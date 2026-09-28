@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { Toaster } from 'sonner';
 import { AppProvider } from './contexts/AppContext';
@@ -17,7 +17,7 @@ const FuturePage = lazy(() => import('./pages/Future'));
 export default function App() {
   return (
     <AppProvider>
-      <BrowserRouter>
+      <HashRouter>
         <Suspense fallback={<FullPageSpinner />}>
           <Routes>
             {/* Public */}
@@ -41,7 +41,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
-      </BrowserRouter>
+      </HashRouter>
       <Toaster
         position="top-right"
         richColors
