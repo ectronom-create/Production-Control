@@ -162,6 +162,26 @@ const en = {
   darkMode: 'Dark Mode',
   lightMode: 'Light Mode',
   language: 'Language',
+
+  // User Management & RBAC
+  userManagement: 'User Management',
+  usersSubtitle: 'Manage users, assign supervisors to groups, and configure roles',
+  assignGroup: 'Assign Group',
+  assignedGroup: 'Assigned Group',
+  changeRole: 'Change Role',
+  status: 'Status',
+  editUser: 'Edit User',
+  allRoles: 'All Roles',
+  allGroups: 'All Groups',
+  noGroup: 'No Group Assigned',
+  permissionsNotice: 'Role Permissions & Access Control',
+  adminFullAccess: 'Administrator has full permissions: manage users, assign groups, configure lines & shifts, and full access to all records.',
+  supervisorGroupAccess: 'Supervisor: operates within their assigned group (Group A, B, C, or D). Admin can reassign them to any group at any time.',
+  operatorAccess: 'Operator: logs production & downtime records under their assigned group.',
+  viewerAccess: 'Viewer: read-only access to dashboard and production reports.',
+  userUpdated: 'User updated successfully',
+  supervisorAssignedToGroup: 'Supervisor {{name}} assigned to {{group}}',
+  cannotDeactivateSelf: 'You cannot deactivate your own account',
 };
 
 export default en;

@@ -12,6 +12,7 @@ const LoginPage = lazy(() => import('./pages/Auth/LoginPage'));
 const DashboardPage = lazy(() => import('./pages/Dashboard'));
 const DowntimePage = lazy(() => import('./pages/Downtime'));
 const DailyProductionPage = lazy(() => import('./pages/DailyProduction'));
+const UsersPage = lazy(() => import('./pages/Users'));
 const FuturePage = lazy(() => import('./pages/Future'));
 
 export default function App() {
@@ -34,6 +35,7 @@ export default function App() {
               <Route index element={<DashboardPage />} />
               <Route path="downtime" element={<DowntimePage />} />
               <Route path="daily-production" element={<DailyProductionPage />} />
+              <Route path="users" element={<UsersPage />} />
               <Route path="future" element={<FuturePage />} />
             </Route>
 

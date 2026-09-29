@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, AlertTriangle, ClipboardList, Sparkles, X, Factory } from 'lucide-react';
+import { LayoutDashboard, AlertTriangle, ClipboardList, Sparkles, X, Factory, Users } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useLanguage } from '../../hooks/useLanguage';
 import { useAppContext } from '../../contexts/AppContext';
@@ -9,6 +9,7 @@ const navItems = [
   { to: '/', icon: LayoutDashboard, labelKey: 'dashboard' as const },
   { to: '/downtime', icon: AlertTriangle, labelKey: 'downtime' as const },
   { to: '/daily-production', icon: ClipboardList, labelKey: 'dailyProduction' as const },
+  { to: '/users', icon: Users, labelKey: 'users' as const },
   { to: '/future', icon: Sparkles, labelKey: 'future' as const },
 ];
 

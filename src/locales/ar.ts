@@ -162,6 +162,26 @@ const ar = {
   darkMode: 'الوضع الداكن',
   lightMode: 'الوضع الفاتح',
   language: 'اللغة',
+
+  // User Management & RBAC
+  userManagement: 'إدارة المستخدمين',
+  usersSubtitle: 'إدارة المستخدمين، وتعيين السوبر فايزر في أي فريق، وتحديد الصلاحيات',
+  assignGroup: 'تعيين الفريق',
+  assignedGroup: 'الفريق المعين',
+  changeRole: 'تغيير الدور',
+  status: 'الحالة',
+  editUser: 'تعديل بيانات المستخدم',
+  allRoles: 'جميع الأدوار',
+  allGroups: 'جميع المجموعات',
+  noGroup: 'غير معين في فريق',
+  permissionsNotice: 'الصلاحيات وتوزيع الأدوار',
+  adminFullAccess: 'المدير (Admin) يملك كافة الصلاحيات: إدارة المستخدمين، وتعيين السوبر فايزر في أي فريق، وتعديل كافة السجلات والإعدادات.',
+  supervisorGroupAccess: 'المشرف (Supervisor): يعمل ضمن الفريق المخصص له (أ، ب، ج، د)، ويمكن للأدمن نقله وتعيينه في أي فريق في أي وقت.',
+  operatorAccess: 'المشغل (Operator): يدخل بيانات الإنتاج والتوقفات التابعة لفريقه فقط.',
+  viewerAccess: 'المشاهد (Viewer): اطلاع وقراءة فقط على لوحة التحكم والتقارير دون إمكانية التعديل.',
+  userUpdated: 'تم تحديث بيانات المستخدم بنجاح',
+  supervisorAssignedToGroup: 'تم تعيين المشرف {{name}} في {{group}}',
+  cannotDeactivateSelf: 'لا يمكنك تعطيل حسابك الحالي',
 };
 
 export default ar;
