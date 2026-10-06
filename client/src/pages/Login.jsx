@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { ShieldCheck, Lock, Building } from 'lucide-react';
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, sessionExpired } = useAuth();
   const navigate   = useNavigate();
 
   const [companyId, setCompanyId] = useState('');
@@ -47,6 +47,22 @@ export default function Login() {
             Sign in with your Company ID
           </p>
         </div>
+
+        {sessionExpired && (
+          <div style={{ 
+            background: '#fffbeb', 
+            border: '1px solid #fde68a', 
+            color: '#b45309', 
+            borderRadius: 8, 
+            padding: '10px 14px', 
+            fontSize: '0.82rem', 
+            fontWeight: 600,
+            textAlign: 'center',
+            marginBottom: 14 
+          }}>
+            ⏱️ Your session expired due to 30 minutes of inactivity. Please log in again.
+          </div>
+        )}
 
         <form className="login-form" onSubmit={handleSubmit} noValidate style={{ width: '100%' }}>
           {error && <div className="login-error" style={{ textAlign: 'center', fontSize: '0.85rem' }}>{error}</div>}
