@@ -209,6 +209,7 @@ export default function Production() {
   const { user } = useAuth();
   const isAdmin = user?.access === 'admin';
   const isSupervisor = user?.access === 'supervisor';
+  const isViewer = user?.access === 'viewer';
 
   // State
   const [records, setRecords] = useState([]);
@@ -570,29 +571,31 @@ export default function Production() {
 
         {/* Action Buttons at Top */}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button 
-            type="button"
-            className="btn-primary" 
-            style={{ 
-              background: 'var(--teal)', 
-              display: 'inline-flex', 
-              alignItems: 'center', 
-              gap: 8, 
-              padding: '10px 20px', 
-              fontWeight: 700, 
-              fontSize: '0.92rem',
-              boxShadow: '0 4px 12px rgba(0, 175, 170, 0.25)' 
-            }}
-            onClick={() => {
-              setParsedData(null);
-              setUploadError('');
-              setUploadDate(getTodayString());
-              setShowUploadModal(true);
-            }}
-          >
-            <Upload size={18} />
-            Upload FPY Report (Excel)
-          </button>
+          {!isViewer && (
+            <button 
+              type="button"
+              className="btn-primary" 
+              style={{ 
+                background: 'var(--teal)', 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: 8, 
+                padding: '10px 20px', 
+                fontWeight: 700, 
+                fontSize: '0.92rem',
+                boxShadow: '0 4px 12px rgba(0, 175, 170, 0.25)' 
+              }}
+              onClick={() => {
+                setParsedData(null);
+                setUploadError('');
+                setUploadDate(getTodayString());
+                setShowUploadModal(true);
+              }}
+            >
+              <Upload size={18} />
+              Upload FPY Report (Excel)
+            </button>
+          )}
 
           <button 
             type="button" 
@@ -806,24 +809,28 @@ export default function Production() {
                           <Eye size={15} />
                         </button>
 
-                        <button 
-                          type="button"
-                          className="btn-icon" 
-                          style={{ background: '#ede9fe', color: '#7c3aed' }}
-                          title="Edit FW QTY"
-                          onClick={() => openFwModalForRecord(r)}
-                        >
-                          <Edit3 size={15} />
-                        </button>
+                        {!isViewer && (
+                          <>
+                            <button 
+                              type="button"
+                              className="btn-icon" 
+                              style={{ background: '#ede9fe', color: '#7c3aed' }}
+                              title="Edit FW QTY"
+                              onClick={() => openFwModalForRecord(r)}
+                            >
+                              <Edit3 size={15} />
+                            </button>
 
-                        <button 
-                          type="button"
-                          className="btn-icon btn-delete" 
-                          title="Delete Record"
-                          onClick={() => handleDeleteRecord(r.id, r.date)}
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                            <button 
+                              type="button"
+                              className="btn-icon btn-delete" 
+                              title="Delete Record"
+                              onClick={() => handleDeleteRecord(r.id, r.date)}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
