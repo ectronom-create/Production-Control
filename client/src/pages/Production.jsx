@@ -233,6 +233,7 @@ export default function Production() {
   const [uploadTarget, setUploadTarget] = useState(320);
   const [uploadFwQty, setUploadFwQty] = useState(0);
   const [uploadTeamName, setUploadTeamName] = useState('');
+  const [uploadNotes, setUploadNotes] = useState('');
   const [uploadError, setUploadError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
@@ -359,6 +360,7 @@ export default function Production() {
       updated_fw_qty: parseInt(uploadFwQty) || 0,
       entered_by: user?.name || 'Admin',
       team_name: assignedTeam,
+      notes: uploadNotes.trim(),
       stations: parsedData.stations || [],
       defects: parsedData.defects || []
     };
@@ -383,7 +385,8 @@ export default function Production() {
       setShowUploadModal(false);
       setParsedData(null);
       setUploadFwQty(0);
-      setSaveSuccessMsg('تم حفظ تقرير الإنتاج بنجاح!');
+      setUploadNotes('');
+      setSaveSuccessMsg('Production report saved successfully!');
       setTimeout(() => setSaveSuccessMsg(''), 4000);
     } catch (err) {
       console.error('Save FPY error:', err);
@@ -733,7 +736,17 @@ export default function Production() {
                     </td>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{r.product}</div>
-                      {r.target && <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>الهدف: {r.target}</span>}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
+                        {r.target && <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Target: {r.target}</span>}
+                        {r.notes && (
+                          <span 
+                            title={r.notes}
+                            style={{ fontSize: '0.7rem', background: '#fef3c7', color: '#b45309', padding: '1px 6px', borderRadius: 4, cursor: 'help' }}
+                          >
+                            📝 Note
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span style={{ 
@@ -985,6 +998,21 @@ export default function Production() {
                       disabled={isSaving}
                     />
                   </div>
+
+                  <div className="form-group">
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      Notes / Problem Comments (Optional)
+                    </label>
+                    <textarea 
+                      rows={2}
+                      className="search-input"
+                      style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
+                      placeholder="e.g. Test bench calibration issue, line stopped for 20 mins due to part shortage, etc..."
+                      value={uploadNotes}
+                      onChange={e => setUploadNotes(e.target.value)}
+                      disabled={isSaving}
+                    />
+                  </div>
                 </>
               )}
             </div>
@@ -1194,7 +1222,7 @@ export default function Production() {
 
               {/* Top Defects in Modal */}
               {selectedRecordForDetail.defects && selectedRecordForDetail.defects.length > 0 && (
-                <div>
+                <div style={{ marginBottom: 16 }}>
                   <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--navy)', marginBottom: 8 }}>
                     Top Defect Codes
                   </div>
@@ -1205,6 +1233,18 @@ export default function Production() {
                         <span style={{ fontWeight: 800, color: '#991b1b' }}>{d.qty}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Notes / Issue description in Modal */}
+              {selectedRecordForDetail.notes && (
+                <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 8, padding: '12px 16px' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#854d0e', marginBottom: 4 }}>
+                    📝 Supervisor Notes & Incident Log:
+                  </div>
+                  <div style={{ fontSize: '0.88rem', color: '#713f12', whiteSpace: 'pre-wrap' }}>
+                    {selectedRecordForDetail.notes}
                   </div>
                 </div>
               )}
