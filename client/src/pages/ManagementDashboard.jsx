@@ -25,18 +25,19 @@ export default function ManagementDashboard() {
   const { user } = useAuth();
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDate, setSelectedDate] = useState('');
 
-  // Constants requested by Management
-  const BASE_PRODUCTION_COMPLETED = 62000;
-  const OVERALL_PRODUCTION_TARGET = 300000;
-  const WEEKLY_PRODUCTION_TARGET = 9100;
-  const DAILY_PRODUCTION_TARGET = 1300;
-  const SHIFT_PRODUCTION_TARGET = 650;
-
-  const OVERALL_FW_TARGET = 70000;
-  const WEEKLY_FW_TARGET = 8400;
-  const DAILY_FW_TARGET = 1200;
-  const SHIFT_FW_TARGET = 600;
+  // Targets requested by Management
+  const [targets, setTargets] = useState({
+    overallProd: 300000,
+    weeklyProd: 9100,
+    dailyProd: 1300,
+    shiftProd: 650,
+    overallFw: 70000,
+    weeklyFw: 8400,
+    dailyFw: 1200,
+    shiftFw: 600,
+  });
 
   // Fetch production records
   const fetchRecords = async () => {
@@ -49,6 +50,9 @@ export default function ManagementDashboard() {
 
       if (data) {
         setRecords(data);
+        if (data.length > 0 && !selectedDate) {
+          setSelectedDate(data[0].date);
+        }
       }
     } catch (e) {
       console.warn('Error fetching production records:', e);
@@ -63,94 +67,93 @@ export default function ManagementDashboard() {
 
   // Dates for Daily and Weekly calculations
   const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const activeDate = selectedDate || (records.length > 0 ? records[0].date : todayStr);
 
+  // Calculate 7-day range relative to activeDate
   const weekStartDateStr = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 6);
-    return d.toISOString().slice(0, 10);
-  }, []);
+    const base = activeDate ? new Date(activeDate) : new Date();
+    base.setDate(base.getDate() - 6);
+    return base.toISOString().slice(0, 10);
+  }, [activeDate]);
 
-  // Compute Production Metrics
+  // Unique dates for dropdown
+  const availableDates = useMemo(() => {
+    const set = new Set(records.map(r => r.date));
+    return Array.from(set).sort().reverse();
+  }, [records]);
+
+  // Compute Production Metrics directly from Supabase tables
   const productionMetrics = useMemo(() => {
-    // 1. Total fresh completed from records (achieved / Final OK)
-    const newProductionCompleted = records.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
-    const overallProductionCompleted = BASE_PRODUCTION_COMPLETED + newProductionCompleted;
-    const overallAchievementPct = ((overallProductionCompleted / OVERALL_PRODUCTION_TARGET) * 100);
+    // 1. Total completed purely from database records (achieved / Final OK)
+    const overallProductionCompleted = records.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
+    const overallAchievementPct = targets.overallProd > 0 ? ((overallProductionCompleted / targets.overallProd) * 100) : 0;
 
-    // 2. Weekly Production (last 7 days)
-    const weeklyActual = records
-      .filter(r => r.date >= weekStartDateStr && r.date <= todayStr)
-      .reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
-    const weeklyAchievementPct = ((weeklyActual / WEEKLY_PRODUCTION_TARGET) * 100);
+    // 2. Weekly Production (7-day window ending at activeDate)
+    const weeklyRecords = records.filter(r => r.date >= weekStartDateStr && r.date <= activeDate);
+    const weeklyActual = weeklyRecords.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
+    const weeklyAchievementPct = targets.weeklyProd > 0 ? ((weeklyActual / targets.weeklyProd) * 100) : 0;
 
-    // 3. Daily Production (today or latest record date)
-    const todayRecords = records.filter(r => r.date === todayStr);
-    const latestDate = records.length > 0 ? records[0].date : todayStr;
-    const activeDateRecords = todayRecords.length > 0 ? todayRecords : records.filter(r => r.date === latestDate);
-
-    const dailyActual = activeDateRecords.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
-    const dailyAchievementPct = ((dailyActual / DAILY_PRODUCTION_TARGET) * 100);
+    // 3. Daily Production (for activeDate)
+    const dailyRecords = records.filter(r => r.date === activeDate);
+    const dailyActual = dailyRecords.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
+    const dailyAchievementPct = targets.dailyProd > 0 ? ((dailyActual / targets.dailyProd) * 100) : 0;
 
     // 4. Shift Production (assumed 2 shifts per active day)
     const shiftActual = Math.round(dailyActual / 2);
-    const shiftAchievementPct = ((shiftActual / SHIFT_PRODUCTION_TARGET) * 100);
+    const shiftAchievementPct = targets.shiftProd > 0 ? ((shiftActual / targets.shiftProd) * 100) : 0;
 
     return {
       overallCompleted: overallProductionCompleted,
-      overallTarget: OVERALL_PRODUCTION_TARGET,
+      overallTarget: targets.overallProd,
       overallPct: overallAchievementPct,
       weeklyActual,
-      weeklyTarget: WEEKLY_PRODUCTION_TARGET,
+      weeklyTarget: targets.weeklyProd,
       weeklyPct: weeklyAchievementPct,
       dailyActual,
-      dailyTarget: DAILY_PRODUCTION_TARGET,
+      dailyTarget: targets.dailyProd,
       dailyPct: dailyAchievementPct,
       shiftActual,
-      shiftTarget: SHIFT_PRODUCTION_TARGET,
+      shiftTarget: targets.shiftProd,
       shiftPct: shiftAchievementPct,
-      activeDate: activeDateRecords.length > 0 ? latestDate : todayStr
+      activeDate
     };
-  }, [records, todayStr, weekStartDateStr]);
+  }, [records, activeDate, weekStartDateStr, targets]);
 
-  // Compute Firmware Metrics
+  // Compute Firmware Metrics directly from Supabase tables
   const fwMetrics = useMemo(() => {
     // 1. Overall FW completed from records
     const totalFwCompleted = records.reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
-    const overallAchievementPct = ((totalFwCompleted / OVERALL_FW_TARGET) * 100);
+    const overallAchievementPct = targets.overallFw > 0 ? ((totalFwCompleted / targets.overallFw) * 100) : 0;
 
-    // 2. Weekly FW (last 7 days)
-    const weeklyActual = records
-      .filter(r => r.date >= weekStartDateStr && r.date <= todayStr)
-      .reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
-    const weeklyAchievementPct = ((weeklyActual / WEEKLY_FW_TARGET) * 100);
+    // 2. Weekly FW (7-day window ending at activeDate)
+    const weeklyRecords = records.filter(r => r.date >= weekStartDateStr && r.date <= activeDate);
+    const weeklyActual = weeklyRecords.reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
+    const weeklyAchievementPct = targets.weeklyFw > 0 ? ((weeklyActual / targets.weeklyFw) * 100) : 0;
 
-    // 3. Daily FW
-    const todayRecords = records.filter(r => r.date === todayStr);
-    const latestDate = records.length > 0 ? records[0].date : todayStr;
-    const activeDateRecords = todayRecords.length > 0 ? todayRecords : records.filter(r => r.date === latestDate);
-
-    const dailyActual = activeDateRecords.reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
-    const dailyAchievementPct = ((dailyActual / DAILY_FW_TARGET) * 100);
+    // 3. Daily FW (for activeDate)
+    const dailyRecords = records.filter(r => r.date === activeDate);
+    const dailyActual = dailyRecords.reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
+    const dailyAchievementPct = targets.dailyFw > 0 ? ((dailyActual / targets.dailyFw) * 100) : 0;
 
     // 4. Shift FW (2 shifts)
     const shiftActual = Math.round(dailyActual / 2);
-    const shiftAchievementPct = ((shiftActual / SHIFT_FW_TARGET) * 100);
+    const shiftAchievementPct = targets.shiftFw > 0 ? ((shiftActual / targets.shiftFw) * 100) : 0;
 
     return {
       overallCompleted: totalFwCompleted,
-      overallTarget: OVERALL_FW_TARGET,
+      overallTarget: targets.overallFw,
       overallPct: overallAchievementPct,
       weeklyActual,
-      weeklyTarget: WEEKLY_FW_TARGET,
+      weeklyTarget: targets.weeklyFw,
       weeklyPct: weeklyAchievementPct,
       dailyActual,
-      dailyTarget: DAILY_FW_TARGET,
+      dailyTarget: targets.dailyFw,
       dailyPct: dailyAchievementPct,
       shiftActual,
-      shiftTarget: SHIFT_FW_TARGET,
+      shiftTarget: targets.shiftFw,
       shiftPct: shiftAchievementPct,
     };
-  }, [records, todayStr, weekStartDateStr]);
+  }, [records, activeDate, weekStartDateStr, targets]);
 
   // Status Badge Logic
   const getStatusBadge = (pct) => {
@@ -184,7 +187,25 @@ export default function ManagementDashboard() {
           <p className="page-subtitle">3-Phase Production targets, Firmware milestones, and high-level project yield</p>
         </div>
 
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {availableDates.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'white', padding: '6px 12px', borderRadius: 8, border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+              <Calendar size={16} color="var(--teal)" />
+              <label style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--gray-600)' }}>Inspect Date:</label>
+              <select
+                value={activeDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                style={{ border: 'none', background: 'transparent', fontWeight: 700, fontSize: '0.85rem', color: 'var(--navy)', cursor: 'pointer', outline: 'none' }}
+              >
+                {availableDates.map(d => (
+                  <option key={d} value={d}>
+                    {d} {d === todayStr ? '(Today)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <button 
             type="button"
             className="btn-outline" 
@@ -308,7 +329,7 @@ export default function ManagementDashboard() {
               {productionMetrics.weeklyTarget.toLocaleString()}
             </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--gray-500)', marginTop: 8 }}>
-              Actual Produced: <b style={{ color: '#1d4ed8' }}>{productionMetrics.weeklyActual.toLocaleString()}</b>
+              Actual Produced ({weekStartDateStr} to {productionMetrics.activeDate}): <b style={{ color: '#1d4ed8' }}>{productionMetrics.weeklyActual.toLocaleString()}</b>
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
               <span>Achievement:</span>
@@ -328,7 +349,7 @@ export default function ManagementDashboard() {
               {productionMetrics.dailyTarget.toLocaleString()}
             </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--gray-500)', marginTop: 8 }}>
-              Actual Achieved: <b style={{ color: 'var(--teal-dark)' }}>{productionMetrics.dailyActual.toLocaleString()}</b>
+              Actual Achieved ({productionMetrics.activeDate}): <b style={{ color: 'var(--teal-dark)' }}>{productionMetrics.dailyActual.toLocaleString()}</b>
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
               <span>Achievement:</span>
@@ -400,7 +421,7 @@ export default function ManagementDashboard() {
               {fwMetrics.weeklyTarget.toLocaleString()}
             </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--gray-500)', marginTop: 8 }}>
-              Actual FW Flashed: <b style={{ color: '#9333ea' }}>{fwMetrics.weeklyActual.toLocaleString()}</b>
+              Actual FW Flashed ({weekStartDateStr} to {activeDate}): <b style={{ color: '#9333ea' }}>{fwMetrics.weeklyActual.toLocaleString()}</b>
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
               <span>Achievement:</span>
@@ -420,7 +441,7 @@ export default function ManagementDashboard() {
               {fwMetrics.dailyTarget.toLocaleString()}
             </div>
             <div style={{ fontSize: '0.82rem', color: 'var(--gray-500)', marginTop: 8 }}>
-              Actual FW Flashed: <b style={{ color: '#db2777' }}>{fwMetrics.dailyActual.toLocaleString()}</b>
+              Actual FW Flashed ({activeDate}): <b style={{ color: '#db2777' }}>{fwMetrics.dailyActual.toLocaleString()}</b>
             </div>
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
               <span>Achievement:</span>
