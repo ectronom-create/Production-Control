@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Chart, registerables } from 'chart.js';
 import { 
   BarChart2, 
@@ -41,6 +42,7 @@ const DOWNTIME_REASONS = {
 };
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.access === 'admin';
 
@@ -420,8 +422,30 @@ export default function Dashboard() {
           <p className="page-subtitle">Real-time yields, stage throughput, station bottlenecks, and downtime analytics</p>
         </div>
 
-        {/* Tab Switcher & Refresh */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Tab Switcher, Management Link & Refresh */}
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button 
+            type="button"
+            className="btn-primary"
+            style={{ 
+              background: 'linear-gradient(135deg, #192e5b 0%, #00afaa 100%)',
+              padding: '8px 16px',
+              borderRadius: 8,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              fontSize: '0.84rem',
+              fontWeight: 700,
+              boxShadow: '0 4px 12px rgba(25, 46, 91, 0.25)',
+              border: 'none',
+              cursor: 'pointer'
+            }}
+            onClick={() => navigate('/management-dashboard')}
+          >
+            <Target size={16} color="#38bdf8" />
+            <span>Management Dashboard</span>
+          </button>
+
           <div style={{ display: 'flex', background: 'var(--white)', padding: 4, borderRadius: 10, border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
             <button 
               className={`tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
