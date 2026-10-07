@@ -225,13 +225,15 @@ export default function Production() {
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTeam, setFilterTeam] = useState('ALL');
+  const [filterShift, setFilterShift] = useState('ALL');
   const [filterDate, setFilterDate] = useState('');
 
   // Upload modal form states
   const [isParsing, setIsParsing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [uploadDate, setUploadDate] = useState(getTodayString());
-  const [uploadTarget, setUploadTarget] = useState(320);
+  const [uploadTarget, setUploadTarget] = useState(650);
+  const [uploadShift, setUploadShift] = useState('Morning'); // 'Morning' (صباحي) or 'Evening' (مسائي)
   const [uploadFwQty, setUploadFwQty] = useState(0);
   const [uploadTeamName, setUploadTeamName] = useState('');
   const [uploadNotes, setUploadNotes] = useState('');
@@ -327,6 +329,8 @@ export default function Production() {
       try {
         const data = parseFPYExcel(e.target.result);
         setParsedData(data);
+        setUploadTarget(650);
+        setUploadShift('Morning');
         setShowUploadModal(true);
       } catch (err) {
         setUploadError(err.message || 'خطأ في قراءة ملف الإكسل.');
@@ -347,14 +351,16 @@ export default function Production() {
     setIsSaving(true);
     setUploadError('');
 
-    const assignedTeam = isSupervisor 
+    const shiftLabel = uploadShift === 'Evening' ? 'مسائي (Evening)' : 'صباحي (Morning)';
+    const assignedTeamBase = isSupervisor 
       ? (user?.team_name?.trim() || 'Team Alpha') 
       : (uploadTeamName || 'Management');
+    const assignedTeam = `${assignedTeamBase} - ${shiftLabel}`;
 
     const payload = {
       date: uploadDate,
       product: parsedData.product || 'Unknown',
-      target: parseInt(uploadTarget) || 320,
+      target: parseInt(uploadTarget) || 650,
       overall_fpy: parsedData.overallFPY ? parseFloat(parsedData.overallFPY.toFixed(2)) : null,
       total_boards: parsedData.totalBoards || 0,
       achieved: parsedData.achieved || 0,
@@ -531,10 +537,13 @@ export default function Production() {
 
       const matchTeam = filterTeam === 'ALL' || r.team_name === filterTeam;
       const matchDate = filterDate === '' || r.date === filterDate;
+      const matchShift = filterShift === 'ALL' ||
+        (filterShift === 'Morning' && (r.team_name?.includes('صباحي') || r.team_name?.includes('Morning') || r.notes?.includes('Morning'))) ||
+        (filterShift === 'Evening' && (r.team_name?.includes('مسائي') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')));
 
-      return matchSearch && matchTeam && matchDate;
+      return matchSearch && matchTeam && matchDate && matchShift;
     });
-  }, [records, searchTerm, filterTeam, filterDate]);
+  }, [records, searchTerm, filterTeam, filterShift, filterDate]);
 
   // Stats
   const stats = useMemo(() => {
@@ -681,6 +690,19 @@ export default function Production() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <select 
+            className="search-input" 
+            style={{ width: 'auto', padding: '9px 12px', fontWeight: 600 }}
+            value={filterShift} 
+            onChange={e => setFilterShift(e.target.value)}
+          >
+            <option value="ALL">All Shifts (كل الشفتات)</option>
+            <option value="Morning">☀️ Morning (صباحي)</option>
+            <option value="Evening">🌙 Evening (مسائي)</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Calendar size={16} color="var(--gray-500)" />
           <input 
             type="date" 
@@ -739,8 +761,12 @@ export default function Production() {
                     </td>
                     <td>
                       <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{r.product}</div>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 }}>
-                        {r.target && <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Target: {r.target}</span>}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+                        {r.target && (
+                          <span style={{ fontSize: '0.72rem', color: 'var(--gray-600)', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                            🎯 Target: {r.target}
+                          </span>
+                        )}
                         {r.notes && (
                           <span 
                             title={r.notes}
@@ -752,19 +778,32 @@ export default function Production() {
                       </div>
                     </td>
                     <td>
-                      <span style={{ 
-                        display: 'inline-flex', 
-                        alignItems: 'center', 
-                        gap: 5, 
-                        padding: '3px 9px', 
-                        borderRadius: 6, 
-                        fontSize: '0.8rem', 
-                        background: 'rgba(35, 63, 121, 0.08)', 
-                        color: 'var(--navy)', 
-                        fontWeight: 700 
-                      }}>
-                        👥 {r.team_name || '—'}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <span style={{ 
+                          display: 'inline-flex', 
+                          alignItems: 'center', 
+                          gap: 5, 
+                          padding: '3px 8px', 
+                          borderRadius: 6, 
+                          fontSize: '0.8rem', 
+                          background: 'rgba(35, 63, 121, 0.08)', 
+                          color: 'var(--navy)', 
+                          fontWeight: 700,
+                          width: 'fit-content'
+                        }}>
+                          👥 {r.team_name ? r.team_name.split(' - ')[0] : '—'}
+                        </span>
+                        {(r.team_name?.includes('صباحي') || r.team_name?.includes('Morning') || r.notes?.includes('Morning')) && (
+                          <span style={{ fontSize: '0.72rem', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
+                            ☀️ صباحي (Morning)
+                          </span>
+                        )}
+                        {(r.team_name?.includes('مسائي') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')) && (
+                          <span style={{ fontSize: '0.72rem', background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
+                            🌙 مسائي (Evening)
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td>
                       <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-700)' }}>
@@ -950,13 +989,90 @@ export default function Production() {
                       />
                     </div>
                     <div className="form-group">
-                      <label>Daily Target (Boards) *</label>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <label>Shift Target (Boards) *</label>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>افتراضي 650</span>
+                      </div>
                       <input 
                         type="number" 
                         value={uploadTarget} 
                         onChange={e => setUploadTarget(e.target.value)} 
                         disabled={isSaving}
+                        placeholder="650"
+                        style={{ fontWeight: 700 }}
                       />
+                      <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2, display: 'block' }}>
+                        تارجت الشفت الافتراضي 650 عداد، يمكنك تغييره إذا لزم الأمر
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Shift Selection (صباحي / مسائي) */}
+                  <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
+                        Shift Selection (تحديد الشفت) *
+                      </label>
+                      <span style={{ 
+                        fontSize: '0.75rem', 
+                        fontWeight: 800, 
+                        color: uploadShift === 'Morning' ? '#b45309' : '#6d28d9',
+                        background: uploadShift === 'Morning' ? '#fef3c7' : '#ede9fe',
+                        padding: '2px 8px',
+                        borderRadius: 12
+                      }}>
+                        {uploadShift === 'Morning' ? 'الشفت الصباحي المحدد' : 'الشفت المسائي المحدد'}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                      <button
+                        type="button"
+                        style={{
+                          padding: '12px 14px',
+                          borderRadius: 8,
+                          border: uploadShift === 'Morning' ? '2px solid #f59e0b' : '1px solid #cbd5e1',
+                          background: uploadShift === 'Morning' ? '#fffbeb' : '#ffffff',
+                          color: uploadShift === 'Morning' ? '#b45309' : '#475569',
+                          fontWeight: 800,
+                          fontSize: '0.9rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          boxShadow: uploadShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onClick={() => setUploadShift('Morning')}
+                      >
+                        <span style={{ fontSize: '1.25rem' }}>☀️</span>
+                        <span>صباحي (Morning)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        style={{
+                          padding: '12px 14px',
+                          borderRadius: 8,
+                          border: uploadShift === 'Evening' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+                          background: uploadShift === 'Evening' ? '#f5f3ff' : '#ffffff',
+                          color: uploadShift === 'Evening' ? '#6d28d9' : '#475569',
+                          fontWeight: 800,
+                          fontSize: '0.9rem',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 8,
+                          boxShadow: uploadShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onClick={() => setUploadShift('Evening')}
+                      >
+                        <span style={{ fontSize: '1.25rem' }}>🌙</span>
+                        <span>مسائي (Evening)</span>
+                      </button>
                     </div>
                   </div>
 
