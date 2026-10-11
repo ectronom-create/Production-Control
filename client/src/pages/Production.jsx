@@ -250,6 +250,20 @@ export default function Production() {
   const [fwError, setFwError] = useState('');
   const [fwSaving, setFwSaving] = useState(false);
 
+  // Edit Production Report Modal states
+  const [editRecordId, setEditRecordId] = useState(null);
+  const [editDate, setEditDate] = useState('');
+  const [editShift, setEditShift] = useState('Morning');
+  const [editTarget, setEditTarget] = useState(650);
+  const [editProduct, setEditProduct] = useState('');
+  const [editAchieved, setEditAchieved] = useState(0);
+  const [editTotalBoards, setEditTotalBoards] = useState(0);
+  const [editFwQty, setEditFwQty] = useState(0);
+  const [editTeamName, setEditTeamName] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [isUpdatingRecord, setIsUpdatingRecord] = useState(false);
+  const [editError, setEditError] = useState('');
+
   // Initialize Team logic based on user
   useEffect(() => {
     const userTeam = user?.team_name?.trim() || 'Team Alpha';
@@ -509,6 +523,98 @@ export default function Production() {
       setFwError('فشل الحفظ: ' + (err.message || ''));
     } finally {
       setFwSaving(false);
+    }
+  };
+
+  // Open Full Production Report Edit Modal
+  const openEditModalForRecord = (record) => {
+    if (!record) return;
+    setEditError('');
+    setEditRecordId(record.id);
+    setEditDate(record.date || getTodayString());
+    
+    const isEvening = record.team_name?.includes('مسائي') || record.team_name?.includes('Evening') || record.notes?.includes('Evening');
+    setEditShift(isEvening ? 'Evening' : 'Morning');
+
+    setEditTarget(record.target || 650);
+    setEditProduct(record.product || '254100543S - SFIN MT212 OMAN - A01');
+    setEditAchieved(record.achieved || 0);
+    setEditTotalBoards(record.total_boards || 0);
+    setEditFwQty(record.updated_fw_qty || 0);
+
+    const baseTeam = record.team_name 
+      ? record.team_name.split(' - ')[0].replace(/\[.*?\]/, '').trim() 
+      : (user?.team_name?.trim() || 'Team Alpha');
+    setEditTeamName(baseTeam);
+
+    const cleanedNotes = record.notes ? record.notes.replace(/\[Shift:.*?\]/, '').trim() : '';
+    setEditNotes(cleanedNotes);
+  };
+
+  // Handle Save / Update Production Report
+  const handleUpdateReport = async (e) => {
+    e.preventDefault();
+    if (!editRecordId) return;
+    setIsUpdatingRecord(true);
+    setEditError('');
+
+    const shiftLabel = editShift === 'Evening' ? 'مسائي (Evening)' : 'صباحي (Morning)';
+    const assignedTeam = `${editTeamName || 'Team Alpha'} - ${shiftLabel}`;
+    const notesWithShift = editNotes.trim() ? `[Shift: ${shiftLabel}] ${editNotes.trim()}` : `[Shift: ${shiftLabel}]`;
+
+    const boardsNum = parseInt(editTotalBoards, 10) || 0;
+    const achievedNum = parseInt(editAchieved, 10) || 0;
+    const targetNum = parseInt(editTarget, 10) || 650;
+    const fwNum = parseInt(editFwQty, 10) || 0;
+
+    let computedFpy = null;
+    if (boardsNum > 0) {
+      computedFpy = parseFloat(((achievedNum / boardsNum) * 100).toFixed(2));
+    }
+
+    const updatedFields = {
+      date: editDate,
+      product: editProduct.trim(),
+      target: targetNum,
+      achieved: achievedNum,
+      total_boards: boardsNum,
+      updated_fw_qty: fwNum,
+      overall_fpy: computedFpy,
+      team_name: assignedTeam,
+      notes: notesWithShift,
+      updated_at: new Date().toISOString()
+    };
+
+    try {
+      const { data, error } = await supabase
+        .from('production_records')
+        .update(updatedFields)
+        .eq('id', editRecordId)
+        .select();
+
+      if (error) {
+        console.warn('Supabase update report error:', error);
+        throw new Error(error.message || 'Failed to update record in database');
+      }
+
+      // Update local state and localStorage
+      const updatedList = records.map(r => r.id === editRecordId ? { ...r, ...updatedFields } : r);
+      setRecords(updatedList);
+      localStorage.setItem('ectron_production_records', JSON.stringify(updatedList));
+
+      if (selectedRecordForDetail && selectedRecordForDetail.id === editRecordId) {
+        setSelectedRecordForDetail({ ...selectedRecordForDetail, ...updatedFields });
+      }
+
+      setEditRecordId(null);
+      setSaveSuccessMsg(`Production report updated successfully! Date: ${editDate}`);
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      await loadRecords();
+    } catch (err) {
+      console.error('Update report error:', err);
+      setEditError(err.message || 'حدث خطأ أثناء تعديل التقرير.');
+    } finally {
+      setIsUpdatingRecord(false);
     }
   };
 
@@ -853,9 +959,9 @@ export default function Production() {
                             <button 
                               type="button"
                               className="btn-icon" 
-                              style={{ background: '#ede9fe', color: '#7c3aed' }}
-                              title="Edit FW QTY"
-                              onClick={() => openFwModalForRecord(r)}
+                              style={{ background: '#e0f2fe', color: '#0369a1' }}
+                              title="Edit Production Report (تعديل التقرير والتاريخ)"
+                              onClick={() => openEditModalForRecord(r)}
                             >
                               <Edit3 size={15} />
                             </button>
@@ -1373,11 +1479,244 @@ export default function Production() {
               )}
             </div>
 
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                {!isViewer && (
+                  <button 
+                    type="button" 
+                    className="btn-primary" 
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', fontSize: '0.84rem' }}
+                    onClick={() => {
+                      const rec = selectedRecordForDetail;
+                      setSelectedRecordForDetail(null);
+                      openEditModalForRecord(rec);
+                    }}
+                  >
+                    <Edit3 size={15} />
+                    Edit This Report (تعديل هذا التقرير والتاريخ)
+                  </button>
+                )}
+              </div>
               <button type="button" className="btn-secondary" onClick={() => setSelectedRecordForDetail(null)}>
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL 4: Edit Production Report Modal ── */}
+      {editRecordId && (
+        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setEditRecordId(null)}>
+          <div className="modal" style={{ maxWidth: 620, maxHeight: '90vh' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit3 size={20} color="var(--teal)" />
+                <span className="modal-title">Edit Production Report (تعديل تقرير الإنتاج والتاريخ)</span>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setEditRecordId(null)}>×</button>
+            </div>
+
+            <form onSubmit={handleUpdateReport}>
+              <div className="modal-body">
+                {editError && <div className="modal-error">{editError}</div>}
+
+                {/* Date & Shift Target */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Report Date (تاريخ التقرير) *</label>
+                    <input 
+                      type="date" 
+                      value={editDate} 
+                      onChange={e => setEditDate(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                      required 
+                      style={{ fontWeight: 800, fontSize: '0.95rem' }}
+                    />
+                    <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 600, marginTop: 2, display: 'block' }}>
+                      يمكنك تغيير التاريخ بحرية تامة
+                    </span>
+                  </div>
+
+                  <div className="form-group">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Shift Target (تارجت الشفت) *</label>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>افتراضي 650</span>
+                    </div>
+                    <input 
+                      type="number" 
+                      value={editTarget} 
+                      onChange={e => setEditTarget(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                      style={{ fontWeight: 800 }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Shift Selector */}
+                <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
+                      Shift Selection (تحديد الشفت) *
+                    </label>
+                    <span style={{ 
+                      fontSize: '0.75rem', 
+                      fontWeight: 800, 
+                      color: editShift === 'Morning' ? '#b45309' : '#6d28d9',
+                      background: editShift === 'Morning' ? '#fef3c7' : '#ede9fe',
+                      padding: '2px 8px',
+                      borderRadius: 12
+                    }}>
+                      {editShift === 'Morning' ? 'الشفت الصباحي' : 'الشفت المسائي'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <button
+                      type="button"
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        border: editShift === 'Morning' ? '2px solid #f59e0b' : '1px solid #cbd5e1',
+                        background: editShift === 'Morning' ? '#fffbeb' : '#ffffff',
+                        color: editShift === 'Morning' ? '#b45309' : '#475569',
+                        fontWeight: 800,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        boxShadow: editShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onClick={() => setEditShift('Morning')}
+                    >
+                      <span style={{ fontSize: '1.25rem' }}>☀️</span>
+                      <span>صباحي (Morning)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      style={{
+                        padding: '12px 14px',
+                        borderRadius: 8,
+                        border: editShift === 'Evening' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
+                        background: editShift === 'Evening' ? '#f5f3ff' : '#ffffff',
+                        color: editShift === 'Evening' ? '#6d28d9' : '#475569',
+                        fontWeight: 800,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 8,
+                        boxShadow: editShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onClick={() => setEditShift('Evening')}
+                    >
+                      <span style={{ fontSize: '1.25rem' }}>🌙</span>
+                      <span>مسائي (Evening)</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Product Name */}
+                <div className="form-group">
+                  <label style={{ fontWeight: 700 }}>Product Name (اسم المنتج) *</label>
+                  <input 
+                    type="text" 
+                    value={editProduct} 
+                    onChange={e => setEditProduct(e.target.value)} 
+                    disabled={isUpdatingRecord}
+                    required 
+                  />
+                </div>
+
+                {/* Achieved & Total Boards */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="form-group">
+                    <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (الإنتاج الفعلي Achieved) *</label>
+                    <input 
+                      type="number" 
+                      value={editAchieved} 
+                      onChange={e => setEditAchieved(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                      required 
+                      style={{ fontWeight: 800, color: '#16a34a' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label style={{ fontWeight: 700 }}>Total Boards Tested (إجمالي المفحوص) *</label>
+                    <input 
+                      type="number" 
+                      value={editTotalBoards} 
+                      onChange={e => setEditTotalBoards(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                      required 
+                      style={{ fontWeight: 800 }}
+                    />
+                  </div>
+                </div>
+
+                {/* Updated FW QTY & Team Name */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div className="form-group" style={{ background: '#f5f3ff', padding: 10, borderRadius: 8, border: '1px solid #ddd6fe' }}>
+                    <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Cpu size={16} /> Updated FW QTY
+                    </label>
+                    <input 
+                      type="number" 
+                      value={editFwQty} 
+                      onChange={e => setEditFwQty(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                      min="0"
+                      style={{ fontWeight: 800, color: '#7c3aed' }}
+                    />
+                  </div>
+
+                  <div className="form-group">
+                    <label style={{ fontWeight: 700 }}>Team Name (اسم الفريق) *</label>
+                    <select 
+                      className="form-select"
+                      value={editTeamName} 
+                      onChange={e => setEditTeamName(e.target.value)} 
+                      disabled={isUpdatingRecord}
+                    >
+                      {availableTeams.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div className="form-group">
+                  <label style={{ fontWeight: 700 }}>Notes / Problem Comments (ملاحظات)</label>
+                  <textarea 
+                    rows={2} 
+                    className="search-input" 
+                    style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
+                    placeholder="ملاحظات المشرف أو المشاكل التي حدثت..."
+                    value={editNotes} 
+                    onChange={e => setEditNotes(e.target.value)} 
+                    disabled={isUpdatingRecord}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setEditRecordId(null)} disabled={isUpdatingRecord}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary" disabled={isUpdatingRecord}>
+                  {isUpdatingRecord ? <span className="spinner" /> : 'Save Changes (حفظ التعديلات)'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

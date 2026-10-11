@@ -13,6 +13,7 @@ const STAGES = [
 ];
 
 const STORAGE_KEY = 'ectron_active_downtime';
+const LOCAL_STOPPAGES_KEY = 'ectron_downtime_local_records';
 
 function formatMinutes(minutes) {
   if (minutes == null || isNaN(minutes)) return '0m';
@@ -39,9 +40,20 @@ function getTodayString() {
   return `${year}-${month}-${day}`;
 }
 
+function formatLocalDate(d) {
+  if (!d) return getTodayString();
+  const now = new Date(d);
+  if (isNaN(now.getTime())) return getTodayString();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function getCurrentTimeString(dateObj = new Date()) {
-  const hours = String(dateObj.getHours()).padStart(2, '0');
-  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  const now = new Date(dateObj);
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
 }
 
@@ -523,13 +535,14 @@ export default function Downtime() {
     setLoading(true);
     try {
       const { data, error } = await supabase.from('stoppages').select('*').order('stopped_at', { ascending: false });
-      let list = (data || []).map(s => {
+      
+      let cloudList = (data || []).map(s => {
         const start = s.stopped_at ? new Date(s.stopped_at) : new Date();
         const end = s.resumed_at ? new Date(s.resumed_at) : new Date();
-        const dateStr = start.toISOString().slice(0, 10);
-        const startTimeStr = start.toTimeString().slice(0, 5);
-        const endTimeStr = end.toTimeString().slice(0, 5);
-        const diffMins = Math.max(1, Math.floor((end.getTime() - start.getTime()) / 60000));
+        const dateStr = formatLocalDate(start);
+        const startTimeStr = `${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`;
+        const endTimeStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`;
+        const diffMins = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60000));
         return {
           id: s.id,
           user_name: s.supervisor_id || 'Supervisor',
@@ -537,16 +550,36 @@ export default function Downtime() {
           date: dateStr,
           start_time: startTimeStr,
           end_time: endTimeStr,
-          total_minutes: diffMins
+          total_minutes: diffMins,
+          notes: s.notes || ''
         };
       });
+
+      // Merge local fallback records (ensures zero data loss)
+      let localList = [];
+      try {
+        localList = JSON.parse(localStorage.getItem(LOCAL_STOPPAGES_KEY) || '[]');
+      } catch {}
+
+      const cloudKeys = new Set(cloudList.map(r => `${r.stage}_${r.date}_${r.start_time}`));
+      const unsynced = localList.filter(l => !cloudKeys.has(`${l.stage}_${l.date}_${l.start_time}`));
+
+      let list = [...unsynced, ...cloudList];
 
       if (selectedDate) list = list.filter(r => r.date === selectedDate);
       if (selectedStage) list = list.filter(r => r.stage === selectedStage);
       if (selectedUser) list = list.filter(r => r.user_name === selectedUser);
       setRecords(list);
-    } catch {
-      // handled
+    } catch (e) {
+      console.warn('fetchRecords error:', e);
+      let localList = [];
+      try {
+        localList = JSON.parse(localStorage.getItem(LOCAL_STOPPAGES_KEY) || '[]');
+      } catch {}
+      if (selectedDate) localList = localList.filter(r => r.date === selectedDate);
+      if (selectedStage) localList = localList.filter(r => r.stage === selectedStage);
+      if (selectedUser) localList = localList.filter(r => r.user_name === selectedUser);
+      setRecords(localList);
     } finally {
       setLoading(false);
     }
@@ -583,40 +616,57 @@ export default function Downtime() {
       const now = new Date();
       let end_time = getCurrentTimeString(now);
 
-      if (end_time === activeSession.start_time && elapsedSeconds >= 30) {
+      const computedElapsedSecs = Math.max(elapsedSeconds, Math.floor((now.getTime() - activeSession.startTimestamp) / 1000));
+
+      if (end_time === activeSession.start_time && computedElapsedSecs >= 30) {
         const nextMin = new Date(now.getTime() + 60000);
         end_time = getCurrentTimeString(nextMin);
       }
 
-      const durationMins = Math.max(1, Math.ceil(elapsedSeconds / 60));
+      const durationMins = Math.max(1, Math.ceil(computedElapsedSecs / 60));
       const payload = {
         id: Date.now(),
-        user_name: activeSession.user_name,
+        user_name: activeSession.user_name || user?.name || 'Supervisor',
         stage: activeSession.stage,
-        date: activeSession.date,
+        date: activeSession.date || formatLocalDate(now),
         start_time: activeSession.start_time,
         end_time: end_time,
-        total_minutes: durationMins
+        total_minutes: durationMins,
+        notes: `Live session: ${durationMins}m`
       };
 
       try {
-        await supabase.from('stoppages').insert([{
+        const { data, error } = await supabase.from('stoppages').insert([{
           stage_id: activeSession.stage,
           supervisor_id: activeSession.user_name,
           stopped_at: new Date(activeSession.startTimestamp).toISOString(),
           resumed_at: now.toISOString(),
           notes: `Live session: ${durationMins}m`
-        }]);
+        }]).select();
+
+        if (error) {
+          console.warn('Supabase live save returned error:', error);
+        } else if (data && data[0]?.id) {
+          payload.id = data[0].id;
+        }
       } catch (e) {
-        console.warn('Supabase live save error:', e);
+        console.warn('Supabase live save network error:', e);
       }
+
+      // Always save to persistent local cache so record is never lost
+      try {
+        const storedList = JSON.parse(localStorage.getItem(LOCAL_STOPPAGES_KEY) || '[]');
+        storedList.unshift(payload);
+        localStorage.setItem(LOCAL_STOPPAGES_KEY, JSON.stringify(storedList.slice(0, 100)));
+      } catch {}
 
       localStorage.removeItem(STORAGE_KEY);
       setActiveSession(null);
       setElapsedSeconds(0);
-      showToast(`Saved downtime for "${payload.stage}" (${payload.start_time} - ${payload.end_time})!`);
-      fetchRecords();
+      showToast(`Saved downtime for "${payload.stage}" (${durationMins}m, ${payload.start_time} - ${payload.end_time})!`);
+      await fetchRecords();
     } catch (err) {
+      console.error('Error saving downtime:', err);
       alert(err?.message || 'Error saving downtime record.');
     } finally {
       setIsSavingLive(false);

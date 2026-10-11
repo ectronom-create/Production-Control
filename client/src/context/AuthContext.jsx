@@ -59,6 +59,12 @@ export function AuthProvider({ children }) {
 
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
+      // If active downtime is currently being recorded, keep session alive and do not logout!
+      const activeDowntime = localStorage.getItem('ectron_active_downtime');
+      if (activeDowntime) {
+        recordActivity();
+        return;
+      }
       logout(true);
     }, INACTIVITY_TIMEOUT_MS);
   }, [token, logout]);
@@ -78,6 +84,12 @@ export function AuthProvider({ children }) {
 
     // Also periodic interval check in case tab is left inactive in background
     const intervalCheck = setInterval(() => {
+      // If active downtime is recording, keep session alive
+      const activeDowntime = localStorage.getItem('ectron_active_downtime');
+      if (activeDowntime) {
+        localStorage.setItem('ectron_last_activity', String(Date.now()));
+        return;
+      }
       const lastActive = localStorage.getItem('ectron_last_activity');
       if (lastActive && Date.now() - parseInt(lastActive, 10) > INACTIVITY_TIMEOUT_MS) {
         logout(true);
