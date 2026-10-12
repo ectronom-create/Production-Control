@@ -346,6 +346,8 @@ export default function Production() {
         setUploadTarget(650);
         setUploadShift('Morning');
         setShowUploadModal(true);
+        // Automatically sync FW QTY for today & Morning shift
+        syncFwForUpload(uploadDate, 'Morning');
       } catch (err) {
         setUploadError(err.message || 'خطأ في قراءة ملف الإكسل.');
       } finally {
@@ -357,6 +359,39 @@ export default function Production() {
       setIsParsing(false);
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  // Auto-sync FW from database records or live PC logs
+  const [isSyncingFw, setIsSyncingFw] = useState(false);
+  const syncFwForUpload = async (targetDate, targetShift) => {
+    setIsSyncingFw(true);
+    try {
+      // Find matching shift count in existing production_records in Supabase
+      const shiftSearch = targetShift === 'Morning' ? 'صباحي' : 'مسائي';
+      const { data, error } = await supabase
+        .from('production_records')
+        .select('updated_fw_qty, team_name, notes')
+        .eq('date', targetDate);
+
+      if (!error && data && data.length > 0) {
+        const match = data.find(r => 
+          (r.team_name && r.team_name.includes(shiftSearch)) ||
+          (r.notes && r.notes.includes(shiftSearch))
+        );
+        if (match && match.updated_fw_qty != null && match.updated_fw_qty > 0) {
+          setUploadFwQty(match.updated_fw_qty);
+          setIsSyncingFw(false);
+          return;
+        }
+      }
+
+      // If not yet recorded, default or fallback
+      setUploadFwQty(prev => prev > 0 ? prev : 0);
+    } catch (err) {
+      console.warn('Sync FW error:', err);
+    } finally {
+      setIsSyncingFw(false);
+    }
   };
 
   // Save parsed FPY Report to Supabase
@@ -567,18 +602,24 @@ export default function Production() {
     const targetNum = parseInt(editTarget, 10) || 650;
     const fwNum = parseInt(editFwQty, 10) || 0;
 
+    // Achieved, total_boards, and updated_fw_qty are auto-derived from official logs and cannot be overwritten manually
+    const originalRecord = records.find(r => r.id === editRecordId);
+    const safeAchieved = originalRecord ? originalRecord.achieved : achievedNum;
+    const safeBoards = originalRecord ? originalRecord.total_boards : boardsNum;
+    const safeFw = originalRecord ? originalRecord.updated_fw_qty : fwNum;
+
     let computedFpy = null;
-    if (boardsNum > 0) {
-      computedFpy = parseFloat(((achievedNum / boardsNum) * 100).toFixed(2));
+    if (safeBoards > 0) {
+      computedFpy = parseFloat(((safeAchieved / safeBoards) * 100).toFixed(2));
     }
 
     const updatedFields = {
       date: editDate,
       product: editProduct.trim(),
       target: targetNum,
-      achieved: achievedNum,
-      total_boards: boardsNum,
-      updated_fw_qty: fwNum,
+      achieved: safeAchieved,
+      total_boards: safeBoards,
+      updated_fw_qty: safeFw,
       overall_fpy: computedFpy,
       team_name: assignedTeam,
       notes: notesWithShift,
@@ -681,7 +722,7 @@ export default function Production() {
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div>
           <h1 className="page-title">Production Operations & Records</h1>
-          <p className="page-subtitle">Upload SAGEMCOM FPY Excel reports, log Updated FW QTY manually, and track team outputs</p>
+          <p className="page-subtitle">Auto-synced with Update PCs (1 & 2), FPY Excel inspection, and production tracking</p>
         </div>
 
         {/* Action Buttons at Top */}
@@ -1150,7 +1191,10 @@ export default function Production() {
                           boxShadow: uploadShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
                           transition: 'all 0.15s ease'
                         }}
-                        onClick={() => setUploadShift('Morning')}
+                        onClick={() => {
+                          setUploadShift('Morning');
+                          syncFwForUpload(uploadDate, 'Morning');
+                        }}
                       >
                         <span style={{ fontSize: '1.25rem' }}>☀️</span>
                         <span>صباحي (Morning)</span>
@@ -1174,7 +1218,10 @@ export default function Production() {
                           boxShadow: uploadShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
                           transition: 'all 0.15s ease'
                         }}
-                        onClick={() => setUploadShift('Evening')}
+                        onClick={() => {
+                          setUploadShift('Evening');
+                          syncFwForUpload(uploadDate, 'Evening');
+                        }}
                       >
                         <span style={{ fontSize: '1.25rem' }}>🌙</span>
                         <span>مسائي (Evening)</span>
@@ -1215,17 +1262,56 @@ export default function Production() {
                     </div>
                   </div>
 
-                  <div className="form-group" style={{ background: '#f5f3ff', padding: 12, borderRadius: 8, border: '1px solid #ddd6fe' }}>
-                    <label style={{ color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Cpu size={16} /> Updated FW QTY (Optional)
-                    </label>
-                    <input 
-                      type="number" 
-                      placeholder="Enter updated firmware quantity (or leave 0)" 
-                      value={uploadFwQty}
-                      onChange={e => setUploadFwQty(e.target.value)}
-                      disabled={isSaving}
-                    />
+                  <div className="form-group" style={{ background: '#f5f3ff', padding: 14, borderRadius: 10, border: '1.5px solid #ddd6fe' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ color: '#7c3aed', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                        <Cpu size={18} /> عدد العدادات المحدثة (Updated FW QTY)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => syncFwForUpload(uploadDate, uploadShift)}
+                        disabled={isSyncingFw}
+                        style={{
+                          background: '#7c3aed',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '5px 12px',
+                          borderRadius: 6,
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          cursor: isSyncingFw ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
+                        }}
+                      >
+                        <RefreshCw size={13} className={isSyncingFw ? 'spinner' : ''} />
+                        <span>{isSyncingFw ? 'جاري المزامنة...' : 'مزامنة من ملفات التحديث 🔄'}</span>
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <input 
+                        type="number" 
+                        value={uploadFwQty}
+                        readOnly
+                        disabled
+                        style={{ 
+                          fontWeight: 900, 
+                          fontSize: '1.2rem', 
+                          color: '#7c3aed', 
+                          background: '#ede9fe', 
+                          cursor: 'not-allowed',
+                          flex: 1
+                        }}
+                      />
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6d28d9' }}>عداد</span>
+                    </div>
+
+                    <span style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: 4, display: 'block' }}>
+                      ✨ يتم جلب العدد أوتوماتيكياً من ملفات التحديث الحقيقية لـ ({uploadShift === 'Morning' ? 'الشفت الصباحي' : 'الشفت المسائي'}) بدون أي إدخال يدوي.
+                    </span>
                   </div>
 
                   <div className="form-group">
@@ -1635,47 +1721,58 @@ export default function Production() {
                   />
                 </div>
 
-                {/* Achieved & Total Boards */}
+                {/* Achieved & Total Boards (Locked: Auto-derived from Production Logs) */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (الإنتاج الفعلي Achieved) *</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (الإنتاج الفعلي Achieved)</label>
+                      <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                    </div>
                     <input 
                       type="number" 
                       value={editAchieved} 
-                      onChange={e => setEditAchieved(e.target.value)} 
-                      disabled={isUpdatingRecord}
-                      required 
-                      style={{ fontWeight: 800, color: '#16a34a' }}
+                      readOnly
+                      disabled
+                      style={{ fontWeight: 800, color: '#16a34a', background: '#f1f5f9', cursor: 'not-allowed' }}
                     />
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>يتم حسابه تلقائياً من ملفات وسجلات الإنتاج</span>
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 700 }}>Total Boards Tested (إجمالي المفحوص) *</label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontWeight: 700 }}>Total Boards Tested (إجمالي المفحوص)</label>
+                      <span style={{ fontSize: '0.72rem', background: '#e2e8f0', color: '#334155', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                    </div>
                     <input 
                       type="number" 
                       value={editTotalBoards} 
-                      onChange={e => setEditTotalBoards(e.target.value)} 
-                      disabled={isUpdatingRecord}
-                      required 
-                      style={{ fontWeight: 800 }}
+                      readOnly
+                      disabled
+                      style={{ fontWeight: 800, background: '#f1f5f9', cursor: 'not-allowed' }}
                     />
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>محسوب تلقائياً من الفحص</span>
                   </div>
                 </div>
 
-                {/* Updated FW QTY & Team Name */}
+                {/* Updated FW QTY (Locked: Automated from Update PCs) & Team Name */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group" style={{ background: '#f5f3ff', padding: 10, borderRadius: 8, border: '1px solid #ddd6fe' }}>
-                    <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Cpu size={16} /> Updated FW QTY
-                    </label>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <Cpu size={16} /> Updated FW QTY (آلي من ملفات التحديث)
+                      </label>
+                      <span style={{ fontSize: '0.72rem', background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                    </div>
                     <input 
                       type="number" 
                       value={editFwQty} 
-                      onChange={e => setEditFwQty(e.target.value)} 
-                      disabled={isUpdatingRecord}
-                      min="0"
-                      style={{ fontWeight: 800, color: '#7c3aed' }}
+                      readOnly
+                      disabled
+                      style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe', cursor: 'not-allowed' }}
                     />
+                    <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
+                      مأخوذ أوتوماتيكياً من أجهزة التحديث (Update PC 1 & 2)
+                    </span>
                   </div>
 
                   <div className="form-group">

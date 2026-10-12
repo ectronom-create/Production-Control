@@ -7,6 +7,7 @@ import ManagementDashboard from './pages/ManagementDashboard';
 import Downtime from './pages/Downtime';
 import Production from './pages/Production';
 import DefectMeters from './pages/DefectMeters';
+import KitMeters from './pages/KitMeters';
 import Users from './pages/Users';
 
 function PrivateRoute({ children }) {
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="downtime"               element={<Downtime />} />
         <Route path="production"             element={<Production />} />
         <Route path="defect-meters"          element={<DefectMeters />} />
+        <Route path="kit-meters"             element={<KitMeters />} />
         <Route path="users"                  element={<Users />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

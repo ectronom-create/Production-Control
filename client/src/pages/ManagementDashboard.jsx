@@ -155,6 +155,82 @@ export default function ManagementDashboard() {
     };
   }, [records, activeDate, weekStartDateStr, targets]);
 
+  // ─── 4. Hand-written Note Calculations (2-Oct to 12-Oct Recovery Plan) ───────
+  const recoveryAnalysis = useMemo(() => {
+    // Filter records from 2026-10-02 to 2026-10-12
+    const periodRecords = records.filter(r => r.date >= '2026-10-02' && r.date <= '2026-10-12');
+    const actualInPeriod = periodRecords.reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
+    const fwInPeriod = periodRecords.reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
+    
+    // 11 working days (2-Oct to 12-Oct) * 1,300 daily target
+    const totalDays = 11;
+    const targetInPeriod = totalDays * targets.dailyProd; // 11 * 1300 = 14,300
+    const missingTarget = Math.max(0, targetInPeriod - actualInPeriod); // Gap
+    const isTargetAchieved = actualInPeriod >= targetInPeriod;
+    const achievementRate = targetInPeriod > 0 ? (actualInPeriod / targetInPeriod) * 100 : 0;
+
+    // Remaining days until next Nama dispatch (Batch 2 on 15-Oct = 3 days remaining: 13, 14, 15 Oct)
+    const recoveryDays = 7; // Plan over next 7 days
+    const dailyCatchUp = Math.ceil(missingTarget / recoveryDays);
+    const shiftCatchUp = Math.ceil(dailyCatchUp / 2);
+    const revisedDailyTarget = targets.dailyProd + dailyCatchUp;
+    const revisedShiftTarget = targets.shiftProd + shiftCatchUp;
+
+    return {
+      actualInPeriod,
+      fwInPeriod,
+      targetInPeriod,
+      missingTarget,
+      isTargetAchieved,
+      achievementRate,
+      dailyCatchUp,
+      shiftCatchUp,
+      revisedDailyTarget,
+      revisedShiftTarget,
+      recoveryDays
+    };
+  }, [records, targets]);
+
+  // ─── 5. Dispatched to Nama / Field Schedule ──────────────────────────────────
+  const namaDispatchPlan = useMemo(() => [
+    {
+      batch: 'Batch 1',
+      date: 'Completed (1-Oct)',
+      qty: 8480,
+      status: 'Delivered',
+      statusClass: 'badge-green',
+      icon: '✅',
+      notes: 'Dispatched to Nama / Field'
+    },
+    {
+      batch: 'Batch 2',
+      date: '15-Oct-2026',
+      qty: 12000,
+      status: 'Ready / Pending Dispatch',
+      statusClass: 'badge-admin',
+      icon: '⏳',
+      notes: 'Scheduled for Nama Field release'
+    },
+    {
+      batch: 'Batch 3',
+      date: '22-Oct-2026',
+      qty: 13920,
+      status: 'In Production Pipeline',
+      statusClass: 'badge-amber',
+      icon: '⚡',
+      notes: 'Next scheduled delivery'
+    },
+    {
+      batch: 'Batch 4',
+      date: '29-Oct-2026',
+      qty: 15625,
+      status: 'Planned',
+      statusClass: 'badge-purple',
+      icon: '📦',
+      notes: 'Final planned October batch'
+    }
+  ], []);
+
   // Status Badge Logic
   const getStatusBadge = (pct) => {
     if (pct >= 95) return { label: 'ON TRACK (Exceeding)', bg: '#dcfce7', color: '#15803d', border: '#bbf7d0' };
@@ -470,6 +546,148 @@ export default function ManagementDashboard() {
               </span>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── 4. Strategic Performance & Recovery Plan (2-Oct to 12-Oct Analysis) ── */}
+      <div style={{
+        background: 'white',
+        borderRadius: 16,
+        padding: '24px 28px',
+        border: '1.5px solid #e2e8f0',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <TrendingUp size={22} color="#b45309" />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--navy)' }}>
+                Target Performance & Recovery Plan (2-Oct to 12-Oct)
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'var(--gray-500)' }}>
+                Handwritten Executive Directive: Analysis of actual output vs target and recovery plan calculation
+              </p>
+            </div>
+          </div>
+
+          <span className={`badge ${recoveryAnalysis.isTargetAchieved ? 'badge-green' : 'badge-red'}`} style={{ fontSize: '0.85rem', padding: '6px 14px' }}>
+            {recoveryAnalysis.isTargetAchieved ? '✅ Target Achieved' : '⚠️ Recovery Plan Required'}
+          </span>
+        </div>
+
+        {/* 4 Cards: Status, Missing, Daily Catchup, Shift Catchup */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 20 }}>
+          <div style={{ background: '#f8fafc', padding: 16, borderRadius: 12, border: '1px solid #e2e8f0' }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Period Actual (2-Oct — 12-Oct)</div>
+            <div style={{ fontSize: '1.7rem', fontWeight: 900, color: 'var(--navy)', marginTop: 4 }}>
+              {recoveryAnalysis.actualInPeriod.toLocaleString()}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 4 }}>
+              Expected: <b>{recoveryAnalysis.targetInPeriod.toLocaleString()}</b> (11 Days @ 1,300/day)
+            </div>
+          </div>
+
+          <div style={{ background: '#fef2f2', padding: 16, borderRadius: 12, border: '1px solid #fee2e2' }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase' }}>Pending Missing Target (العجز)</div>
+            <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#b91c1c', marginTop: 4 }}>
+              -{recoveryAnalysis.missingTarget.toLocaleString()}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#991b1b', marginTop: 4 }}>
+              Achievement: <b>{recoveryAnalysis.achievementRate.toFixed(1)}%</b> of target
+            </div>
+          </div>
+
+          <div style={{ background: '#fffbeb', padding: 16, borderRadius: 12, border: '1px solid #fef3c7' }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b45309', textTransform: 'uppercase' }}>Recovery Daily Target (خطة التعويض اليومية)</div>
+            <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#b45309', marginTop: 4 }}>
+              {recoveryAnalysis.revisedDailyTarget.toLocaleString()}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#92400e', marginTop: 4 }}>
+              Base 1,300 + <b>{recoveryAnalysis.dailyCatchUp}</b> catch-up/day ({recoveryAnalysis.recoveryDays} days)
+            </div>
+          </div>
+
+          <div style={{ background: '#ede9fe', padding: 16, borderRadius: 12, border: '1px solid #ddd6fe' }}>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase' }}>Recovery Shift Target (تارجت الشفت المستحدث)</div>
+            <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#6d28d9', marginTop: 4 }}>
+              {recoveryAnalysis.revisedShiftTarget.toLocaleString()}
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#5b21b6', marginTop: 4 }}>
+              Base 650 + <b>{recoveryAnalysis.shiftCatchUp}</b> meters/shift (2 shifts)
+            </div>
+          </div>
+        </div>
+
+        {/* Narrative Box */}
+        <div style={{ background: '#f0fdfa', border: '1px solid #ccfbf1', borderRadius: 10, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ fontSize: '1.5rem' }}>🎯</div>
+          <div style={{ fontSize: '0.86rem', color: '#115e59', lineHeight: 1.5 }}>
+            <strong>Strategic Recovery Directive:</strong> To recover the pending <strong>{recoveryAnalysis.missingTarget.toLocaleString()}</strong> meters deficit from the 2-Oct to 12-Oct period, daily production must be increased to <strong>{recoveryAnalysis.revisedDailyTarget.toLocaleString()} meters/day</strong> (or <strong>{recoveryAnalysis.revisedShiftTarget.toLocaleString()} meters/shift</strong>) over the next {recoveryAnalysis.recoveryDays} operating days prior to upcoming Nama Field shipments.
+          </div>
+        </div>
+      </div>
+
+      {/* ── 5. Dispatched to Nama / Field Schedule (Plan of Dispatch) ── */}
+      <div style={{
+        background: 'white',
+        borderRadius: 16,
+        padding: '24px 28px',
+        border: '1.5px solid #e2e8f0',
+        boxShadow: 'var(--shadow-sm)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 40, height: 40, borderRadius: 10, background: '#dbeafe', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Layers size={22} color="#1d4ed8" />
+            </div>
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--navy)' }}>
+                Dispatched to Nama / Field — Plan of Dispatch
+              </h3>
+              <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: 'var(--gray-500)' }}>
+                Field dispatch roadmap, release schedule dates, and contract batch quantities
+              </p>
+            </div>
+          </div>
+
+          <span className="badge badge-viewer" style={{ fontSize: '0.85rem' }}>
+            Total Planned: 50,025 Meters
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
+          {namaDispatchPlan.map((p, idx) => (
+            <div key={p.batch} style={{
+              background: '#f8fafc',
+              border: idx === 0 ? '1.5px solid #86efac' : (idx === 1 ? '1.5px solid #93c5fd' : '1px solid #e2e8f0'),
+              borderRadius: 12,
+              padding: '16px 18px',
+              position: 'relative'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--navy)' }}>
+                  {p.icon} {p.batch}
+                </span>
+                <span className={`badge ${p.statusClass}`} style={{ fontSize: '0.72rem' }}>
+                  {p.status}
+                </span>
+              </div>
+
+              <div style={{ fontSize: '1.6rem', fontWeight: 900, color: idx === 0 ? '#16a34a' : 'var(--navy)', lineHeight: 1 }}>
+                {p.qty.toLocaleString()} <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748b' }}>Meters</span>
+              </div>
+
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #e2e8f0', fontSize: '0.82rem', color: '#64748b' }}>
+                📅 Scheduled Date: <strong style={{ color: 'var(--navy)' }}>{p.date}</strong>
+              </div>
+
+              <div style={{ fontSize: '0.76rem', color: '#94a3b8', marginTop: 4 }}>
+                {p.notes}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
