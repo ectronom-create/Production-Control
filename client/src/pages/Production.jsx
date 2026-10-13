@@ -646,11 +646,11 @@ export default function Production() {
     const targetNum = parseInt(editTarget, 10) || 650;
     const fwNum = parseInt(editFwQty, 10) || 0;
 
-    // Achieved, total_boards, and updated_fw_qty are auto-derived from official logs and cannot be overwritten manually
+    // Achieved and total_boards are auto-derived from test logs, FW QTY is synced from Update PCs
     const originalRecord = records.find(r => r.id === editRecordId);
     const safeAchieved = originalRecord ? originalRecord.achieved : achievedNum;
     const safeBoards = originalRecord ? originalRecord.total_boards : boardsNum;
-    const safeFw = originalRecord ? originalRecord.updated_fw_qty : fwNum;
+    const safeFw = fwNum > 0 ? fwNum : (originalRecord ? originalRecord.updated_fw_qty : 0);
 
     let computedFpy = null;
     if (safeBoards > 0) {
@@ -1802,14 +1802,45 @@ export default function Production() {
                   </div>
                 </div>
 
-                {/* Updated FW QTY (Locked: Automated from Update PCs) & Team Name */}
+                {/* Updated FW QTY (Live sync from Update PCs) & Team Name */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div className="form-group" style={{ background: '#f5f3ff', padding: 10, borderRadius: 8, border: '1px solid #ddd6fe' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Cpu size={16} /> Updated FW QTY (آلي من ملفات التحديث)
+                  <div className="form-group" style={{ background: '#f5f3ff', padding: 12, borderRadius: 8, border: '1px solid #ddd6fe' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                        <Cpu size={16} /> Updated FW QTY
                       </label>
-                      <span style={{ fontSize: '0.72rem', background: '#ede9fe', color: '#6d28d9', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const resp = await fetch(`/api/sync-fw?date=${encodeURIComponent(editDate)}&shift=${encodeURIComponent(editShift)}`);
+                            if (resp.ok) {
+                              const json = await resp.json();
+                              if (json.success && json.count != null) {
+                                setEditFwQty(json.count);
+                              }
+                            }
+                          } catch (e) {
+                            console.warn('Edit sync error:', e);
+                          }
+                        }}
+                        style={{
+                          background: '#7c3aed',
+                          color: '#ffffff',
+                          border: 'none',
+                          padding: '3px 8px',
+                          borderRadius: 4,
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4
+                        }}
+                      >
+                        <RefreshCw size={11} />
+                        تحديث من الدرايف 🔄
+                      </button>
                     </div>
                     <input 
                       type="number" 
@@ -1819,7 +1850,7 @@ export default function Production() {
                       style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe', cursor: 'not-allowed' }}
                     />
                     <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
-                      مأخوذ أوتوماتيكياً من أجهزة التحديث (Update PC 1 & 2)
+                      محدث أوتوماتيكياً من ملفات التحديث في Google Drive
                     </span>
                   </div>
 
