@@ -925,8 +925,8 @@ export default function Batches() {
       {showUploadModal && (
         <div className="modal-backdrop" onClick={() => !isUploading && setShowUploadModal(false)}>
           <div 
-            className="modal-box" 
-            style={{ maxWidth: 780, width: '95%' }} 
+            className="modal-box modal-large" 
+            style={{ width: '95%', background: '#ffffff' }} 
             onClick={e => e.stopPropagation()}
           >
             <div className="modal-header">
@@ -1092,8 +1092,8 @@ export default function Batches() {
       {inspectBatch && (
         <div className="modal-backdrop" onClick={() => setInspectBatch(null)}>
           <div 
-            className="modal-box" 
-            style={{ maxWidth: 1100, width: '96%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} 
+            className="modal-box modal-xl" 
+            style={{ width: '96%', height: '88vh', maxHeight: '88vh', background: '#ffffff', display: 'flex', flexDirection: 'column' }} 
             onClick={e => e.stopPropagation()}
           >
             <div className="modal-header">
