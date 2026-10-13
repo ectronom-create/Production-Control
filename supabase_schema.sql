@@ -160,7 +160,17 @@ CREATE POLICY "Anon full access on batch_meter_records" ON public.batch_meter_re
 
 DROP POLICY IF EXISTS "Anon full access on batch_fw_targets" ON public.batch_fw_targets;
 CREATE POLICY "Anon full access on batch_fw_targets" ON public.batch_fw_targets 
-  FOR ALL TO anon USING (true) WITH CHECK (true);
+  FOR ALL TO anon, authenticated USING (true) WITH CHECK (true);
+
+-- 8. GRANT PRIVILEGES TO anon AND authenticated ROLES
+GRANT ALL ON TABLE public.users TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.production_records TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.stoppages TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.kit_meters TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.shipment_batches TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.batch_meter_records TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.batch_fw_targets TO anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 
 -- 8. INITIAL DEFAULT ADMIN USER (إذا لم يكن موجوداً)
 INSERT INTO public.users (name, password, company_id, email, phone, access, team_name)
