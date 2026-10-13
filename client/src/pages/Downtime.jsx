@@ -960,7 +960,7 @@ Best regards,`;
                 title="Send test email to all registered admin emails"
               >
                 <span>📧</span>
-                <span>{isSendingTestAlert ? 'Sending Test...' : 'Test Alert Email (تجربة إيميل)'}</span>
+                <span>{isSendingTestAlert ? 'Sending Test...' : 'Test Alert Email'}</span>
               </button>
             )}
 

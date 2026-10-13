@@ -111,15 +111,15 @@ export default function KitMeters() {
     e.preventDefault();
     const qty = parseInt(kitQuantity, 10);
     if (!batchNumber.trim()) {
-      setModalError('يرجى إدخال رقم الباتش (Batch Number).');
+      setModalError('Please enter a Batch Number.');
       return;
     }
     if (isNaN(qty) || qty <= 0) {
-      setModalError('يرجى إدخال عدد كت صحيح أكبر من صفر.');
+      setModalError('Please enter a valid kit quantity greater than 0.');
       return;
     }
     if (!recordDate) {
-      setModalError('يرجى تحديد التاريخ.');
+      setModalError('Please select a date.');
       return;
     }
 
@@ -153,7 +153,7 @@ export default function KitMeters() {
         } else {
           await loadRecords();
         }
-        setSaveSuccessMsg(`تم تحديث بيانات الباتش ${batchNumber} بنجاح!`);
+        setSaveSuccessMsg(`Batch ${batchNumber} updated successfully!`);
       } else {
         // Insert new record
         const { data, error } = await supabase
@@ -171,14 +171,14 @@ export default function KitMeters() {
         } else {
           await loadRecords();
         }
-        setSaveSuccessMsg(`تمت إضافة الباتش ${batchNumber} بعدد ${qty.toLocaleString()} كت بنجاح!`);
+        setSaveSuccessMsg(`Batch ${batchNumber} added with ${qty.toLocaleString()} kits successfully!`);
       }
 
       setShowModal(false);
       setTimeout(() => setSaveSuccessMsg(''), 4000);
     } catch (err) {
       console.error('Submit error:', err);
-      setModalError(err.message || 'حدث خطأ أثناء الحفظ.');
+      setModalError(err.message || 'An error occurred while saving.');
     } finally {
       setIsSubmitting(false);
     }
@@ -186,7 +186,7 @@ export default function KitMeters() {
 
   // Delete record
   const handleDeleteRecord = async (id, batch) => {
-    if (!window.confirm(`هل أنت متأكد من حذف سجل الباتش "${batch}"؟`)) return;
+    if (!window.confirm(`Are you sure you want to delete kit batch "${batch}"?`)) return;
 
     try {
       const { error } = await supabase.from('kit_meters').delete().eq('id', id);
@@ -250,7 +250,7 @@ export default function KitMeters() {
       {/* ── Page Header ── */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 className="page-title">Kit Meters (إدارة كميات الكيت والباتشات)</h1>
+          <h1 className="page-title">Kit Meters (Kit Quantities & Batch Management)</h1>
           <p className="page-subtitle">Track incoming meter kits, batch quantities, Three Phase & Single Phase allocation</p>
         </div>
 
@@ -272,7 +272,7 @@ export default function KitMeters() {
             onClick={handleOpenAddModal}
           >
             <Plus size={18} />
-            Add Kit Batch (إضافة باتش كيت جديد)
+            Add Kit Batch
           </button>
         )}
       </div>
@@ -284,11 +284,11 @@ export default function KitMeters() {
             <Package size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Total Kits (إجمالي عدد الكيت)</span>
+            <span className="kpi-title">Total Kits</span>
             <span className="kpi-val" style={{ color: 'var(--navy)' }}>
               {stats.totalKits.toLocaleString()}
             </span>
-            <span className="kpi-sub">عبر جميع الباتشات المسجلة</span>
+            <span className="kpi-sub">Across all logged batches</span>
           </div>
         </div>
 
@@ -297,12 +297,12 @@ export default function KitMeters() {
             <Layers size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Three Phase Kits (ثلاثي الطور)</span>
+            <span className="kpi-title">Three Phase Kits</span>
             <span className="kpi-val" style={{ color: '#1d4ed8' }}>
               {stats.threePhaseKits.toLocaleString()}
             </span>
             <span className="kpi-sub">
-              {stats.totalKits > 0 ? `${((stats.threePhaseKits / stats.totalKits) * 100).toFixed(1)}% من الإجمالي` : '0%'}
+              {stats.totalKits > 0 ? `${((stats.threePhaseKits / stats.totalKits) * 100).toFixed(1)}% of total` : '0%'}
             </span>
           </div>
         </div>
@@ -312,12 +312,12 @@ export default function KitMeters() {
             <TrendingUp size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Single Phase Kits (أحادي الطور)</span>
+            <span className="kpi-title">Single Phase Kits</span>
             <span className="kpi-val" style={{ color: '#6d28d9' }}>
               {stats.singlePhaseKits.toLocaleString()}
             </span>
             <span className="kpi-sub">
-              {stats.totalKits > 0 ? `${((stats.singlePhaseKits / stats.totalKits) * 100).toFixed(1)}% من الإجمالي` : '0%'}
+              {stats.totalKits > 0 ? `${((stats.singlePhaseKits / stats.totalKits) * 100).toFixed(1)}% of total` : '0%'}
             </span>
           </div>
         </div>
@@ -327,11 +327,11 @@ export default function KitMeters() {
             <Hash size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Total Batches (إجمالي الباتشات)</span>
+            <span className="kpi-title">Total Batches</span>
             <span className="kpi-val" style={{ color: '#b45309' }}>
               {stats.totalBatches}
             </span>
-            <span className="kpi-sub">شحنات / دفعات مسجلة</span>
+            <span className="kpi-sub">Logged shipments / batches</span>
           </div>
         </div>
       </div>
@@ -358,9 +358,9 @@ export default function KitMeters() {
             onChange={e => setFilterProduct(e.target.value)}
             style={{ width: 'auto' }}
           >
-            <option value="ALL">All Products (جميع المنتجات)</option>
-            <option value="Three Phase">Three Phase (ثلاثي الطور)</option>
-            <option value="Single Phase">Single Phase (أحادي الطور)</option>
+            <option value="ALL">All Products</option>
+            <option value="Three Phase">Three Phase</option>
+            <option value="Single Phase">Single Phase</option>
           </select>
         </div>
 
@@ -398,10 +398,10 @@ export default function KitMeters() {
           <table>
             <thead>
               <tr>
-                <th>Batch Number (رقم الباتش)</th>
-                <th>Date (التاريخ)</th>
-                <th>Product Type (نوع المنتج)</th>
-                <th style={{ textAlign: 'right' }}>Kit Quantity (عدد الكت)</th>
+                <th>Batch Number</th>
+                <th>Date</th>
+                <th>Product Type</th>
+                <th style={{ textAlign: 'right' }}>Kit Quantity</th>
                 <th>Entered By</th>
                 <th>Notes</th>
                 <th style={{ textAlign: 'center' }}>Actions</th>
@@ -504,7 +504,7 @@ export default function KitMeters() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Package size={20} color="var(--teal)" />
                 <span className="modal-title">
-                  {editingRecord ? `Edit Kit Batch (${editingRecord.batch_number})` : 'Add New Kit Batch (إضافة باتش كيت جديد)'}
+                  {editingRecord ? `Edit Kit Batch (${editingRecord.batch_number})` : 'Add New Kit Batch'}
                 </span>
               </div>
               <button type="button" className="modal-close" onClick={() => setShowModal(false)}>×</button>
@@ -517,7 +517,7 @@ export default function KitMeters() {
                 {/* Batch Number & Kit Quantity */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Batch Number (رقم الباتش) *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Batch Number *</label>
                     <input 
                       type="text" 
                       placeholder="e.g. Batch 1 / Batch 25" 
@@ -530,7 +530,7 @@ export default function KitMeters() {
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--teal-dark)' }}>Kit Quantity (عدد الكت) *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--teal-dark)' }}>Kit Quantity *</label>
                     <input 
                       type="number" 
                       placeholder="e.g. 25000" 
@@ -542,7 +542,7 @@ export default function KitMeters() {
                       style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--navy)' }}
                     />
                     <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2, display: 'block' }}>
-                      مثال: 25,000 كت
+                      e.g. 25,000 kits
                     </span>
                   </div>
                 </div>
@@ -550,7 +550,7 @@ export default function KitMeters() {
                 {/* Date & Product Type */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Date (التاريخ) *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Date *</label>
                     <input 
                       type="date" 
                       value={recordDate}
@@ -562,7 +562,7 @@ export default function KitMeters() {
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Product Name (اسم المنتج) *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Product Name *</label>
                     <select 
                       className="form-select"
                       value={productName}
@@ -570,8 +570,8 @@ export default function KitMeters() {
                       disabled={isSubmitting}
                       style={{ fontWeight: 700 }}
                     >
-                      <option value="Three Phase">Three Phase (ثلاثي الطور)</option>
-                      <option value="Single Phase">Single Phase (أحادي الطور)</option>
+                      <option value="Three Phase">Three Phase</option>
+                      <option value="Single Phase">Single Phase</option>
                     </select>
                   </div>
                 </div>
@@ -579,13 +579,13 @@ export default function KitMeters() {
                 {/* Notes */}
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <FileText size={15} /> Notes / Description (ملاحظات الشحنة أو الباتش)
+                    <FileText size={15} /> Notes / Description
                   </label>
                   <textarea 
                     rows={2}
                     className="search-input"
                     style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
-                    placeholder="أي ملاحظات إضافية حول التوريد أو موقع التخزين..."
+                    placeholder="Any additional notes regarding shipment or storage location..."
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
                     disabled={isSubmitting}

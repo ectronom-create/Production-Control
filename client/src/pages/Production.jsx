@@ -15,7 +15,9 @@ import {
   Search,
   Database,
   Check,
-  AlertCircle
+  AlertCircle,
+  Package,
+  X
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -43,7 +45,7 @@ function parseFPYExcel(arrayBuffer) {
   }
 
   if (headerIdx === -1) {
-    throw new Error('لم يتم العثور على عناوين الأعمدة المتوقعة في الملف (Board, Pass, Test Bench).');
+    throw new Error('Expected column headers not found in file (Board, Pass, Test Bench).');
   }
 
   let product = 'Unknown';
@@ -246,7 +248,16 @@ export default function Production() {
   // Modals state
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showFwModal, setShowFwModal] = useState(false);
+  const [showBatchTargetModal, setShowBatchTargetModal] = useState(false);
   const [selectedRecordForDetail, setSelectedRecordForDetail] = useState(null);
+
+  // Batch FW Target upload states
+  const [targetBatchName, setTargetBatchName] = useState('Batch 1');
+  const [targetParsedRows, setTargetParsedRows] = useState([]);
+  const [targetFileName, setTargetFileName] = useState('');
+  const [targetUploadError, setTargetUploadError] = useState('');
+  const [targetIsSaving, setTargetIsSaving] = useState(false);
+  const [targetSuccessMsg, setTargetSuccessMsg] = useState('');
 
   // Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -378,13 +389,13 @@ export default function Production() {
         // Automatically sync FW QTY from Google Drive LOG.csv for this production shift
         syncFwForUpload(curShift.date, curShift.shift);
       } catch (err) {
-        setUploadError(err.message || 'خطأ في قراءة ملف الإكسل.');
+        setUploadError(err.message || 'Error reading Excel file.');
       } finally {
         setIsParsing(false);
       }
     };
     reader.onerror = () => {
-      setUploadError('فشل قراءة الملف من الجهاز.');
+      setUploadError('Failed to read file from disk.');
       setIsParsing(false);
     };
     reader.readAsArrayBuffer(file);
@@ -411,17 +422,17 @@ export default function Production() {
       }
 
       // 2. Fallback: Find matching shift count in existing production_records in Supabase
-      const shiftSearch = targetShift === 'Morning' ? 'صباحي' : 'مسائي';
+      const isMorning = targetShift === 'Morning';
       const { data, error } = await supabase
         .from('production_records')
         .select('updated_fw_qty, team_name, notes')
         .eq('date', targetDate);
 
       if (!error && data && data.length > 0) {
-        const match = data.find(r => 
-          (r.team_name && r.team_name.includes(shiftSearch)) ||
-          (r.notes && r.notes.includes(shiftSearch))
-        );
+        const match = data.find(r => {
+          const str = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
+          return isMorning ? (str.includes('morning') || str.includes('\u0635\u0628\u0627\u062d')) : (str.includes('evening') || str.includes('\u0645\u0633\u0627'));
+        });
         if (match && match.updated_fw_qty != null && match.updated_fw_qty > 0) {
           setUploadFwQty(match.updated_fw_qty);
           setIsSyncingFw(false);
@@ -438,13 +449,134 @@ export default function Production() {
     }
   };
 
+  // Parse Excel for Batch FW Target Upload (extracting last 6 digits from SN)
+  const handleBatchTargetFile = (file) => {
+    if (!file) return;
+    setTargetUploadError('');
+    setTargetFileName(file.name);
+    setTargetParsedRows([]);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const rawJson = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+        if (rawJson.length < 2) {
+          throw new Error('File is empty or contains no data rows.');
+        }
+
+        const headers = rawJson[0].map(h => String(h || '').trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
+        let snColIdx = -1;
+
+        // Find serial column index
+        headers.forEach((h, idx) => {
+          if (['serialnumber', 'sn', 'serial_number', 'meter_sn', 'factoryserialnumber', 'factorysn', 'serial'].includes(h)) {
+            snColIdx = idx;
+          }
+        });
+
+        // Fallback: if header not clearly named, use first non-empty column
+        if (snColIdx === -1) {
+          snColIdx = 0;
+        }
+
+        const validRows = [];
+        const seenSuffixes = new Set();
+
+        for (let i = 1; i < rawJson.length; i++) {
+          const row = rawJson[i];
+          if (!row || !row[snColIdx]) continue;
+          const rawSn = String(row[snColIdx]).trim();
+          if (!rawSn || rawSn.length < 6) continue;
+
+          const suffix = rawSn.slice(-6);
+          if (!seenSuffixes.has(suffix)) {
+            seenSuffixes.add(suffix);
+            validRows.push({
+              serial_number: rawSn,
+              sn_suffix: suffix,
+              batch_name: targetBatchName.trim()
+            });
+          }
+        }
+
+        if (validRows.length === 0) {
+          throw new Error('No valid meter serial numbers found in file.');
+        }
+
+        setTargetParsedRows(validRows);
+      } catch (err) {
+        console.error('Target parse error:', err);
+        setTargetUploadError(err.message || 'Failed to parse Excel file.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  };
+
+  // Save Batch FW Targets to Supabase (and localStorage cache fallback)
+  const saveBatchTargets = async () => {
+    if (!targetParsedRows || targetParsedRows.length === 0) {
+      setTargetUploadError('Please select a file containing valid meter serials.');
+      return;
+    }
+    if (!targetBatchName.trim()) {
+      setTargetUploadError('Please specify the batch name.');
+      return;
+    }
+
+    setTargetIsSaving(true);
+    setTargetUploadError('');
+
+    try {
+      const bName = targetBatchName.trim();
+      const payload = targetParsedRows.map(r => ({
+        batch_name: bName,
+        serial_number: r.serial_number,
+        sn_suffix: r.sn_suffix
+      }));
+
+      // 1. Delete old targets for this batch if re-uploading
+      await supabase.from('batch_fw_targets').delete().eq('batch_name', bName);
+
+      // 2. Insert in chunks of 500 rows
+      const chunkSize = 500;
+      for (let i = 0; i < payload.length; i += chunkSize) {
+        const slice = payload.slice(i, i + chunkSize);
+        const { error } = await supabase.from('batch_fw_targets').insert(slice);
+        if (error) console.warn('Supabase batch_fw_targets insert warning:', error.message);
+      }
+
+      // 3. Save to localStorage cache as robust offline fallback
+      const cached = JSON.parse(localStorage.getItem('ectron_batch_fw_targets') || '[]');
+      const filtered = cached.filter(item => item.batch_name !== bName);
+      const combined = [...filtered, ...payload];
+      localStorage.setItem('ectron_batch_fw_targets', JSON.stringify(combined));
+
+      setTargetSuccessMsg(`Successfully saved ${payload.length.toLocaleString()} meters for batch (${bName})!`);
+      setTimeout(() => setTargetSuccessMsg(''), 5000);
+
+      setShowBatchTargetModal(false);
+      setTargetParsedRows([]);
+      setTargetFileName('');
+    } catch (err) {
+      console.error('Save target error:', err);
+      setTargetUploadError('Failed to save: ' + err.message);
+    } finally {
+      setTargetIsSaving(false);
+    }
+  };
+
   // Save parsed FPY Report to Supabase
   const handleSaveUpload = async () => {
     if (!parsedData) return;
     setIsSaving(true);
     setUploadError('');
 
-    const shiftLabel = uploadShift === 'Evening' ? 'مسائي (Evening)' : 'صباحي (Morning)';
+    const shiftLabel = uploadShift === 'Evening' ? 'Evening' : 'Morning';
     const assignedTeamBase = isSupervisor 
       ? (user?.team_name?.trim() || 'Team Alpha') 
       : (uploadTeamName || 'Management');
@@ -490,7 +622,7 @@ export default function Production() {
       setTimeout(() => setSaveSuccessMsg(''), 4000);
     } catch (err) {
       console.error('Save FPY error:', err);
-      setUploadError('حدث خطأ أثناء الحفظ: ' + (err.message || ''));
+      setUploadError('Error occurred while saving: ' + (err.message || ''));
     } finally {
       setIsSaving(false);
     }
@@ -521,7 +653,7 @@ export default function Production() {
     e.preventDefault();
     const qtyNum = parseInt(fwQty, 10);
     if (isNaN(qtyNum) || qtyNum < 0) {
-      setFwError('يرجى إدخال كمية صحيحة أكبر من أو تساوي 0.');
+      setFwError('Please enter a valid quantity greater than or equal to 0.');
       return;
     }
 
@@ -595,11 +727,11 @@ export default function Production() {
 
       setShowFwModal(false);
       setFwQty('');
-      setSaveSuccessMsg('تم حفظ وتحديث Updated FW QTY بنجاح!');
+      setSaveSuccessMsg('Updated FW QTY saved successfully!');
       setTimeout(() => setSaveSuccessMsg(''), 4000);
     } catch (err) {
       console.error('Error saving FW QTY:', err);
-      setFwError('فشل الحفظ: ' + (err.message || ''));
+      setFwError('Failed to save: ' + (err.message || ''));
     } finally {
       setFwSaving(false);
     }
@@ -612,7 +744,8 @@ export default function Production() {
     setEditRecordId(record.id);
     setEditDate(record.date || getTodayString());
     
-    const isEvening = record.team_name?.includes('مسائي') || record.team_name?.includes('Evening') || record.notes?.includes('Evening');
+    const recStr = `${record.team_name || ''} ${record.notes || ''}`.toLowerCase();
+    const isEvening = recStr.includes('evening') || recStr.includes('\u0645\u0633\u0627');
     setEditShift(isEvening ? 'Evening' : 'Morning');
 
     setEditTarget(record.target || 650);
@@ -637,7 +770,7 @@ export default function Production() {
     setIsUpdatingRecord(true);
     setEditError('');
 
-    const shiftLabel = editShift === 'Evening' ? 'مسائي (Evening)' : 'صباحي (Morning)';
+    const shiftLabel = editShift === 'Evening' ? 'Evening' : 'Morning';
     const assignedTeam = `${editTeamName || 'Team Alpha'} - ${shiftLabel}`;
     const notesWithShift = editNotes.trim() ? `[Shift: ${shiftLabel}] ${editNotes.trim()}` : `[Shift: ${shiftLabel}]`;
 
@@ -697,7 +830,7 @@ export default function Production() {
       await loadRecords();
     } catch (err) {
       console.error('Update report error:', err);
-      setEditError(err.message || 'حدث خطأ أثناء تعديل التقرير.');
+      setEditError(err.message || 'Error occurred while updating report.');
     } finally {
       setIsUpdatingRecord(false);
     }
@@ -705,7 +838,7 @@ export default function Production() {
 
   // Delete Record from Supabase
   const handleDeleteRecord = async (id, date) => {
-    if (!window.confirm(`هل أنت متأكد من حذف سجل الإنتاج لتاريخ ${date} نهائياً؟`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete the production record for ${date}?`)) return;
 
     try {
       await supabase.from('production_records').delete().eq('id', id);
@@ -728,9 +861,10 @@ export default function Production() {
 
       const matchTeam = filterTeam === 'ALL' || r.team_name === filterTeam;
       const matchDate = filterDate === '' || r.date === filterDate;
+      const rText = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
       const matchShift = filterShift === 'ALL' ||
-        (filterShift === 'Morning' && (r.team_name?.includes('صباحي') || r.team_name?.includes('Morning') || r.notes?.includes('Morning'))) ||
-        (filterShift === 'Evening' && (r.team_name?.includes('مسائي') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')));
+        (filterShift === 'Morning' && (rText.includes('morning') || rText.includes('\u0635\u0628\u0627\u062d'))) ||
+        (filterShift === 'Evening' && (rText.includes('evening') || rText.includes('\u0645\u0633\u0627')));
 
       return matchSearch && matchTeam && matchDate && matchShift;
     });
@@ -754,11 +888,18 @@ export default function Production() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* ── Status Banner ── */}
+      {/* ── Status Banners ── */}
       {saveSuccessMsg && (
         <div style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '12px 18px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700 }}>
           <Check size={20} />
           {saveSuccessMsg}
+        </div>
+      )}
+
+      {targetSuccessMsg && (
+        <div style={{ background: '#eff6ff', color: '#1d4ed8', border: '1.5px solid #bfdbfe', padding: '12px 18px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700 }}>
+          <Package size={20} />
+          {targetSuccessMsg}
         </div>
       )}
 
@@ -771,6 +912,32 @@ export default function Production() {
 
         {/* Action Buttons at Top */}
         <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          {isAdmin && (
+            <button 
+              type="button"
+              className="btn-primary" 
+              style={{ 
+                background: '#4f46e5', 
+                display: 'inline-flex', 
+                alignItems: 'center', 
+                gap: 8, 
+                padding: '10px 18px', 
+                fontWeight: 700, 
+                fontSize: '0.9rem',
+                boxShadow: '0 4px 12px rgba(79, 70, 229, 0.25)' 
+              }}
+              onClick={() => {
+                setTargetUploadError('');
+                setTargetParsedRows([]);
+                setTargetFileName('');
+                setShowBatchTargetModal(true);
+              }}
+            >
+              <Package size={18} />
+              Upload FW Target Batch
+            </button>
+          )}
+
           {!isViewer && (
             <button 
               type="button"
@@ -887,9 +1054,9 @@ export default function Production() {
             value={filterShift} 
             onChange={e => setFilterShift(e.target.value)}
           >
-            <option value="ALL">All Shifts (كل الشفتات)</option>
-            <option value="Morning">☀️ Morning (صباحي)</option>
-            <option value="Evening">🌙 Evening (مسائي)</option>
+            <option value="ALL">All Shifts</option>
+            <option value="Morning">☀️ Morning Shift</option>
+            <option value="Evening">🌙 Evening Shift</option>
           </select>
         </div>
 
@@ -984,14 +1151,14 @@ export default function Production() {
                         }}>
                           👥 {r.team_name ? r.team_name.split(' - ')[0] : '—'}
                         </span>
-                        {(r.team_name?.includes('صباحي') || r.team_name?.includes('Morning') || r.notes?.includes('Morning')) && (
+                        {(r.team_name?.includes('\u0635\u0628\u0627\u062d') || r.team_name?.includes('Morning') || r.notes?.includes('Morning')) && (
                           <span style={{ fontSize: '0.72rem', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
-                            ☀️ صباحي (Morning)
+                            ☀️ Morning Shift
                           </span>
                         )}
-                        {(r.team_name?.includes('مسائي') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')) && (
+                        {(r.team_name?.includes('\u0645\u0633\u0627') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')) && (
                           <span style={{ fontSize: '0.72rem', background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
-                            🌙 مسائي (Evening)
+                            🌙 Evening Shift
                           </span>
                         )}
                       </div>
@@ -1045,7 +1212,7 @@ export default function Production() {
                               type="button"
                               className="btn-icon" 
                               style={{ background: '#e0f2fe', color: '#0369a1' }}
-                              title="Edit Production Report (تعديل التقرير والتاريخ)"
+                              title="Edit Production Report & Date"
                               onClick={() => openEditModalForRecord(r)}
                             >
                               <Edit3 size={15} />
@@ -1186,7 +1353,7 @@ export default function Production() {
                     <div className="form-group">
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <label>Shift Target (Boards) *</label>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>افتراضي 650</span>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>Default 650</span>
                       </div>
                       <input 
                         type="number" 
@@ -1197,16 +1364,16 @@ export default function Production() {
                         style={{ fontWeight: 700 }}
                       />
                       <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2, display: 'block' }}>
-                        تارجت الشفت الافتراضي 650 عداد، يمكنك تغييره إذا لزم الأمر
+                        Default shift target is 650 boards, adjust if needed
                       </span>
                     </div>
                   </div>
 
-                  {/* Shift Selection (صباحي / مسائي) */}
+                  {/* Shift Selection */}
                   <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
-                        Shift Selection (تحديد الشفت) *
+                        Shift Selection *
                       </label>
                       <span style={{ 
                         fontSize: '0.75rem', 
@@ -1216,7 +1383,7 @@ export default function Production() {
                         padding: '2px 8px',
                         borderRadius: 12
                       }}>
-                        {uploadShift === 'Morning' ? 'الشفت الصباحي المحدد' : 'الشفت المسائي المحدد'}
+                        {uploadShift === 'Morning' ? 'Morning Shift Selected' : 'Evening Shift Selected'}
                       </span>
                     </div>
 
@@ -1245,7 +1412,7 @@ export default function Production() {
                         }}
                       >
                         <span style={{ fontSize: '1.25rem' }}>☀️</span>
-                        <span>صباحي (Morning)</span>
+                        <span>Morning Shift</span>
                       </button>
 
                       <button
@@ -1272,7 +1439,7 @@ export default function Production() {
                         }}
                       >
                         <span style={{ fontSize: '1.25rem' }}>🌙</span>
-                        <span>مسائي (Evening)</span>
+                        <span>Evening Shift</span>
                       </button>
                     </div>
                   </div>
@@ -1313,7 +1480,7 @@ export default function Production() {
                   <div className="form-group" style={{ background: '#f5f3ff', padding: 14, borderRadius: 10, border: '1.5px solid #ddd6fe' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                       <label style={{ color: '#7c3aed', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
-                        <Cpu size={18} /> عدد العدادات المحدثة (Updated FW QTY)
+                        <Cpu size={18} /> Updated FW QTY
                       </label>
                       <button
                         type="button"
@@ -1335,7 +1502,7 @@ export default function Production() {
                         }}
                       >
                         <RefreshCw size={13} className={isSyncingFw ? 'spinner' : ''} />
-                        <span>{isSyncingFw ? 'جاري المزامنة...' : 'مزامنة من ملفات التحديث 🔄'}</span>
+                        <span>{isSyncingFw ? 'Syncing...' : 'Sync from Drive Logs 🔄'}</span>
                       </button>
                     </div>
 
@@ -1354,11 +1521,11 @@ export default function Production() {
                           flex: 1
                         }}
                       />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6d28d9' }}>عداد</span>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6d28d9' }}>Meters</span>
                     </div>
 
                     <span style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: 4, display: 'block' }}>
-                      ✨ يتم جلب العدد أوتوماتيكياً من ملفات التحديث الحقيقية لـ ({uploadShift === 'Morning' ? 'الشفت الصباحي' : 'الشفت المسائي'}) بدون أي إدخال يدوي.
+                      ✨ Automatically retrieved from Google Drive update logs for ({uploadShift} Shift) without manual entry.
                     </span>
                   </div>
 
@@ -1394,6 +1561,136 @@ export default function Production() {
                   {isSaving ? <span className="spinner" /> : 'Save Record to Cloud'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL: Upload Batch FW Target (Admin Only) ── */}
+      {showBatchTargetModal && (
+        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && !targetIsSaving && setShowBatchTargetModal(false)}>
+          <div className="modal-box modal-large" style={{ background: '#ffffff', width: '92%' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Package size={22} color="#4f46e5" />
+                <span className="modal-title" style={{ fontSize: '1.2rem', color: '#1e1b4b' }}>
+                  Upload FW Target Batch
+                </span>
+              </div>
+              {!targetIsSaving && (
+                <button type="button" className="btn-close" onClick={() => setShowBatchTargetModal(false)}>
+                  <X size={20} />
+                </button>
+              )}
+            </div>
+
+            <div className="modal-body">
+              {targetUploadError && (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', padding: '12px 16px', borderRadius: 8, fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <AlertCircle size={18} />
+                  <span>{targetUploadError}</span>
+                </div>
+              )}
+
+              {/* Batch Selector / Input */}
+              <div className="form-group">
+                <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Batch Name / Identifier *</label>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 4 }}>
+                  {['Batch 1', 'Batch 2', 'Batch 3', 'Batch 4'].map(b => (
+                    <button
+                      key={b}
+                      type="button"
+                      onClick={() => setTargetBatchName(b)}
+                      style={{
+                        padding: '8px 16px',
+                        borderRadius: 8,
+                        border: targetBatchName === b ? '2px solid #4f46e5' : '1px solid #cbd5e1',
+                        background: targetBatchName === b ? '#eef2ff' : '#ffffff',
+                        color: targetBatchName === b ? '#4338ca' : '#475569',
+                        fontWeight: 800,
+                        fontSize: '0.9rem',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      {b}
+                    </button>
+                  ))}
+                  <input
+                    type="text"
+                    placeholder="Or enter custom batch name..."
+                    value={targetBatchName}
+                    onChange={e => setTargetBatchName(e.target.value)}
+                    style={{ flex: 1, minWidth: 200, padding: '8px 12px', borderRadius: 8, border: '1.5px solid #cbd5e1' }}
+                  />
+                </div>
+              </div>
+
+              {/* Excel Dropzone */}
+              <div 
+                style={{
+                  border: '2px dashed #4f46e5',
+                  borderRadius: 12,
+                  padding: '30px 20px',
+                  textAlign: 'center',
+                  background: '#f5f3ff',
+                  cursor: 'pointer',
+                  marginTop: 6
+                }}
+                onClick={() => document.getElementById('batch-target-file-input').click()}
+              >
+                <FileSpreadsheet size={44} color="#4f46e5" style={{ margin: '0 auto 10px' }} />
+                <div style={{ fontWeight: 800, color: '#312e81', fontSize: '1.05rem', marginBottom: 4 }}>
+                  {targetFileName ? targetFileName : 'Drag & drop Excel file here or click to browse'}
+                </div>
+                <div style={{ fontSize: '0.82rem', color: '#6b7280' }}>
+                  Supports any file with a Serial Number column (e.g. 062621000028154)
+                </div>
+                <input
+                  type="file"
+                  id="batch-target-file-input"
+                  accept=".xlsx, .xls, .csv"
+                  style={{ display: 'none' }}
+                  onChange={e => handleBatchTargetFile(e.target.files?.[0])}
+                  disabled={targetIsSaving}
+                />
+              </div>
+
+              {/* Preview Stats */}
+              {targetParsedRows.length > 0 && (
+                <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--gray-500)' }}>Total meter serials parsed: </span>
+                    <strong style={{ fontSize: '1.2rem', color: '#16a34a' }}>{targetParsedRows.length.toLocaleString()} Meters</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--gray-500)' }}>Sample Serial & Suffix (Last 6 Digits): </span>
+                    <strong style={{ color: '#4f46e5', fontFamily: 'monospace' }}>
+                      {targetParsedRows[0]?.serial_number} ➔ [{targetParsedRows[0]?.sn_suffix}]
+                    </strong>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowBatchTargetModal(false)}
+                disabled={targetIsSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: '#4f46e5', display: 'flex', alignItems: 'center', gap: 8 }}
+                onClick={saveBatchTargets}
+                disabled={targetIsSaving || targetParsedRows.length === 0}
+              >
+                {targetIsSaving ? <RefreshCw size={16} className="spin" /> : <CheckCircle size={16} />}
+                Save Batch Plan & Enable Tracking
+              </button>
             </div>
           </div>
         </div>
@@ -1627,7 +1924,7 @@ export default function Production() {
                     }}
                   >
                     <Edit3 size={15} />
-                    Edit This Report (تعديل هذا التقرير والتاريخ)
+                    Edit This Report
                   </button>
                 )}
               </div>
@@ -1646,7 +1943,7 @@ export default function Production() {
             <div className="modal-header">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Edit3 size={20} color="var(--teal)" />
-                <span className="modal-title">Edit Production Report (تعديل تقرير الإنتاج والتاريخ)</span>
+                <span className="modal-title">Edit Production Report & Date</span>
               </div>
               <button type="button" className="modal-close" onClick={() => setEditRecordId(null)}>×</button>
             </div>
@@ -1658,7 +1955,7 @@ export default function Production() {
                 {/* Date & Shift Target */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Report Date (تاريخ التقرير) *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Report Date *</label>
                     <input 
                       type="date" 
                       value={editDate} 
@@ -1668,14 +1965,14 @@ export default function Production() {
                       style={{ fontWeight: 800, fontSize: '0.95rem' }}
                     />
                     <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 600, marginTop: 2, display: 'block' }}>
-                      يمكنك تغيير التاريخ بحرية تامة
+                      Freely editable report date
                     </span>
                   </div>
 
                   <div className="form-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Shift Target (تارجت الشفت) *</label>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>افتراضي 650</span>
+                      <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Shift Target *</label>
+                      <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>Default 650</span>
                     </div>
                     <input 
                       type="number" 
@@ -1692,7 +1989,7 @@ export default function Production() {
                 <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                     <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
-                      Shift Selection (تحديد الشفت) *
+                      Shift Selection *
                     </label>
                     <span style={{ 
                       fontSize: '0.75rem', 
@@ -1702,7 +1999,7 @@ export default function Production() {
                       padding: '2px 8px',
                       borderRadius: 12
                     }}>
-                      {editShift === 'Morning' ? 'الشفت الصباحي' : 'الشفت المسائي'}
+                      {editShift === 'Morning' ? 'Morning Shift Selected' : 'Evening Shift Selected'}
                     </span>
                   </div>
 
@@ -1728,7 +2025,7 @@ export default function Production() {
                       onClick={() => setEditShift('Morning')}
                     >
                       <span style={{ fontSize: '1.25rem' }}>☀️</span>
-                      <span>صباحي (Morning)</span>
+                      <span>Morning Shift</span>
                     </button>
 
                     <button
@@ -1752,14 +2049,14 @@ export default function Production() {
                       onClick={() => setEditShift('Evening')}
                     >
                       <span style={{ fontSize: '1.25rem' }}>🌙</span>
-                      <span>مسائي (Evening)</span>
+                      <span>Evening Shift</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Product Name */}
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Product Name (اسم المنتج) *</label>
+                  <label style={{ fontWeight: 700 }}>Product Name *</label>
                   <input 
                     type="text" 
                     value={editProduct} 
@@ -1773,8 +2070,8 @@ export default function Production() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (الإنتاج الفعلي Achieved)</label>
-                      <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                      <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (Achieved)</label>
+                      <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 Auto-Locked</span>
                     </div>
                     <input 
                       type="number" 
@@ -1783,13 +2080,13 @@ export default function Production() {
                       disabled
                       style={{ fontWeight: 800, color: '#16a34a', background: '#f1f5f9', cursor: 'not-allowed' }}
                     />
-                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>يتم حسابه تلقائياً من ملفات وسجلات الإنتاج</span>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Automatically calculated from production test records</span>
                   </div>
 
                   <div className="form-group">
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 700 }}>Total Boards Tested (إجمالي المفحوص)</label>
-                      <span style={{ fontSize: '0.72rem', background: '#e2e8f0', color: '#334155', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 مقفل آلياً</span>
+                      <label style={{ fontWeight: 700 }}>Total Boards Tested</label>
+                      <span style={{ fontSize: '0.72rem', background: '#e2e8f0', color: '#334155', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 Auto-Locked</span>
                     </div>
                     <input 
                       type="number" 
@@ -1798,7 +2095,7 @@ export default function Production() {
                       disabled
                       style={{ fontWeight: 800, background: '#f1f5f9', cursor: 'not-allowed' }}
                     />
-                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>محسوب تلقائياً من الفحص</span>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Calculated automatically from test logs</span>
                   </div>
                 </div>
 
@@ -1839,7 +2136,7 @@ export default function Production() {
                         }}
                       >
                         <RefreshCw size={11} />
-                        تحديث من الدرايف 🔄
+                        Sync from Drive 🔄
                       </button>
                     </div>
                     <input 
@@ -1850,12 +2147,12 @@ export default function Production() {
                       style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe', cursor: 'not-allowed' }}
                     />
                     <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
-                      محدث أوتوماتيكياً من ملفات التحديث في Google Drive
+                      Automatically synced from Google Drive update logs
                     </span>
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 700 }}>Team Name (اسم الفريق) *</label>
+                    <label style={{ fontWeight: 700 }}>Team Name *</label>
                     <select 
                       className="form-select"
                       value={editTeamName} 
@@ -1871,12 +2168,12 @@ export default function Production() {
 
                 {/* Notes */}
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Notes / Problem Comments (ملاحظات)</label>
+                  <label style={{ fontWeight: 700 }}>Notes / Problem Comments</label>
                   <textarea 
                     rows={2} 
                     className="search-input" 
                     style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
-                    placeholder="ملاحظات المشرف أو المشاكل التي حدثت..."
+                    placeholder="Supervisor notes or issues encountered..."
                     value={editNotes} 
                     onChange={e => setEditNotes(e.target.value)} 
                     disabled={isUpdatingRecord}
@@ -1889,7 +2186,7 @@ export default function Production() {
                   Cancel
                 </button>
                 <button type="submit" className="btn-primary" disabled={isUpdatingRecord}>
-                  {isUpdatingRecord ? <span className="spinner" /> : 'Save Changes (حفظ التعديلات)'}
+                  {isUpdatingRecord ? <span className="spinner" /> : 'Save Changes'}
                 </button>
               </div>
             </form>

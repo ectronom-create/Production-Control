@@ -87,6 +87,115 @@ function fwSyncPlugin() {
           res.end(JSON.stringify({ error: err.message }));
         }
       });
+
+      server.middlewares.use('/api/batch-fw-reconciliation', (req, res) => {
+        if (req.method !== 'POST') {
+          res.statusCode = 405;
+          return res.end('Method Not Allowed');
+        }
+
+        let bodyStr = '';
+        req.on('data', chunk => { bodyStr += chunk; });
+        req.on('end', () => {
+          try {
+            const body = bodyStr ? JSON.parse(bodyStr) : {};
+            const targets = body.targets || [];
+
+            const files = [
+              'H:/Other computers/Update PC 1/LOG_CSV/LOG.csv',
+              'H:/Other computers/Update PC 2/LOG_CSV/LOG.csv'
+            ];
+
+            const updatedSuffixMap = new Map();
+
+            files.forEach(f => {
+              if (!fs.existsSync(f)) return;
+              const content = fs.readFileSync(f, 'utf8');
+              const lines = content.split('\n');
+              for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                const parts = line.split(';');
+                if (parts.length < 7) continue;
+                const rDate = parts[0]?.trim();
+                const rTime = parts[1]?.trim();
+                const sn = parts[2]?.trim();
+                const status = parts[6]?.trim()?.toUpperCase();
+                const pc = parts[7]?.trim() || 'Unknown';
+
+                if (status !== 'PASS' || !sn || sn === 'SAG1030712345678') continue;
+                const suffix = sn.slice(-6);
+                if (suffix.length === 6 && !updatedSuffixMap.has(suffix)) {
+                  updatedSuffixMap.set(suffix, { date: rDate, time: rTime, pc, driveSn: sn });
+                }
+              }
+            });
+
+            const batchSummary = {};
+            let totalTarget = 0;
+            let totalUpdated = 0;
+
+            targets.forEach(item => {
+              const bName = (item.batch_name || 'General').trim();
+              const sn = String(item.serial_number || '').trim();
+              const suffix = item.sn_suffix ? String(item.sn_suffix).trim() : sn.slice(-6);
+
+              if (!batchSummary[bName]) {
+                batchSummary[bName] = {
+                  batchName: bName,
+                  targetCount: 0,
+                  updatedCount: 0,
+                  remainingCount: 0,
+                  updatedList: [],
+                  pendingList: []
+                };
+              }
+
+              batchSummary[bName].targetCount++;
+              totalTarget++;
+
+              if (updatedSuffixMap.has(suffix)) {
+                const matchInfo = updatedSuffixMap.get(suffix);
+                batchSummary[bName].updatedCount++;
+                totalUpdated++;
+                batchSummary[bName].updatedList.push({
+                  serial_number: sn,
+                  suffix,
+                  updated_at: `${matchInfo.date} ${matchInfo.time}`,
+                  pc: matchInfo.pc,
+                  drive_sn: matchInfo.driveSn
+                });
+              } else {
+                batchSummary[bName].remainingCount++;
+                batchSummary[bName].pendingList.push({
+                  serial_number: sn,
+                  suffix
+                });
+              }
+            });
+
+            Object.values(batchSummary).forEach(b => {
+              b.progressPct = b.targetCount > 0 ? parseFloat(((b.updatedCount / b.targetCount) * 100).toFixed(1)) : 0;
+              b.remainingCount = b.targetCount - b.updatedCount;
+            });
+
+            res.statusCode = 200;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              success: true,
+              batches: batchSummary,
+              totalTarget,
+              totalUpdated,
+              totalRemaining: totalTarget - totalUpdated,
+              overallProgressPct: totalTarget > 0 ? parseFloat(((totalUpdated / totalTarget) * 100).toFixed(1)) : 0
+            }));
+          } catch (err) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: err.message }));
+          }
+        });
+      });
     }
   };
 }

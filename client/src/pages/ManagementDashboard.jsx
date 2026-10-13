@@ -15,8 +15,12 @@ import {
   Award,
   Zap,
   CheckCircle,
-  AlertCircle
+  AlertCircle,
+  Package,
+  Download,
+  X
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
@@ -26,6 +30,11 @@ export default function ManagementDashboard() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedDate, setSelectedDate] = useState('');
+
+  // Batch FW Reconciliation state
+  const [reconciliationData, setReconciliationData] = useState(null);
+  const [reconciliationLoading, setReconciliationLoading] = useState(false);
+  const [viewingBatchPending, setViewingBatchPending] = useState(null);
 
   // Targets requested by Management
   const [targets, setTargets] = useState({
@@ -61,8 +70,48 @@ export default function ManagementDashboard() {
     }
   };
 
+  // Fetch batch firmware targets and reconcile with Google Drive logs by last 6 digits
+  const fetchBatchReconciliation = async () => {
+    setReconciliationLoading(true);
+    try {
+      // 1. Fetch targets from Supabase (or localStorage fallback)
+      let targetList = [];
+      const { data, error } = await supabase.from('batch_fw_targets').select('*');
+      if (!error && data && data.length > 0) {
+        targetList = data;
+      } else {
+        targetList = JSON.parse(localStorage.getItem('ectron_batch_fw_targets') || '[]');
+      }
+
+      if (targetList.length === 0) {
+        setReconciliationData(null);
+        setReconciliationLoading(false);
+        return;
+      }
+
+      // 2. Call live reconciliation endpoint
+      const resp = await fetch('/api/batch-fw-reconciliation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets: targetList })
+      });
+
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json.success) {
+          setReconciliationData(json);
+        }
+      }
+    } catch (err) {
+      console.warn('Reconciliation fetch error:', err);
+    } finally {
+      setReconciliationLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchRecords();
+    fetchBatchReconciliation();
   }, []);
 
   // Dates for Daily and Weekly calculations
@@ -590,7 +639,7 @@ export default function ManagementDashboard() {
           </div>
 
           <div style={{ background: '#fef2f2', padding: 16, borderRadius: 12, border: '1px solid #fee2e2' }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase' }}>Pending Missing Target (العجز)</div>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase' }}>Target Deficit (Variance Gap)</div>
             <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#b91c1c', marginTop: 4 }}>
               -{recoveryAnalysis.missingTarget.toLocaleString()}
             </div>
@@ -600,7 +649,7 @@ export default function ManagementDashboard() {
           </div>
 
           <div style={{ background: '#fffbeb', padding: 16, borderRadius: 12, border: '1px solid #fef3c7' }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b45309', textTransform: 'uppercase' }}>Recovery Daily Target (خطة التعويض اليومية)</div>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#b45309', textTransform: 'uppercase' }}>Recovery Daily Target</div>
             <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#b45309', marginTop: 4 }}>
               {recoveryAnalysis.revisedDailyTarget.toLocaleString()}
             </div>
@@ -610,7 +659,7 @@ export default function ManagementDashboard() {
           </div>
 
           <div style={{ background: '#ede9fe', padding: 16, borderRadius: 12, border: '1px solid #ddd6fe' }}>
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase' }}>Recovery Shift Target (تارجت الشفت المستحدث)</div>
+            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6d28d9', textTransform: 'uppercase' }}>Recovery Shift Target</div>
             <div style={{ fontSize: '1.7rem', fontWeight: 900, color: '#6d28d9', marginTop: 4 }}>
               {recoveryAnalysis.revisedShiftTarget.toLocaleString()}
             </div>
@@ -690,6 +739,263 @@ export default function ManagementDashboard() {
           ))}
         </div>
       </div>
+
+      {/* ── 6. BATCH-BY-BATCH FIRMWARE UPGRADE TRACKING (RECONCILIATION WITH GOOGLE DRIVE LOGS) ── */}
+      <div style={{
+        background: '#ffffff',
+        border: '1.5px solid #c7d2fe',
+        borderRadius: 14,
+        padding: '24px 28px',
+        boxShadow: '0 4px 16px rgba(79, 70, 229, 0.08)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Package size={22} color="#4f46e5" />
+              <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900, color: '#1e1b4b' }}>
+                Batch Firmware Upgrade Tracking
+              </h2>
+              <span className="badge badge-purple" style={{ fontSize: '0.75rem', fontWeight: 800 }}>
+                Live Reconciliation with Google Drive (Last 6 Digits)
+              </span>
+            </div>
+            <p style={{ margin: '4px 0 0', color: '#64748b', fontSize: '0.82rem' }}>
+              Real-time reconciliation between uploaded meter serial targets per batch and Google Drive update station logs (matched by suffix).
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="btn-outline"
+            onClick={fetchBatchReconciliation}
+            disabled={reconciliationLoading}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#4f46e5', borderColor: '#c7d2fe', background: '#eef2ff' }}
+          >
+            <RefreshCw size={14} className={reconciliationLoading ? 'spin' : ''} />
+            Refresh Live Matching 🔄
+          </button>
+        </div>
+
+        {/* Top Summary KPI Cards */}
+        {reconciliationData && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14, marginBottom: 20 }}>
+            <div style={{ background: '#f8fafc', padding: '16px 20px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+              <div style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Total Target Meters</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--navy)', marginTop: 4 }}>
+                {reconciliationData.totalTarget?.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Meters</span>
+              </div>
+            </div>
+
+            <div style={{ background: '#f0fdf4', padding: '16px 20px', borderRadius: 10, border: '1px solid #bbf7d0' }}>
+              <div style={{ fontSize: '0.78rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase' }}>Successfully Updated (Pass)</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#16a34a', marginTop: 4 }}>
+                {reconciliationData.totalUpdated?.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Meters</span>
+              </div>
+            </div>
+
+            <div style={{ background: '#fffbeb', padding: '16px 20px', borderRadius: 10, border: '1px solid #fde68a' }}>
+              <div style={{ fontSize: '0.78rem', color: '#b45309', fontWeight: 700, textTransform: 'uppercase' }}>Pending Update</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#d97706', marginTop: 4 }}>
+                {reconciliationData.totalRemaining?.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Meters</span>
+              </div>
+            </div>
+
+            <div style={{ background: '#eef2ff', padding: '16px 20px', borderRadius: 10, border: '1px solid #c7d2fe' }}>
+              <div style={{ fontSize: '0.78rem', color: '#4338ca', fontWeight: 700, textTransform: 'uppercase' }}>Overall Progress Rate</div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#4f46e5', marginTop: 4 }}>
+                {reconciliationData.overallProgressPct}%
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Batches Table */}
+        {!reconciliationData || Object.keys(reconciliationData.batches || {}).length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '36px 20px', background: '#f8fafc', borderRadius: 10, border: '1px dashed #cbd5e1', color: '#64748b' }}>
+            <Package size={36} color="#94a3b8" style={{ margin: '0 auto 10px' }} />
+            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--navy)' }}>No Batch Firmware Targets Uploaded Yet</div>
+            <div style={{ fontSize: '0.82rem', marginTop: 4 }}>
+              Administrators can upload the meter serial target list using the <b>"Upload FW Target Batch"</b> button in the <b>Production</b> page.
+            </div>
+          </div>
+        ) : (
+          <div className="table-wrap" style={{ border: '1px solid #e2e8f0', borderRadius: 10 }}>
+            <table>
+              <thead>
+                <tr style={{ background: '#f8fafc' }}>
+                  <th>Batch Name</th>
+                  <th style={{ textAlign: 'center' }}>Target Qty</th>
+                  <th style={{ textAlign: 'center' }}>Updated Qty</th>
+                  <th style={{ textAlign: 'center' }}>Pending Qty</th>
+                  <th style={{ minWidth: 200 }}>Progress %</th>
+                  <th style={{ textAlign: 'center' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.values(reconciliationData.batches).map(b => (
+                  <tr key={b.batchName}>
+                    <td style={{ fontWeight: 800, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Package size={16} color="#4f46e5" />
+                      {b.batchName}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
+                      {b.targetCount.toLocaleString()}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 800, color: '#16a34a' }}>
+                      {b.updatedCount.toLocaleString()}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 800, color: b.remainingCount > 0 ? '#dc2626' : '#16a34a' }}>
+                      {b.remainingCount.toLocaleString()}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ flex: 1, height: 10, background: '#e2e8f0', borderRadius: 5, overflow: 'hidden' }}>
+                          <div 
+                            style={{ 
+                              height: '100%', 
+                              width: `${Math.min(100, b.progressPct)}%`, 
+                              background: b.progressPct >= 100 ? '#16a34a' : b.progressPct >= 50 ? '#4f46e5' : '#f59e0b',
+                              transition: 'width 0.3s ease'
+                            }} 
+                          />
+                        </div>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--navy)', minWidth: 45 }}>
+                          {b.progressPct}%
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          title="View Pending Meters"
+                          onClick={() => setViewingBatchPending(b)}
+                          style={{ padding: '5px 10px', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 5, color: '#b45309', borderColor: '#fde68a', background: '#fffbeb' }}
+                        >
+                          Pending ({b.remainingCount})
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn-outline"
+                          title="Export Pending Meters to Excel"
+                          onClick={() => {
+                            if (!b.pendingList || b.pendingList.length === 0) {
+                              alert('All meters in this batch have been successfully updated!');
+                              return;
+                            }
+                            const exportData = b.pendingList.map((m, i) => ({
+                              '#': i + 1,
+                              'Batch': b.batchName,
+                              'Serial_number': m.serial_number,
+                              'Suffix (Last 6)': m.suffix,
+                              'Status': 'Pending Update'
+                            }));
+                            const ws = XLSX.utils.json_to_sheet(exportData);
+                            const wb = XLSX.utils.book_new();
+                            XLSX.utils.book_append_sheet(wb, ws, 'Pending Meters');
+                            XLSX.writeFile(wb, `${b.batchName.replace(/\s+/g, '_')}_Pending_Meters.xlsx`);
+                          }}
+                          style={{ padding: '5px 8px', fontSize: '0.78rem', color: '#16a34a', borderColor: '#bbf7d0', background: '#f0fdf4' }}
+                        >
+                          <Download size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── MODAL: Inspect Pending Meters for a Batch ── */}
+      {viewingBatchPending && (
+        <div className="modal-backdrop" onClick={() => setViewingBatchPending(null)}>
+          <div className="modal-box modal-large" style={{ background: '#ffffff', width: '92%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Package size={20} color="#b45309" />
+                <span className="modal-title" style={{ fontSize: '1.15rem' }}>
+                  Pending Firmware Update Meters: {viewingBatchPending.batchName} ({viewingBatchPending.remainingCount.toLocaleString()} Meters)
+                </span>
+              </div>
+              <button type="button" className="btn-close" onClick={() => setViewingBatchPending(null)}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="modal-body" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>
+                These meters have not received a PASS status in Google Drive update stations yet:
+              </p>
+              <div style={{ flex: 1, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                <table>
+                  <thead>
+                    <tr style={{ background: '#f8fafc' }}>
+                      <th style={{ width: 50 }}>#</th>
+                      <th>Target Serial Number</th>
+                      <th>Last 6 Digits (Match Key)</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingBatchPending.pendingList?.slice(0, 500).map((m, idx) => (
+                      <tr key={m.serial_number + idx}>
+                        <td style={{ textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8' }}>{idx + 1}</td>
+                        <td style={{ fontWeight: 800, color: 'var(--navy)', fontFamily: 'monospace' }}>{m.serial_number}</td>
+                        <td style={{ fontWeight: 800, color: '#4f46e5', fontFamily: 'monospace' }}>{m.suffix}</td>
+                        <td>
+                          <span className="badge badge-amber" style={{ fontSize: '0.72rem' }}>Pending Update</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {viewingBatchPending.pendingList?.length > 500 && (
+                <div style={{ fontSize: '0.75rem', color: '#64748b', textAlign: 'center' }}>
+                  Showing first 500 meters in preview. Export full list to Excel to view all records.
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <button
+                type="button"
+                className="btn-outline"
+                onClick={() => {
+                  const exportData = viewingBatchPending.pendingList.map((m, i) => ({
+                    '#': i + 1,
+                    'Batch': viewingBatchPending.batchName,
+                    'Serial_number': m.serial_number,
+                    'Suffix (Last 6)': m.suffix,
+                    'Status': 'Pending Update'
+                  }));
+                  const ws = XLSX.utils.json_to_sheet(exportData);
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, 'Pending Meters');
+                  XLSX.writeFile(wb, `${viewingBatchPending.batchName.replace(/\s+/g, '_')}_Pending_Meters.xlsx`);
+                }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#16a34a', borderColor: '#bbf7d0', background: '#f0fdf4' }}
+              >
+                <Download size={14} />
+                Export All Pending Meters to Excel
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setViewingBatchPending(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Summary Comparison Table ── */}
       <div className="table-card">
