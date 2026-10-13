@@ -25,8 +25,9 @@ import {
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
-// Field definitions strictly matching the user's specification and image + actual factory excel headers
+// Field definitions strictly matching the user's specification and image + actual factory excel headers (13 fields)
 const EXPECTED_FIELDS = [
+  { key: 'device_pallet_number', label: 'Device_pallet_number', aliases: ['device_pallet_number', 'devicepalletnumber', 'palletnumber', 'pallet_no', 'pallet_number', 'palette', 'pallet', 'serialnumberpalette', 'serial_number_palette'] },
   { key: 'device_box_number', label: 'Device_box_number', aliases: ['device_box_number', 'deviceboxnumber', 'boxnumber', 'box_no', 'device_box', 'boxserialnumber', 'box_serial_number', 'boxsn'] },
   { key: 'factory_serial_number', label: 'Factory serial number', aliases: ['factory_serial_number', 'factoryserialnumber', 'factory_sn', 'factorysn', 'factoryserial'] },
   { key: 'date_of_manufactory', label: 'Date_of_manufactory', aliases: ['date_of_manufactory', 'dateofmanufactory', 'date_of_manufacture', 'dateofmanufacture', 'mfg_date', 'date_manufacture', 'datemanufactory'] },
@@ -294,6 +295,7 @@ export default function Batches() {
         const meterPayloads = slice.map(r => ({
           batch_id: createdBatchId,
           batch_name: batchName.trim(),
+          device_pallet_number: r.device_pallet_number || '',
           device_box_number: r.device_box_number || '',
           factory_serial_number: r.factory_serial_number || '',
           date_of_manufactory: r.date_of_manufactory || '',
@@ -404,6 +406,7 @@ export default function Batches() {
     const q = inspectSearch.toLowerCase();
     return inspectMeters.filter(m => 
       (m.serial_number && m.serial_number.toLowerCase().includes(q)) ||
+      (m.device_pallet_number && m.device_pallet_number.toLowerCase().includes(q)) ||
       (m.factory_serial_number && m.factory_serial_number.toLowerCase().includes(q)) ||
       (m.device_box_number && m.device_box_number.toLowerCase().includes(q)) ||
       (m.module_imei && m.module_imei.toLowerCase().includes(q)) ||
@@ -433,8 +436,9 @@ export default function Batches() {
         return;
       }
 
-      // Format with exact original headers
+      // Format with exact original headers (all 13 fields)
       const exportData = rowsToExport.map(r => ({
+        'Device_pallet_number': r.device_pallet_number || '',
         'Device_box_number': r.device_box_number || '',
         'Factory serial number': r.factory_serial_number || '',
         'Date_of_manufactory': r.date_of_manufactory || '',
@@ -497,7 +501,7 @@ export default function Batches() {
       const { data, error } = await supabase
         .from('batch_meter_records')
         .select('*')
-        .or(`serial_number.ilike.%${q}%,factory_serial_number.ilike.%${q}%,module_imei.ilike.%${q}%,module_iccid.ilike.%${q}%,device_box_number.ilike.%${q}%`)
+        .or(`serial_number.ilike.%${q}%,device_pallet_number.ilike.%${q}%,factory_serial_number.ilike.%${q}%,module_imei.ilike.%${q}%,module_iccid.ilike.%${q}%,device_box_number.ilike.%${q}%`)
         .limit(100);
 
       if (!error && data) {
@@ -870,6 +874,7 @@ export default function Batches() {
                     <tr>
                       <th>Serial Number</th>
                       <th>Batch Name</th>
+                      <th>Pallet Number</th>
                       <th>Device Box No</th>
                       <th>Factory SN</th>
                       <th>Date Mfg</th>
@@ -886,7 +891,7 @@ export default function Batches() {
                   <tbody>
                     {lookupResults.length === 0 ? (
                       <tr>
-                        <td colSpan={13} style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--gray-500)' }}>
+                        <td colSpan={14} style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--gray-500)' }}>
                           لم يتم العثور على أي عداد يطابق معايير البحث.
                         </td>
                       </tr>
@@ -899,6 +904,7 @@ export default function Batches() {
                           <td>
                             <span className="badge badge-teal" style={{ fontSize: '0.75rem' }}>{m.batch_name}</span>
                           </td>
+                          <td style={{ fontFamily: 'monospace', color: '#0f766e', fontWeight: 600 }}>{m.device_pallet_number || '-'}</td>
                           <td style={{ fontFamily: 'monospace' }}>{m.device_box_number || '-'}</td>
                           <td style={{ fontFamily: 'monospace' }}>{m.factory_serial_number || '-'}</td>
                           <td>{m.date_of_manufactory || '-'}</td>
@@ -958,7 +964,7 @@ export default function Batches() {
                   {uploadFile ? uploadFile.name : 'اسحب ملف الإكسل (XLSX, XLS, CSV) هنا أو اضغط للاختيار'}
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>
-                  يتضمن الأعمدة الـ 12: Device_box_number, Factory serial number, Serial_number, Module_IMEI, Module_ICCID ...
+                  يتضمن الحقول الـ 13: Device_pallet_number, Device_box_number, Factory serial number, Serial_number, Module_IMEI, Module_ICCID ...
                 </div>
                 <input
                   type="file"
@@ -986,7 +992,7 @@ export default function Batches() {
                   </div>
                   <div>
                     <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>الأعمدة المتطابقة: </span>
-                    <strong style={{ color: 'var(--navy)' }}>{parsedStats.mappedColumns} من أصل 12 حقل</strong>
+                    <strong style={{ color: 'var(--navy)' }}>{parsedStats.mappedColumns} من أصل 13 حقلاً</strong>
                   </div>
                 </div>
               )}
@@ -1141,13 +1147,14 @@ export default function Batches() {
                 />
               </div>
 
-              {/* Meters Table with full 12 fields */}
+              {/* Meters Table with full 13 fields */}
               <div style={{ flex: 1, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
                 <table>
                   <thead>
                     <tr>
                       <th style={{ width: 40 }}>#</th>
                       <th>Serial Number</th>
+                      <th>Device Pallet No</th>
                       <th>Device Box No</th>
                       <th>Factory SN</th>
                       <th>Date Mfg</th>
@@ -1164,13 +1171,13 @@ export default function Batches() {
                   <tbody>
                     {inspectLoading ? (
                       <tr>
-                        <td colSpan={13} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
+                        <td colSpan={14} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
                           جاري تحميل العدادات...
                         </td>
                       </tr>
                     ) : paginatedInspectMeters.length === 0 ? (
                       <tr>
-                        <td colSpan={13} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
+                        <td colSpan={14} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
                           لا توجد نتائج مطابقة.
                         </td>
                       </tr>
@@ -1183,6 +1190,7 @@ export default function Batches() {
                           <td style={{ fontWeight: 800, color: 'var(--navy)', fontFamily: 'monospace' }}>
                             {m.serial_number}
                           </td>
+                          <td style={{ fontFamily: 'monospace', color: '#0f766e', fontWeight: 600 }}>{m.device_pallet_number || '-'}</td>
                           <td style={{ fontFamily: 'monospace' }}>{m.device_box_number || '-'}</td>
                           <td style={{ fontFamily: 'monospace' }}>{m.factory_serial_number || '-'}</td>
                           <td>{m.date_of_manufactory || '-'}</td>
