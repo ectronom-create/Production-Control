@@ -25,20 +25,20 @@ import {
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
-// Field definitions strictly matching the user's specification and image
+// Field definitions strictly matching the user's specification and image + actual factory excel headers
 const EXPECTED_FIELDS = [
-  { key: 'device_box_number', label: 'Device_box_number', aliases: ['device_box_number', 'deviceboxnumber', 'boxnumber', 'box_no', 'device_box'] },
-  { key: 'factory_serial_number', label: 'Factory serial number', aliases: ['factory_serial_number', 'factoryserialnumber', 'factory_sn', 'factorysn'] },
-  { key: 'date_of_manufactory', label: 'Date_of_manufactory', aliases: ['date_of_manufactory', 'dateofmanufactory', 'date_of_manufacture', 'dateofmanufacture', 'mfg_date'] },
-  { key: 'hardware_version', label: 'Hardware_version', aliases: ['hardware_version', 'hardwareversion', 'hw_version', 'hwversion'] },
-  { key: 'lot_number', label: 'Lot_number', aliases: ['lot_number', 'lotnumber', 'lot_no', 'lot'] },
-  { key: 'serial_number', label: 'Serial_number', aliases: ['serial_number', 'serialnumber', 'sn', 'meter_sn', 'meter_serial'] },
-  { key: 'logic_device_name', label: 'Logic_device_name', aliases: ['logic_device_name', 'logicdevicename', 'logic_name', 'ldn'] },
-  { key: 'app_software_version', label: 'App_software_version', aliases: ['app_software_version', 'appsoftwareversion', 'app_version', 'app_sw'] },
-  { key: 'legal_software_version', label: 'Legal_software_version', aliases: ['legal_software_version', 'legalsoftwareversion', 'legal_version', 'legal_sw'] },
-  { key: 'module_software_version', label: 'Module_software_version', aliases: ['module_software_version', 'modulesoftwareversion', 'mod_version', 'module_sw'] },
-  { key: 'module_imei', label: 'Module_IMEI', aliases: ['module_imei', 'moduleimei', 'imei'] },
-  { key: 'module_iccid', label: 'Module_ICCID', aliases: ['module_iccid', 'moduleiccid', 'iccid'] },
+  { key: 'device_box_number', label: 'Device_box_number', aliases: ['device_box_number', 'deviceboxnumber', 'boxnumber', 'box_no', 'device_box', 'boxserialnumber', 'box_serial_number', 'boxsn'] },
+  { key: 'factory_serial_number', label: 'Factory serial number', aliases: ['factory_serial_number', 'factoryserialnumber', 'factory_sn', 'factorysn', 'factoryserial'] },
+  { key: 'date_of_manufactory', label: 'Date_of_manufactory', aliases: ['date_of_manufactory', 'dateofmanufactory', 'date_of_manufacture', 'dateofmanufacture', 'mfg_date', 'date_manufacture', 'datemanufactory'] },
+  { key: 'hardware_version', label: 'Hardware_version', aliases: ['hardware_version', 'hardwareversion', 'hw_version', 'hwversion', 'hw_ver'] },
+  { key: 'lot_number', label: 'Lot_number', aliases: ['lot_number', 'lotnumber', 'lot_no', 'lot', 'lotno'] },
+  { key: 'serial_number', label: 'Serial_number', aliases: ['serial_number', 'serialnumber', 'sn', 'meter_sn', 'meter_serial', 'serial_no', 'meterserialnumber'] },
+  { key: 'logic_device_name', label: 'Logic_device_name', aliases: ['logic_device_name', 'logicdevicename', 'logic_name', 'ldn', 'logicaldevicename'] },
+  { key: 'app_software_version', label: 'App_software_version', aliases: ['app_software_version', 'appsoftwareversion', 'app_version', 'app_sw', 'appswversion'] },
+  { key: 'legal_software_version', label: 'Legal_software_version', aliases: ['legal_software_version', 'legalsoftwareversion', 'legal_version', 'legal_sw', 'legalswversion'] },
+  { key: 'module_software_version', label: 'Module_software_version', aliases: ['module_software_version', 'modulesoftwareversion', 'mod_version', 'module_sw', 'moduleswversion'] },
+  { key: 'module_imei', label: 'Module_IMEI', aliases: ['module_imei', 'moduleimei', 'imei', 'mod_imei'] },
+  { key: 'module_iccid', label: 'Module_ICCID', aliases: ['module_iccid', 'moduleiccid', 'iccid', 'mod_iccid', 'sim_iccid'] },
 ];
 
 function normalizeHeader(str) {
@@ -347,6 +347,40 @@ export default function Batches() {
   };
 
   // Inspect batch details
+  // Helper to fetch all meters for a batch across chunks if batch > 1000
+  const fetchAllBatchMeters = async (batchId) => {
+    let all = [];
+    let from = 0;
+    const step = 1000;
+    let hasMore = true;
+
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('batch_meter_records')
+        .select('*')
+        .eq('batch_id', batchId)
+        .range(from, from + step - 1);
+
+      if (error) {
+        console.warn('Fetch batch meters error:', error.message);
+        break;
+      }
+
+      if (data && data.length > 0) {
+        all = all.concat(data);
+        if (data.length < step) {
+          hasMore = false;
+        } else {
+          from += step;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
+    return all;
+  };
+
+  // Inspect batch details
   const handleInspectBatch = async (batch) => {
     setInspectBatch(batch);
     setInspectMeters([]);
@@ -355,16 +389,8 @@ export default function Batches() {
     setInspectPage(1);
 
     try {
-      const { data, error } = await supabase
-        .from('batch_meter_records')
-        .select('*')
-        .eq('batch_id', batch.id);
-
-      if (!error && data) {
-        setInspectMeters(data);
-      } else {
-        console.warn('Failed to fetch batch meters from Supabase:', error?.message);
-      }
+      const data = await fetchAllBatchMeters(batch.id);
+      setInspectMeters(data || []);
     } catch (err) {
       console.warn('Error fetching batch meters:', err);
     } finally {
@@ -399,11 +425,7 @@ export default function Batches() {
       if (inspectBatch && inspectBatch.id === batch.id && inspectMeters.length > 0) {
         rowsToExport = inspectMeters;
       } else {
-        const { data } = await supabase
-          .from('batch_meter_records')
-          .select('*')
-          .eq('batch_id', batch.id);
-        rowsToExport = data || [];
+        rowsToExport = await fetchAllBatchMeters(batch.id);
       }
 
       if (rowsToExport.length === 0) {
