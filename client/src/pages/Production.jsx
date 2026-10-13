@@ -200,9 +200,35 @@ function parseFPYExcel(arrayBuffer) {
   return { product, stations, defects: defectsArr, achieved, totalBoards, overallFPY };
 }
 
+function getProductionDateAndShift() {
+  const now = new Date();
+  const hour = now.getHours();
+  if (hour >= 6 && hour < 18) {
+    return {
+      date: now.toISOString().slice(0, 10),
+      shift: 'Morning'
+    };
+  } else if (hour >= 18) {
+    return {
+      date: now.toISOString().slice(0, 10),
+      shift: 'Evening'
+    };
+  } else {
+    // 00:00 to 05:59 belongs to previous day's evening shift
+    const prev = new Date(now);
+    prev.setDate(prev.getDate() - 1);
+    const py = prev.getFullYear();
+    const pm = String(prev.getMonth() + 1).padStart(2, '0');
+    const pd = String(prev.getDate()).padStart(2, '0');
+    return {
+      date: `${py}-${pm}-${pd}`,
+      shift: 'Evening'
+    };
+  }
+}
+
 function getTodayString() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return getProductionDateAndShift().date;
 }
 
 export default function Production() {
@@ -229,11 +255,12 @@ export default function Production() {
   const [filterDate, setFilterDate] = useState('');
 
   // Upload modal form states
+  const initialShiftInfo = getProductionDateAndShift();
   const [isParsing, setIsParsing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
-  const [uploadDate, setUploadDate] = useState(getTodayString());
+  const [uploadDate, setUploadDate] = useState(initialShiftInfo.date);
   const [uploadTarget, setUploadTarget] = useState(650);
-  const [uploadShift, setUploadShift] = useState('Morning'); // 'Morning' (صباحي) or 'Evening' (مسائي)
+  const [uploadShift, setUploadShift] = useState(initialShiftInfo.shift); // 'Morning' or 'Evening'
   const [uploadFwQty, setUploadFwQty] = useState(0);
   const [uploadTeamName, setUploadTeamName] = useState('');
   const [uploadNotes, setUploadNotes] = useState('');
@@ -342,12 +369,14 @@ export default function Production() {
     reader.onload = e => {
       try {
         const data = parseFPYExcel(e.target.result);
+        const curShift = getProductionDateAndShift();
         setParsedData(data);
         setUploadTarget(650);
-        setUploadShift('Morning');
+        setUploadDate(curShift.date);
+        setUploadShift(curShift.shift);
         setShowUploadModal(true);
-        // Automatically sync FW QTY for today & Morning shift
-        syncFwForUpload(uploadDate, 'Morning');
+        // Automatically sync FW QTY from Google Drive LOG.csv for this production shift
+        syncFwForUpload(curShift.date, curShift.shift);
       } catch (err) {
         setUploadError(err.message || 'خطأ في قراءة ملف الإكسل.');
       } finally {
@@ -361,12 +390,27 @@ export default function Production() {
     reader.readAsArrayBuffer(file);
   };
 
-  // Auto-sync FW from database records or live PC logs
+  // Auto-sync FW from live Google Drive LOG.csv (or Supabase fallback)
   const [isSyncingFw, setIsSyncingFw] = useState(false);
   const syncFwForUpload = async (targetDate, targetShift) => {
     setIsSyncingFw(true);
     try {
-      // Find matching shift count in existing production_records in Supabase
+      // 1. Live sync from Google Drive LOG.csv via /api/sync-fw
+      try {
+        const resp = await fetch(`/api/sync-fw?date=${encodeURIComponent(targetDate)}&shift=${encodeURIComponent(targetShift)}`);
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json.success && json.count != null) {
+            setUploadFwQty(json.count);
+            setIsSyncingFw(false);
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Live /api/sync-fw endpoint failed, trying database fallback:', apiErr);
+      }
+
+      // 2. Fallback: Find matching shift count in existing production_records in Supabase
       const shiftSearch = targetShift === 'Morning' ? 'صباحي' : 'مسائي';
       const { data, error } = await supabase
         .from('production_records')
@@ -1131,7 +1175,11 @@ export default function Production() {
                       <input 
                         type="date" 
                         value={uploadDate} 
-                        onChange={e => setUploadDate(e.target.value)} 
+                        onChange={e => {
+                          const nd = e.target.value;
+                          setUploadDate(nd);
+                          syncFwForUpload(nd, uploadShift);
+                        }} 
                         disabled={isSaving}
                       />
                     </div>
