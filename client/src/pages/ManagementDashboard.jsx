@@ -346,8 +346,8 @@ export default function ManagementDashboard() {
     let plannedBatches = 0;
     let threePhaseKits = 0;
     let singlePhaseKits = 0;
-    let nearestIncomingDays = null;
-    let nextIncomingBatch = null;
+
+    const plannedList = [];
 
     kitRecords.forEach(r => {
       const qty = parseInt(r.kit_quantity ?? r.quantity, 10) || 0;
@@ -363,15 +363,22 @@ export default function ManagementDashboard() {
       if (status.isPlanned) {
         plannedBatches += 1;
         plannedKits += qty;
-        if (nearestIncomingDays === null || (status.daysDiff >= 0 && status.daysDiff < nearestIncomingDays)) {
-          nearestIncomingDays = status.daysDiff;
-          nextIncomingBatch = r;
-        }
+        plannedList.push({
+          record: r,
+          daysDiff: status.daysDiff,
+          date: r.date,
+          qty
+        });
       } else {
         receivedBatches += 1;
         receivedKits += qty;
       }
     });
+
+    // Sort planned batches ascending by date to always pick the earliest upcoming shipment from database
+    plannedList.sort((a, b) => (a.date > b.date ? 1 : a.date < b.date ? -1 : 0));
+    const nextIncomingBatch = plannedList.length > 0 ? plannedList[0].record : null;
+    const nearestIncomingDays = plannedList.length > 0 ? plannedList[0].daysDiff : null;
 
     const totalBatches = kitRecords.length;
     const totalKits = receivedKits + plannedKits;
@@ -1339,7 +1346,33 @@ export default function ManagementDashboard() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: '#475569' }}>
               <span style={{ fontSize: '1rem' }}>🛡️</span>
               <span>
-                <strong>Supply Chain Continuity:</strong> Current stock of <strong>{kitRunwayMetrics.runwayDays.toFixed(1)} operating days</strong> covers plant production until the arrival of the next shipment batch <strong>W44</strong> scheduled on <strong>30-Oct-2026</strong> (27,000 kits), ensuring zero line stoppage.
+                <strong>Supply Chain Continuity:</strong>{' '}
+                {kitMetrics.nextIncomingBatch ? (
+                  (() => {
+                    const nextBatch = kitMetrics.nextIncomingBatch;
+                    const nextQty = (parseInt(nextBatch.kit_quantity ?? nextBatch.quantity, 10) || 0).toLocaleString();
+                    const weekMatch = nextBatch.notes?.match(/W\d+/);
+                    const weekLabel = weekMatch ? ` (${weekMatch[0]})` : '';
+                    const daysLabel = kitMetrics.nearestIncomingDays !== null 
+                      ? (kitMetrics.nearestIncomingDays === 0 ? 'arriving today' : `in ${kitMetrics.nearestIncomingDays} day${kitMetrics.nearestIncomingDays > 1 ? 's' : ''}`)
+                      : '';
+                    return (
+                      <>
+                        Current stock of <strong>{kitRunwayMetrics.runwayDays.toFixed(1)} operating days</strong>{' '}
+                        {kitRunwayMetrics.runwayDays >= (kitMetrics.nearestIncomingDays ?? 0)
+                          ? 'comfortably covers plant production until the arrival of the next shipment batch '
+                          : 'covers plant production towards the next scheduled shipment batch '}
+                        <strong>{nextBatch.batch_number}{weekLabel}</strong> scheduled on{' '}
+                        <strong>{nextBatch.date}</strong> ({nextQty} kits{daysLabel ? ` • ${daysLabel}` : ''}),{' '}
+                        ensuring zero line stoppage.
+                      </>
+                    );
+                  })()
+                ) : (
+                  <>
+                    Current stock of <strong>{kitRunwayMetrics.runwayDays.toFixed(1)} operating days</strong> provides adequate manufacturing buffer across all active production lines.
+                  </>
+                )}
               </span>
             </div>
           </div>
