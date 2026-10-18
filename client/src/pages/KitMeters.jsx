@@ -13,18 +13,16 @@ import {
   Filter, 
   CheckCircle,
   Hash,
-  FileText
+  FileText,
+  Clock,
+  ArrowUpRight,
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
+import { getTodayString, getBatchStatus } from '../utils/kitStatus';
 
 const LOCAL_STORAGE_KEY = 'ectron_kit_meters_records';
 
-function getTodayString() {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
 export default function KitMeters() {
   const { user } = useAuth();
@@ -33,10 +31,13 @@ export default function KitMeters() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [dbWarning, setDbWarning] = useState('');
+  const [isSyncing, setIsSyncing] = useState(false);
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
   const [filterProduct, setFilterProduct] = useState('ALL');
+  const [filterStatus, setFilterStatus] = useState('ALL'); // 'ALL' | 'RECEIVED' | 'PLANNED'
   const [filterDate, setFilterDate] = useState('');
 
   // Add / Edit Modal state
@@ -62,21 +63,68 @@ export default function KitMeters() {
 
       if (error) {
         console.warn('Supabase kit_meters fetch error:', error);
-        // Fallback to local storage
+        setDbWarning(`Supabase Error (${error.message || error.code || 'Permission Denied'}). Using local storage cache.`);
         const local = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
         setRecords(local);
       } else {
+        setDbWarning('');
         setRecords(data || []);
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data || []));
       }
     } catch (err) {
       console.warn('Kit meters load error:', err);
+      setDbWarning(`Connection error: ${err.message}. Using local storage.`);
       const local = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
       setRecords(local);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  // Sync locally cached batches to Supabase once permissions are granted
+  const handleSyncLocalToSupabase = async () => {
+    setIsSyncing(true);
+    try {
+      const { data: remoteData, error: readError } = await supabase.from('kit_meters').select('*');
+      if (readError) {
+        alert(`Supabase is still reporting an error: ${readError.message}\n\nPlease run the GRANT SQL in the Supabase SQL Editor.`);
+        setIsSyncing(false);
+        return;
+      }
+
+      const remoteKeys = new Set((remoteData || []).map(r => `${r.batch_number}_${r.date}`));
+      const local = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
+      const toInsert = local
+        .filter(r => !remoteKeys.has(`${r.batch_number}_${r.date}`))
+        .map(r => ({
+          batch_number: r.batch_number,
+          kit_quantity: r.kit_quantity,
+          date: r.date,
+          product_name: r.product_name || 'Three Phase',
+          notes: r.notes || '',
+          created_by: r.created_by || user?.name || 'Admin',
+          updated_at: new Date().toISOString()
+        }));
+
+      if (toInsert.length > 0) {
+        const { error: insertError } = await supabase.from('kit_meters').insert(toInsert);
+        if (insertError) {
+          alert(`Error syncing batches to Supabase: ${insertError.message}`);
+          setIsSyncing(false);
+          return;
+        }
+      }
+
+      await loadRecords();
+      setDbWarning('');
+      setSaveSuccessMsg(`Successfully synced ${toInsert.length} batch(es) to Supabase database!`);
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
+    } catch (err) {
+      alert(`Sync failed: ${err.message}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   useEffect(() => {
     loadRecords();
@@ -146,14 +194,16 @@ export default function KitMeters() {
 
         if (error) {
           console.warn('Update kit_meters Supabase error:', error);
-          // Local fallback
           const updated = records.map(r => r.id === editingRecord.id ? { ...r, ...payload } : r);
           setRecords(updated);
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+          setDbWarning(`Supabase write issue: ${error.message || 'Permission Denied'}. Record saved locally in browser.`);
+          setSaveSuccessMsg(`⚠️ Batch ${batchNumber} saved locally (Supabase table permissions required)`);
         } else {
+          setDbWarning('');
           await loadRecords();
+          setSaveSuccessMsg(`Batch ${batchNumber} updated in Supabase successfully!`);
         }
-        setSaveSuccessMsg(`Batch ${batchNumber} updated successfully!`);
       } else {
         // Insert new record
         const { data, error } = await supabase
@@ -163,19 +213,21 @@ export default function KitMeters() {
 
         if (error) {
           console.warn('Insert kit_meters Supabase error:', error);
-          // Local fallback
           const newRec = { ...payload, id: Date.now() };
           const updated = [newRec, ...records];
           setRecords(updated);
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+          setDbWarning(`Supabase write issue: ${error.message || 'Permission Denied'}. Record saved locally in browser.`);
+          setSaveSuccessMsg(`⚠️ Batch ${batchNumber} saved locally only (Supabase permission denied)`);
         } else {
+          setDbWarning('');
           await loadRecords();
+          setSaveSuccessMsg(`Batch ${batchNumber} added to Supabase with ${qty.toLocaleString()} kits successfully!`);
         }
-        setSaveSuccessMsg(`Batch ${batchNumber} added with ${qty.toLocaleString()} kits successfully!`);
       }
 
       setShowModal(false);
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setTimeout(() => setSaveSuccessMsg(''), 6000);
     } catch (err) {
       console.error('Submit error:', err);
       setModalError(err.message || 'An error occurred while saving.');
@@ -204,37 +256,83 @@ export default function KitMeters() {
 
   // Filtered records
   const filteredRecords = useMemo(() => {
+    const today = getTodayString();
     return records.filter(r => {
       const matchSearch = searchTerm === '' || 
         (r.batch_number && r.batch_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (r.notes && r.notes.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchProduct = filterProduct === 'ALL' || r.product_name === filterProduct;
       const matchDate = filterDate === '' || r.date === filterDate;
-      return matchSearch && matchProduct && matchDate;
-    });
-  }, [records, searchTerm, filterProduct, filterDate]);
+      
+      let matchStatus = true;
+      if (filterStatus === 'RECEIVED') {
+        matchStatus = !getBatchStatus(r.date, r.notes).isPlanned;
+      } else if (filterStatus === 'PLANNED') {
+        matchStatus = getBatchStatus(r.date, r.notes).isPlanned;
+      }
 
-  // KPI Statistics
+      return matchSearch && matchProduct && matchDate && matchStatus;
+    });
+  }, [records, searchTerm, filterProduct, filterDate, filterStatus]);
+
+  // KPI Statistics (Computed across all records to show overall pipeline & delivery plan)
   const stats = useMemo(() => {
-    const totalKits = filteredRecords.reduce((sum, r) => sum + (r.kit_quantity || 0), 0);
-    const threePhaseKits = filteredRecords
-      .filter(r => r.product_name === 'Three Phase')
-      .reduce((sum, r) => sum + (r.kit_quantity || 0), 0);
-    const singlePhaseKits = filteredRecords
-      .filter(r => r.product_name === 'Single Phase')
-      .reduce((sum, r) => sum + (r.kit_quantity || 0), 0);
-    const totalBatches = filteredRecords.length;
-    return { totalKits, threePhaseKits, singlePhaseKits, totalBatches };
-  }, [filteredRecords]);
+    let totalKits = 0;
+    let receivedKits = 0;
+    let plannedKits = 0;
+    let receivedBatches = 0;
+    let plannedBatches = 0;
+    let threePhaseKits = 0;
+    let singlePhaseKits = 0;
+    let nearestIncomingDate = null;
+    let nearestIncomingDays = null;
+
+    records.forEach(r => {
+      const q = r.kit_quantity || 0;
+      totalKits += q;
+      if (r.product_name === 'Three Phase') threePhaseKits += q;
+      if (r.product_name === 'Single Phase') singlePhaseKits += q;
+
+      const bStatus = getBatchStatus(r.date, r.notes);
+      if (bStatus.isPlanned) {
+        plannedKits += q;
+        plannedBatches += 1;
+        if (!nearestIncomingDate || r.date < nearestIncomingDate) {
+          nearestIncomingDate = r.date;
+          nearestIncomingDays = bStatus.daysDiff;
+        }
+      } else {
+        receivedKits += q;
+        receivedBatches += 1;
+      }
+    });
+
+    const totalBatches = records.length;
+    const receivedPct = totalKits > 0 ? ((receivedKits / totalKits) * 100) : 0;
+
+    return { 
+      totalKits, 
+      receivedKits, 
+      plannedKits, 
+      totalBatches, 
+      receivedBatches, 
+      plannedBatches, 
+      threePhaseKits, 
+      singlePhaseKits,
+      nearestIncomingDate,
+      nearestIncomingDays,
+      receivedPct
+    };
+  }, [records]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* ── Status Banner ── */}
       {saveSuccessMsg && (
         <div style={{ 
-          background: '#dcfce7', 
-          color: '#15803d', 
-          border: '1px solid #bbf7d0', 
+          background: saveSuccessMsg.includes('⚠️') ? '#fef3c7' : '#dcfce7', 
+          color: saveSuccessMsg.includes('⚠️') ? '#92400e' : '#15803d', 
+          border: `1px solid ${saveSuccessMsg.includes('⚠️') ? '#fde68a' : '#bbf7d0'}`, 
           padding: '12px 18px', 
           borderRadius: 10, 
           display: 'flex', 
@@ -242,8 +340,56 @@ export default function KitMeters() {
           gap: 10, 
           fontWeight: 700 
         }}>
-          <CheckCircle size={20} />
+          {saveSuccessMsg.includes('⚠️') ? <AlertCircle size={20} /> : <CheckCircle size={20} />}
           {saveSuccessMsg}
+        </div>
+      )}
+
+      {/* ── Supabase Permissions / Warning Banner ── */}
+      {dbWarning && (
+        <div style={{ 
+          background: '#fffbeb', 
+          color: '#92400e', 
+          border: '1.5px solid #fde68a', 
+          padding: '14px 18px', 
+          borderRadius: 12, 
+          display: 'flex', 
+          alignItems: 'flex-start', 
+          gap: 12, 
+          fontSize: '0.88rem'
+        }}>
+          <AlertCircle size={22} style={{ color: '#d97706', flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#b45309', marginBottom: 4 }}>
+              Supabase Database Connection Alert (kit_meters table permissions)
+            </div>
+            <div style={{ color: '#78350f', lineHeight: 1.5 }}>
+              Current records are saved locally in the browser cache because the <code>kit_meters</code> table in Supabase requires access permissions (GRANT & RLS) to be enabled via the Supabase SQL Editor.
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleSyncLocalToSupabase}
+                disabled={isSyncing}
+                style={{
+                  background: '#d97706',
+                  color: 'white',
+                  border: 'none',
+                  padding: '6px 14px',
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6
+                }}
+              >
+                <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                {isSyncing ? 'Syncing...' : 'Retry Sync with Supabase'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -279,59 +425,67 @@ export default function KitMeters() {
 
       {/* ── Summary Counters ── */}
       <div className="kpi-grid">
+        {/* Card 1: Received Kits (Actual) */}
+        <div className="kpi-card" style={{ borderLeft: '4px solid #16a34a' }}>
+          <div className="kpi-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
+            <CheckCircle size={24} />
+          </div>
+          <div className="kpi-data">
+            <span className="kpi-title">Received Kits (Actual)</span>
+            <span className="kpi-val" style={{ color: '#15803d' }}>
+              {stats.receivedKits.toLocaleString()}
+            </span>
+            <span className="kpi-sub">
+              <strong>{stats.receivedBatches}</strong> received batches • {stats.receivedPct.toFixed(1)}% of total
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Delivery Plan (Incoming) */}
+        <div className="kpi-card" style={{ borderLeft: '4px solid #4f46e5' }}>
+          <div className="kpi-icon" style={{ background: '#eef2ff', color: '#4338ca' }}>
+            <Clock size={24} />
+          </div>
+          <div className="kpi-data">
+            <span className="kpi-title">Delivery Plan (Incoming)</span>
+            <span className="kpi-val" style={{ color: '#4338ca' }}>
+              {stats.plannedKits.toLocaleString()}
+            </span>
+            <span className="kpi-sub">
+              <strong>{stats.plannedBatches}</strong> planned batches {stats.nearestIncomingDays ? `• Next in ${stats.nearestIncomingDays}d` : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 3: Total Batches Logged */}
+        <div className="kpi-card" style={{ borderLeft: '4px solid var(--navy)' }}>
+          <div className="kpi-icon" style={{ background: '#f1f5f9', color: 'var(--navy)' }}>
+            <Layers size={24} />
+          </div>
+          <div className="kpi-data">
+            <span className="kpi-title">Total Pipeline Batches</span>
+            <span className="kpi-val" style={{ color: 'var(--navy)' }}>
+              {stats.totalBatches}
+            </span>
+            <span className="kpi-sub">
+              {stats.receivedBatches} Received • {stats.plannedBatches} Delivery Plan
+            </span>
+          </div>
+        </div>
+
+        {/* Card 4: Total Kits & Product Split */}
         <div className="kpi-card" style={{ borderLeft: '4px solid var(--teal)' }}>
           <div className="kpi-icon" style={{ background: 'var(--teal-light)', color: 'var(--teal-dark)' }}>
             <Package size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Total Kits</span>
-            <span className="kpi-val" style={{ color: 'var(--navy)' }}>
+            <span className="kpi-title">Total Kits (All Shipments)</span>
+            <span className="kpi-val" style={{ color: 'var(--teal-dark)' }}>
               {stats.totalKits.toLocaleString()}
             </span>
-            <span className="kpi-sub">Across all logged batches</span>
-          </div>
-        </div>
-
-        <div className="kpi-card" style={{ borderLeft: '4px solid #3b82f6' }}>
-          <div className="kpi-icon" style={{ background: '#dbeafe', color: '#1d4ed8' }}>
-            <Layers size={24} />
-          </div>
-          <div className="kpi-data">
-            <span className="kpi-title">Three Phase Kits</span>
-            <span className="kpi-val" style={{ color: '#1d4ed8' }}>
-              {stats.threePhaseKits.toLocaleString()}
-            </span>
             <span className="kpi-sub">
-              {stats.totalKits > 0 ? `${((stats.threePhaseKits / stats.totalKits) * 100).toFixed(1)}% of total` : '0%'}
+              {stats.threePhaseKits.toLocaleString()} 3-Phase • {stats.singlePhaseKits.toLocaleString()} 1-Phase
             </span>
-          </div>
-        </div>
-
-        <div className="kpi-card" style={{ borderLeft: '4px solid #8b5cf6' }}>
-          <div className="kpi-icon" style={{ background: '#ede9fe', color: '#6d28d9' }}>
-            <TrendingUp size={24} />
-          </div>
-          <div className="kpi-data">
-            <span className="kpi-title">Single Phase Kits</span>
-            <span className="kpi-val" style={{ color: '#6d28d9' }}>
-              {stats.singlePhaseKits.toLocaleString()}
-            </span>
-            <span className="kpi-sub">
-              {stats.totalKits > 0 ? `${((stats.singlePhaseKits / stats.totalKits) * 100).toFixed(1)}% of total` : '0%'}
-            </span>
-          </div>
-        </div>
-
-        <div className="kpi-card" style={{ borderLeft: '4px solid #f59e0b' }}>
-          <div className="kpi-icon" style={{ background: '#fef3c7', color: '#b45309' }}>
-            <Hash size={24} />
-          </div>
-          <div className="kpi-data">
-            <span className="kpi-title">Total Batches</span>
-            <span className="kpi-val" style={{ color: '#b45309' }}>
-              {stats.totalBatches}
-            </span>
-            <span className="kpi-sub">Logged shipments / batches</span>
           </div>
         </div>
       </div>
@@ -352,6 +506,19 @@ export default function KitMeters() {
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <Filter size={16} color="var(--gray-500)" />
+          <select 
+            className="form-select"
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            style={{ width: 'auto', fontWeight: 700 }}
+          >
+            <option value="ALL">All Statuses (Received & Planned)</option>
+            <option value="RECEIVED">🟢 Received Only (Actual)</option>
+            <option value="PLANNED">🔵 Delivery Plan Only (Incoming)</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <select 
             className="form-select"
             value={filterProduct}
@@ -399,7 +566,8 @@ export default function KitMeters() {
             <thead>
               <tr>
                 <th>Batch Number</th>
-                <th>Date</th>
+                <th>Status</th>
+                <th>Receipt / Scheduled Date</th>
                 <th>Product Type</th>
                 <th style={{ textAlign: 'right' }}>Kit Quantity</th>
                 <th>Entered By</th>
@@ -410,7 +578,7 @@ export default function KitMeters() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 40 }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 40 }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--gray-500)' }}>
                       <span className="spinner" /> Loading kit meter batches...
                     </div>
@@ -418,78 +586,106 @@ export default function KitMeters() {
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-400)' }}>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-400)' }}>
                     No kit batches found matching current filters.
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map(r => (
-                  <tr key={r.id}>
-                    <td>
-                      <div style={{ fontWeight: 800, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Hash size={14} color="var(--teal)" />
-                        <span>{r.batch_number}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span style={{ fontWeight: 600, color: 'var(--gray-700)' }}>{r.date}</span>
-                    </td>
-                    <td>
-                      <span style={{
-                        padding: '4px 10px',
-                        borderRadius: 12,
-                        fontSize: '0.78rem',
-                        fontWeight: 800,
-                        background: r.product_name === 'Three Phase' ? '#dbeafe' : '#ede9fe',
-                        color: r.product_name === 'Three Phase' ? '#1d4ed8' : '#6d28d9'
-                      }}>
-                        {r.product_name === 'Three Phase' ? '⚡ Three Phase' : '🔌 Single Phase'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <span style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--navy)' }}>
-                        {r.kit_quantity?.toLocaleString()}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>Kits</span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.82rem', color: 'var(--gray-600)' }}>
-                        {r.created_by || 'Admin'}
-                      </span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.82rem', color: 'var(--gray-500)', maxWidth: 220, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.notes || '—'}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="action-btns" style={{ justifyContent: 'center' }}>
-                        {!isViewer && (
-                          <>
-                            <button 
-                              type="button"
-                              className="btn-icon" 
-                              style={{ background: '#e0f2fe', color: '#0369a1' }}
-                              title="Edit Batch"
-                              onClick={() => handleOpenEditModal(r)}
-                            >
-                              <Edit3 size={15} />
-                            </button>
+                filteredRecords.map(r => {
+                  const bStatus = getBatchStatus(r.date, r.notes);
+                  return (
+                    <tr key={r.id} style={{ borderLeft: bStatus.isPlanned ? '4px solid #6366f1' : '4px solid #16a34a' }}>
+                      <td>
+                        <div style={{ fontWeight: 800, color: 'var(--navy)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Hash size={14} color="var(--teal)" />
+                          <span>{r.batch_number}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 5,
+                            padding: '3px 8px',
+                            borderRadius: 12,
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            background: bStatus.bg,
+                            color: bStatus.color,
+                            border: `1px solid ${bStatus.border}`,
+                            width: 'fit-content'
+                          }}>
+                            {bStatus.isPlanned ? <Clock size={12} /> : <CheckCircle size={12} />}
+                            {bStatus.label}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: bStatus.isPlanned ? '#4338ca' : '#64748b', fontWeight: bStatus.isPlanned ? 700 : 500, paddingLeft: 2 }}>
+                            {bStatus.sublabel}
+                          </span>
+                        </div>
+                      </td>
+                      <td>
+                        <span style={{ fontWeight: 700, color: bStatus.isPlanned ? '#4338ca' : 'var(--gray-700)' }}>
+                          {r.date}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{
+                          padding: '4px 10px',
+                          borderRadius: 12,
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          background: r.product_name === 'Three Phase' ? '#dbeafe' : '#ede9fe',
+                          color: r.product_name === 'Three Phase' ? '#1d4ed8' : '#6d28d9'
+                        }}>
+                          {r.product_name === 'Three Phase' ? '⚡ Three Phase' : '🔌 Single Phase'}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <span style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--navy)' }}>
+                          {r.kit_quantity?.toLocaleString()}
+                        </span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>Kits</span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--gray-600)' }}>
+                          {r.created_by || 'Admin'}
+                        </span>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--gray-500)', maxWidth: 220, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {r.notes || '—'}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="action-btns" style={{ justifyContent: 'center' }}>
+                          {!isViewer && (
+                            <>
+                              <button 
+                                type="button"
+                                className="btn-icon" 
+                                style={{ background: '#e0f2fe', color: '#0369a1' }}
+                                title="Edit Batch"
+                                onClick={() => handleOpenEditModal(r)}
+                              >
+                                <Edit3 size={15} />
+                              </button>
 
-                            <button 
-                              type="button"
-                              className="btn-icon btn-delete" 
-                              title="Delete Batch"
-                              onClick={() => handleDeleteRecord(r.id, r.batch_number)}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                              <button 
+                                type="button"
+                                className="btn-icon btn-delete" 
+                                title="Delete Batch"
+                                onClick={() => handleDeleteRecord(r.id, r.batch_number)}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -559,6 +755,31 @@ export default function KitMeters() {
                       required
                       style={{ fontWeight: 700 }}
                     />
+                    {recordDate && (() => {
+                      const st = getBatchStatus(recordDate);
+                      return (
+                        <div style={{ 
+                          marginTop: 6, 
+                          padding: '6px 10px', 
+                          background: st.bg, 
+                          border: `1px solid ${st.border}`, 
+                          borderRadius: 6, 
+                          fontSize: '0.76rem', 
+                          color: st.color, 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 6, 
+                          fontWeight: 700 
+                        }}>
+                          {st.isPlanned ? <Clock size={14} /> : <CheckCircle size={14} />}
+                          <span>
+                            {st.isPlanned 
+                              ? `Future date (${st.sublabel}): Scheduled under Incoming Delivery Plan.`
+                              : `Current/Past date (${st.sublabel}): Logged as Received Shipment.`}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="form-group">
