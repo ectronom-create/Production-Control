@@ -387,24 +387,32 @@ export default function Production() {
     }
   }, [user, isSupervisor]);
 
-  // Load team list from Supabase users
+  // Load team list from Supabase users & production records
   useEffect(() => {
     async function fetchTeams() {
       try {
         const { data, error } = await supabase.from('users').select('team_name');
+        const teamsSet = new Set(['Management']);
         if (data && data.length > 0) {
-          const teamsSet = new Set(['Management']);
           data.forEach(u => {
             if (u.team_name && u.team_name.trim()) teamsSet.add(u.team_name.trim());
           });
-          setAvailableTeams(Array.from(teamsSet));
         }
+        if (records && records.length > 0) {
+          records.forEach(r => {
+            if (r.team_name) {
+              const base = r.team_name.split(' - ')[0].replace(/\[.*?\]/, '').trim();
+              if (base) teamsSet.add(base);
+            }
+          });
+        }
+        setAvailableTeams(Array.from(teamsSet).filter(Boolean));
       } catch (e) {
         console.warn('Teams fetch error:', e);
       }
     }
     fetchTeams();
-  }, []);
+  }, [records]);
 
   // Fetch production records from Supabase
   const loadRecords = useCallback(async () => {
@@ -810,7 +818,11 @@ export default function Production() {
         (r.entered_by && r.entered_by.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (r.team_name && r.team_name.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      const matchTeam = filterTeam === 'ALL' || r.team_name === filterTeam;
+      const rBaseTeam = (r.team_name || '').split(' - ')[0].replace(/\[.*?\]/, '').trim();
+      const matchTeam = filterTeam === 'ALL' || 
+        r.team_name === filterTeam ||
+        rBaseTeam.toLowerCase() === filterTeam.toLowerCase() ||
+        (r.team_name && r.team_name.toLowerCase().includes(filterTeam.toLowerCase()));
       const matchDate = filterDate === '' || r.date === filterDate;
       const rText = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
       const matchShift = filterShift === 'ALL' ||
