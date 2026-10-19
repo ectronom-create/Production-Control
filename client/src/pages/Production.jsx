@@ -54,6 +54,29 @@ async function fetchFwSyncCount(date, shift) {
     console.warn('Google Cloud Drive direct API sync failed:', cloudErr);
   }
 
+  // 3. Database Fallback (Supabase production_records): Always available for recorded shifts
+  try {
+    const isMorning = shift === 'Morning';
+    const { data, error } = await supabase
+      .from('production_records')
+      .select('updated_fw_qty, team_name, notes')
+      .eq('date', date);
+
+    if (!error && data && data.length > 0) {
+      const match = data.find(r => {
+        const str = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
+        return isMorning 
+          ? (str.includes('morning') || str.includes('صباح')) 
+          : (str.includes('evening') || str.includes('مسا'));
+      });
+      if (match && match.updated_fw_qty != null && match.updated_fw_qty > 0) {
+        return match.updated_fw_qty;
+      }
+    }
+  } catch (dbErr) {
+    console.warn('Supabase fallback error in fetchFwSyncCount:', dbErr);
+  }
+
   return null;
 }
 
