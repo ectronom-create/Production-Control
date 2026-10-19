@@ -28,7 +28,20 @@ const GOOGLE_DRIVE_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbxHUC
 async function fetchFwSyncCount(date, shift) {
   const query = `date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`;
 
-  // 1. Live Google Cloud Drive Web API (Universal: works on all computers, Vercel & mobile)
+  // 1. Same-Origin Proxy (/api/sync-fw): Works on Vercel Serverless, Vite, Express (Zero CORS, universally accessible)
+  try {
+    const resp = await fetch(`/api/sync-fw?${query}`);
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && json.success && json.count != null) {
+        return json.count;
+      }
+    }
+  } catch (apiErr) {
+    console.warn('/api/sync-fw proxy failed, trying direct Google Apps Script fallback:', apiErr);
+  }
+
+  // 2. Direct Google Cloud Apps Script fallback
   try {
     const resp = await fetch(`${GOOGLE_DRIVE_SYNC_API_URL}?${query}`);
     if (resp.ok) {
@@ -38,20 +51,7 @@ async function fetchFwSyncCount(date, shift) {
       }
     }
   } catch (cloudErr) {
-    console.warn('Google Cloud Drive API sync failed, trying local proxy fallback:', cloudErr);
-  }
-
-  // 2. Local proxy fallback (/api/sync-fw)
-  try {
-    const resp = await fetch(`/api/sync-fw?${query}`);
-    if (resp.ok) {
-      const json = await resp.json();
-      if (json && json.success && json.count != null) {
-        return json.count;
-      }
-    }
-  } catch (localErr) {
-    console.warn('Local /api/sync-fw proxy failed:', localErr);
+    console.warn('Google Cloud Drive direct API sync failed:', cloudErr);
   }
 
   return null;
@@ -327,6 +327,30 @@ export default function Production() {
   const [editNotes, setEditNotes] = useState('');
   const [isUpdatingRecord, setIsUpdatingRecord] = useState(false);
   const [editError, setEditError] = useState('');
+  const [isSyncingEditFw, setIsSyncingEditFw] = useState(false);
+  const [syncEditMsg, setSyncEditMsg] = useState('');
+
+  const handleSyncEditFw = async (dateVal, shiftVal) => {
+    const d = dateVal || editDate;
+    const s = shiftVal || editShift;
+    if (!d || !s) return;
+    setIsSyncingEditFw(true);
+    setSyncEditMsg('');
+    try {
+      const count = await fetchFwSyncCount(d, s);
+      if (count != null) {
+        setEditFwQty(count);
+        setSyncEditMsg(`✓ Synced ${count.toLocaleString()} kits from Google Drive (${s})`);
+      } else {
+        setSyncEditMsg('⚠️ Could not sync: No matching records or server unreachable.');
+      }
+    } catch (e) {
+      console.warn('Edit sync error:', e);
+      setSyncEditMsg('⚠️ Sync error: ' + (e.message || ''));
+    } finally {
+      setIsSyncingEditFw(false);
+    }
+  };
 
   // Initialize Team logic based on user
   useEffect(() => {
@@ -639,12 +663,15 @@ export default function Production() {
   const openEditModalForRecord = (record) => {
     if (!record) return;
     setEditError('');
+    setSyncEditMsg('');
     setEditRecordId(record.id);
-    setEditDate(record.date || getTodayString());
+    const recDate = record.date || getTodayString();
+    setEditDate(recDate);
     
     const recStr = `${record.team_name || ''} ${record.notes || ''}`.toLowerCase();
     const isEvening = recStr.includes('evening') || recStr.includes('\u0645\u0633\u0627');
-    setEditShift(isEvening ? 'Evening' : 'Morning');
+    const detectedShift = isEvening ? 'Evening' : 'Morning';
+    setEditShift(detectedShift);
 
     setEditTarget(record.target || 650);
     setEditProduct(record.product || '254100543S - SFIN MT212 OMAN - A01');
@@ -659,6 +686,9 @@ export default function Production() {
 
     const cleanedNotes = record.notes ? record.notes.replace(/\[Shift:.*?\]/, '').trim() : '';
     setEditNotes(cleanedNotes);
+
+    // Auto-fetch fresh FW count from Google Drive for this date and shift
+    handleSyncEditFw(recDate, detectedShift);
   };
 
   // Handle Save / Update Production Report
@@ -681,7 +711,7 @@ export default function Production() {
     const originalRecord = records.find(r => r.id === editRecordId);
     const safeAchieved = originalRecord ? originalRecord.achieved : achievedNum;
     const safeBoards = originalRecord ? originalRecord.total_boards : boardsNum;
-    const safeFw = fwNum > 0 ? fwNum : (originalRecord ? originalRecord.updated_fw_qty : 0);
+    const safeFw = fwNum >= 0 ? fwNum : (originalRecord ? originalRecord.updated_fw_qty : 0);
 
     let computedFpy = null;
     if (safeBoards > 0) {
@@ -1695,7 +1725,11 @@ export default function Production() {
                     <input 
                       type="date" 
                       value={editDate} 
-                      onChange={e => setEditDate(e.target.value)} 
+                      onChange={e => {
+                        const newD = e.target.value;
+                        setEditDate(newD);
+                        handleSyncEditFw(newD, editShift);
+                      }} 
                       disabled={isUpdatingRecord}
                       required 
                       style={{ fontWeight: 800, fontSize: '0.95rem' }}
@@ -1758,7 +1792,10 @@ export default function Production() {
                         boxShadow: editShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
                         transition: 'all 0.15s ease'
                       }}
-                      onClick={() => setEditShift('Morning')}
+                      onClick={() => {
+                        setEditShift('Morning');
+                        handleSyncEditFw(editDate, 'Morning');
+                      }}
                     >
                       <span style={{ fontSize: '1.25rem' }}>☀️</span>
                       <span>Morning Shift</span>
@@ -1782,7 +1819,10 @@ export default function Production() {
                         boxShadow: editShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
                         transition: 'all 0.15s ease'
                       }}
-                      onClick={() => setEditShift('Evening')}
+                      onClick={() => {
+                        setEditShift('Evening');
+                        handleSyncEditFw(editDate, 'Evening');
+                      }}
                     >
                       <span style={{ fontSize: '1.25rem' }}>🌙</span>
                       <span>Evening Shift</span>
@@ -1844,44 +1884,48 @@ export default function Production() {
                       </label>
                       <button
                         type="button"
-                        onClick={async () => {
-                          try {
-                            const count = await fetchFwSyncCount(editDate, editShift);
-                            if (count != null) {
-                              setEditFwQty(count);
-                            }
-                          } catch (e) {
-                            console.warn('Edit sync error:', e);
-                          }
-                        }}
+                        disabled={isSyncingEditFw}
+                        onClick={() => handleSyncEditFw(editDate, editShift)}
                         style={{
-                          background: '#7c3aed',
+                          background: isSyncingEditFw ? '#a78bfa' : '#7c3aed',
                           color: '#ffffff',
                           border: 'none',
-                          padding: '3px 8px',
-                          borderRadius: 4,
-                          fontSize: '0.72rem',
+                          padding: '4px 10px',
+                          borderRadius: 6,
+                          fontSize: '0.74rem',
                           fontWeight: 700,
-                          cursor: 'pointer',
+                          cursor: isSyncingEditFw ? 'not-allowed' : 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: 4
+                          gap: 5
                         }}
                       >
-                        <RefreshCw size={11} />
-                        Sync from Drive 🔄
+                        <RefreshCw size={12} className={isSyncingEditFw ? 'animate-spin' : ''} />
+                        {isSyncingEditFw ? 'Syncing...' : 'Sync from Drive 🔄'}
                       </button>
                     </div>
                     <input 
                       type="number" 
                       value={editFwQty} 
-                      readOnly
-                      disabled
-                      style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe', cursor: 'not-allowed' }}
+                      onChange={e => setEditFwQty(parseInt(e.target.value, 10) || 0)}
+                      disabled={isUpdatingRecord}
+                      style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe' }}
                     />
-                    <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
-                      Automatically synced from Google Drive update logs
-                    </span>
+                    {syncEditMsg ? (
+                      <span style={{ 
+                        fontSize: '0.72rem', 
+                        fontWeight: 700, 
+                        color: syncEditMsg.startsWith('✓') ? '#15803d' : '#b91c1c', 
+                        marginTop: 4, 
+                        display: 'block' 
+                      }}>
+                        {syncEditMsg}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
+                        Live sync from Google Drive update logs ({editDate} • {editShift})
+                      </span>
+                    )}
                   </div>
 
                   <div className="form-group">

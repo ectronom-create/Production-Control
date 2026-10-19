@@ -35,6 +35,24 @@ function fwSyncPlugin() {
             'H:/Other computers/Update PC 2/LOG_CSV/LOG.csv'
           ];
 
+          const filesExist = files.some(f => fs.existsSync(f));
+          if (!filesExist) {
+            const cloudUrl = `https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec?date=${encodeURIComponent(targetDate)}&shift=${encodeURIComponent(targetShift)}`;
+            fetch(cloudUrl)
+              .then(cr => cr.json())
+              .then(data => {
+                res.statusCode = 200;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify(data));
+              })
+              .catch(e => {
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ error: e.message }));
+              });
+            return;
+          }
+
           const uniqueSn = new Set();
           const pcStats = {};
 
