@@ -22,6 +22,41 @@ import {
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
+// Direct Google Cloud Apps Script Web API (accessible globally from any computer/browser)
+const GOOGLE_DRIVE_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec';
+
+async function fetchFwSyncCount(date, shift) {
+  const query = `date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`;
+
+  // 1. Live Google Cloud Drive Web API (Universal: works on all computers, Vercel & mobile)
+  try {
+    const resp = await fetch(`${GOOGLE_DRIVE_SYNC_API_URL}?${query}`);
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && json.success && json.count != null) {
+        return json.count;
+      }
+    }
+  } catch (cloudErr) {
+    console.warn('Google Cloud Drive API sync failed, trying local proxy fallback:', cloudErr);
+  }
+
+  // 2. Local proxy fallback (/api/sync-fw)
+  try {
+    const resp = await fetch(`/api/sync-fw?${query}`);
+    if (resp.ok) {
+      const json = await resp.json();
+      if (json && json.success && json.count != null) {
+        return json.count;
+      }
+    }
+  } catch (localErr) {
+    console.warn('Local /api/sync-fw proxy failed:', localErr);
+  }
+
+  return null;
+}
+
 // ===================== EXCEL PARSER =====================
 function parseFPYExcel(arrayBuffer) {
   const wb = XLSX.read(arrayBuffer, { type: 'array' });
@@ -397,19 +432,12 @@ export default function Production() {
   const syncFwForUpload = async (targetDate, targetShift) => {
     setIsSyncingFw(true);
     try {
-      // 1. Live sync from Google Drive LOG.csv via /api/sync-fw
-      try {
-        const resp = await fetch(`/api/sync-fw?date=${encodeURIComponent(targetDate)}&shift=${encodeURIComponent(targetShift)}`);
-        if (resp.ok) {
-          const json = await resp.json();
-          if (json.success && json.count != null) {
-            setUploadFwQty(json.count);
-            setIsSyncingFw(false);
-            return;
-          }
-        }
-      } catch (apiErr) {
-        console.warn('Live /api/sync-fw endpoint failed, trying database fallback:', apiErr);
+      // 1. Live sync from Google Cloud Drive Web API (or local proxy fallback)
+      const count = await fetchFwSyncCount(targetDate, targetShift);
+      if (count != null) {
+        setUploadFwQty(count);
+        setIsSyncingFw(false);
+        return;
       }
 
       // 2. Fallback: Find matching shift count in existing production_records in Supabase
@@ -1818,12 +1846,9 @@ export default function Production() {
                         type="button"
                         onClick={async () => {
                           try {
-                            const resp = await fetch(`/api/sync-fw?date=${encodeURIComponent(editDate)}&shift=${encodeURIComponent(editShift)}`);
-                            if (resp.ok) {
-                              const json = await resp.json();
-                              if (json.success && json.count != null) {
-                                setEditFwQty(json.count);
-                              }
+                            const count = await fetchFwSyncCount(editDate, editShift);
+                            if (count != null) {
+                              setEditFwQty(count);
                             }
                           } catch (e) {
                             console.warn('Edit sync error:', e);
