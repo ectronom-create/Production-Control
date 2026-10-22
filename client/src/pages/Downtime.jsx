@@ -527,13 +527,37 @@ export default function Downtime() {
   const lastAlertMinuteRef = useRef(0);        // tracks last alert milestone in minutes (30, 90, 150...)
   const adminEmailsRef = useRef([]);           // cached list of admin emails
 
-  // Pre-load admin emails once on mount
+  // Pre-load admin emails & sync any active live stoppage from Supabase
   useEffect(() => {
     supabase.from('users')
       .select('email, name')
       .eq('access', 'admin')
       .then(res => {
         adminEmailsRef.current = (res.data || []).filter(u => u.email);
+      })
+      .catch(() => {});
+
+    // Check Supabase for any active live stoppage (resumed_at IS NULL)
+    supabase.from('stoppages')
+      .select('*')
+      .is('resumed_at', null)
+      .order('id', { ascending: false })
+      .limit(1)
+      .then(({ data, error }) => {
+        if (!error && data && data[0]) {
+          const row = data[0];
+          const startMs = new Date(row.stopped_at).getTime();
+          const restored = {
+            id: row.id,
+            stage: row.stage_id || STAGES[0],
+            user_name: row.supervisor_id || 'Supervisor',
+            startTimestamp: startMs,
+            date: row.stopped_at.split('T')[0],
+            start_time: new Date(row.stopped_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+          };
+          setActiveSession(restored);
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
+        }
       })
       .catch(() => {});
   }, []);
@@ -779,15 +803,32 @@ Best regards,`;
   const totalMinutesInDay = records.reduce((acc, curr) => acc + (curr.total_minutes || 0), 0);
 
   // ─── Start Live Downtime ────────────────────────────────────────────────────
-  function handleStartLiveDowntime() {
+  async function handleStartLiveDowntime() {
     const now = new Date();
     const session = {
       stage: selectedPillStage,
       user_name: user?.name || 'Admin',
       date: getTodayString(),
       start_time: getCurrentTimeString(now),
-      startTimestamp: Date.now()
+      startTimestamp: now.getTime()
     };
+
+    try {
+      const { data, error } = await supabase.from('stoppages').insert([{
+        stage_id: selectedPillStage,
+        supervisor_id: user?.name || 'Supervisor',
+        stopped_at: now.toISOString(),
+        resumed_at: null,
+        notes: 'LIVE_ACTIVE'
+      }]).select();
+
+      if (!error && data && data[0]?.id) {
+        session.id = data[0].id;
+      }
+    } catch (e) {
+      console.warn('Could not register active live stoppage in Supabase:', e);
+    }
+
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
     setActiveSession(session);
     showToast(`Downtime recording started for "${selectedPillStage}"`);
@@ -811,7 +852,7 @@ Best regards,`;
 
       const durationMins = Math.max(1, Math.ceil(computedElapsedSecs / 60));
       const payload = {
-        id: Date.now(),
+        id: activeSession.id || Date.now(),
         user_name: activeSession.user_name || user?.name || 'Supervisor',
         stage: activeSession.stage,
         date: activeSession.date || formatLocalDate(now),
@@ -822,18 +863,36 @@ Best regards,`;
       };
 
       try {
-        const { data, error } = await supabase.from('stoppages').insert([{
-          stage_id: activeSession.stage,
-          supervisor_id: activeSession.user_name,
-          stopped_at: new Date(activeSession.startTimestamp).toISOString(),
-          resumed_at: now.toISOString(),
-          notes: `Live session: ${durationMins}m`
-        }]).select();
+        if (activeSession.id) {
+          const { error } = await supabase.from('stoppages').update({
+            resumed_at: now.toISOString(),
+            notes: `Live session: ${durationMins}m`
+          }).eq('id', activeSession.id);
 
-        if (error) {
-          console.warn('Supabase live save returned error:', error);
-        } else if (data && data[0]?.id) {
-          payload.id = data[0].id;
+          if (error) {
+            console.warn('Supabase update returned error, trying fallback insert:', error);
+            await supabase.from('stoppages').insert([{
+              stage_id: activeSession.stage,
+              supervisor_id: activeSession.user_name,
+              stopped_at: new Date(activeSession.startTimestamp).toISOString(),
+              resumed_at: now.toISOString(),
+              notes: `Live session: ${durationMins}m`
+            }]);
+          } else {
+            payload.id = activeSession.id;
+          }
+        } else {
+          const { data, error } = await supabase.from('stoppages').insert([{
+            stage_id: activeSession.stage,
+            supervisor_id: activeSession.user_name,
+            stopped_at: new Date(activeSession.startTimestamp).toISOString(),
+            resumed_at: now.toISOString(),
+            notes: `Live session: ${durationMins}m`
+          }]).select();
+
+          if (!error && data && data[0]?.id) {
+            payload.id = data[0].id;
+          }
         }
       } catch (e) {
         console.warn('Supabase live save network error:', e);
@@ -860,8 +919,15 @@ Best regards,`;
   }
 
   // ─── Cancel Live Session ────────────────────────────────────────────────────
-  function handleCancelLiveDowntime() {
+  async function handleCancelLiveDowntime() {
     if (window.confirm('Cancel this recording without saving?')) {
+      if (activeSession?.id) {
+        try {
+          await supabase.from('stoppages').delete().eq('id', activeSession.id);
+        } catch (e) {
+          console.warn('Could not delete canceled stoppage from Supabase:', e);
+        }
+      }
       localStorage.removeItem(STORAGE_KEY);
       setActiveSession(null);
       setElapsedSeconds(0);

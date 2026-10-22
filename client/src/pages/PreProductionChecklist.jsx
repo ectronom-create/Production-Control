@@ -35,18 +35,24 @@ const CHECKLIST_ITEMS = [
     id: 'chk-0',
     cat: 'A',
     title: 'Pre-Shift Standup Meeting & Shift Briefing',
-    arabicTitle: 'اجتماع الوقوف الصباحي / بداية الوردية (Standup Meeting) والتوجيهات',
+    arabicTitle: 'اجتماع الوقوف وبداية الوردية (Standup Meeting) والتوجيهات',
     stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
     critical: true,
     tag: 'Briefing & Alignment',
     color: '#4f46e5',
     summary: 'Conducted pre-shift standup meeting with all line operators, reviewed daily targets, previous shift defects/lessons learned, and assigned station roles.',
-    arabicSummary: 'عقد اجتماع الوقوف الصباحي السريع مع جميع مشغلي الخط، مراجعة أهداف الوردية، مناقشة أخطاء وعيوب الوردية السابقة، وتوزيع المهام على المحطات.',
+    arabicSummary: 'عقد اجتماع الوقوف الصباحي السريع مع جميع مشغلي الخط، استعراض أهداف الوردية، مناقشة أخطاء وعيوب الوردية السابقة، وتوزيع المهام على المحطات.',
     details: [
       'Line operators attendance check completed; all critical workstations manned and ready.',
       'Daily production targets, meter batch numbers, and scheduled run plan clearly communicated.',
       'Quality & defect briefing: review of previous shift defects, KO boards, and lessons learned to prevent recurrence.',
       'Workstation assignment confirmed, safety/HSE reminders briefed, and operator questions addressed.'
+    ],
+    arabicDetails: [
+      'حصر حضور مشغلي الخط والتأكد من تواجد وتغطية مشغلي المحطات الحساسة في مواقعهم.',
+      'استعراض أهداف الإنتاج اليومية، رقم تشغيلة العدادات (Batch)، وخطة التشغيل الزمنية بدقة.',
+      'مراجعة تنبيهات الجودة وأعطال الوردية السابقة وحالات التوقف (KO) لتفادي تكرارها.',
+      'تأكيد توزيع المهام على المحطات، والتذكير بتعليمات السلامة المهنية وتفريغ الشحنات (ESD).'
     ]
   },
   {
@@ -59,11 +65,16 @@ const CHECKLIST_ITEMS = [
     tag: 'People & HSE',
     color: '#0284c7',
     summary: 'Operators qualified in skill matrix, wearing full PPE, and compliant with safety & workstation rules.',
-    arabicSummary: 'التأكد من إدراج المشغلين بقائمة المهارات، ارتداء مهمات الوقاية كاملة، والالتزام بقواعد السلامة والعمل ومعايير الجودة.',
+    arabicSummary: 'التأكد من إدراج وتأهيل المشغلين بقائمة المهارات، ارتداء مهمات الوقاية كاملة، والالتزام بقواعد السلامة والعمل ومعايير الجودة.',
     details: [
       'Operators listed in Skill Matrix & certified for their assigned station (Assembly, Calibration, Multi-Test, Packaging).',
       'Required PPE worn: safety shoes, ESD lab coats, grounded wrist straps, and hairnets/gloves where applicable.',
       'Emergency stop buttons and workstation safety rules fully understood by all active operators.'
+    ],
+    arabicDetails: [
+      'اعتماد وتأهيل المشغلين في مصفوفة المهارات (Skill Matrix) للعمل على المحطة المحددة (Assembly, Calibration, Multi-Test, Packaging).',
+      'الالتزام الكامل بارتداء مهمات الوقاية الشخصية (أحذية السلامة، روب ESD، أساور التأريض، وقفازات/أغطية الشعر عند اللزوم).',
+      'التأكد من جاهزية أزرار الإيقاف في حالات الطوارئ (Emergency Stop) واستيعاب قواعد السلامة بمواقع العمل.'
     ]
   },
   {
@@ -82,6 +93,12 @@ const CHECKLIST_ITEMS = [
       'Electric torque screwdrivers verified with valid calibration tags and set to specified torque (Nm) for terminal/cover screws.',
       'Assembly jigs, fixtures, holding clamps, and manual presses inspected for wear, alignment, and secure mounting.',
       'Workbench ESD grounding mats and ground wires verified and physically connected.'
+    ],
+    arabicDetails: [
+      'توفر تعليمات العمل المعتمدة (WI) ومعايير فحص الجودة (FI) محدثة وموقعة ومقروءة عند كل محطة.',
+      'فحص المفكات الكهربائية (Torque Screwdrivers) والتأكد من ملصقات المعايرة السارية وضبط عزم الدوران (Nm) بدقة.',
+      'فحص مثبتات التجميع والمكابس اليدوية (Fixtures/Jigs) للتأكد من خلوها من التآكل وتثبيتها بإحكام.',
+      'التحقق من توصيل بساط تفريغ الشحنات الكهربائية (ESD Grounding Mats) وأسلاك التأريض بجميع طاولات العمل.'
     ]
   },
   {
@@ -100,6 +117,12 @@ const CHECKLIST_ITEMS = [
       'Multi-Test benches powered on, calibration due dates valid, and automated testing software running with zero error codes.',
       'Update PC 1 and Update PC 2 connected to local network with firmware logging directories active and synchronized.',
       'Laser marking machines, label printers, and handheld barcode scanners operational and communicating.'
+    ],
+    arabicDetails: [
+      'ضغط الهواء بالكمبريسر المركزي ضمن النطاق المعياري (6.0 - 8.0 Bar) مع خلو الخطوط من أي تسريب أو رطوبة.',
+      'تشغيل محطات الفحص الشامل (Multi-Test)، سريان صلاحية المعايرة، وعمل برامج الاختبار دون أي إنذارات أو أكواد أخطاء.',
+      'اتصال أجهزة التحديث (Update PC 1 & PC 2) بالشبكة الداخلية وتزامن مجلدات تسجيل الفيرموير (Logs).',
+      'جاهزية ماكينات وسم الليزر وطابعات ملصقات الباركود وقارئات الباركود اليدوية للعمل بكفاءة.'
     ]
   },
   {
@@ -118,6 +141,12 @@ const CHECKLIST_ITEMS = [
       'Pre-shift "Golden Sample" / Reference Meter run completed on test benches with 100% PASS result.',
       'Quality defect logging sheets and digital inspection forms ready at each inspection checkpoint.',
       'Defect classification guide and visual quality acceptance samples visible at inspection stations.'
+    ],
+    arabicDetails: [
+      'اتصال قاعدة بيانات نظام التتبع (Traceability) ومطابقة قراءة الأرقام التسلسلية وعناوين الماك (MAC) فورياً دون تأخير.',
+      'اجتياز اختبار العينة المعيارية (Golden Sample) بنجاح 100% (PASS) على أجهزة الفحص قبل بدء تشغيل الوردية.',
+      'جاهزية سجلات ونماذج الفحص الرقمية والورقية لتوثيق أي عيوب أو ملاحظات عند نقاط التفتيش.',
+      'توفر دليل تصنيف العيوب ونماذج العينات البصرية المقبولة والمعيبة بوضوح عند محطات الفحص.'
     ]
   },
   {
@@ -136,6 +165,12 @@ const CHECKLIST_ITEMS = [
       'Staged raw materials (terminal blocks, base covers, top covers, screws, seals, and PCBA boards) inspected and labeled.',
       'Line Clearance: all parts, loose boards, and finished goods from previous shift completely removed from workbenches.',
       'Component staging buffers (trolleys and bins) verified with adequate quantities to sustain production.'
+    ],
+    arabicDetails: [
+      'مطابقة رقم دفعة الكيت (Kit Batch) مع أمر التشغيل اليومي لتفادي أي خلط في موديلات أو إعدادات العدادات.',
+      'فحص وتعريف المواد المجهزة (الروزتة، القواعد، الأغطية، البراغي، الأختام، وبوردات PCBA المعتمدة).',
+      'إخلاء الخط (Line Clearance): إزالة كافة القطع والمكونات وبوردات الوردية السابقة والمنتجات المكتملة تماماً.',
+      'التحقق من كفاية المواد في عربات وسلال التخزين المؤقت لاستمرار التدفق الإنتاجي دون انقطاع.'
     ]
   },
   {
@@ -154,6 +189,12 @@ const CHECKLIST_ITEMS = [
       'Shipping barcode labels, serial number stickers, and calibration test certificates staged and verified.',
       'Palletizing setup verified: solid wooden/plastic pallets, corner protectors available, standard stacking height adhered to.',
       'Workstations 5S clean and organized; cardboard bins cleared, and scrap/reject bins emptied and tagged with red labels.'
+    ],
+    arabicDetails: [
+      'فحص كراتين التغليف الخارجية، القواطع الكرتونية، مواد التبطين، وأشرطة التحزيم وتجهيزها للتعبئة.',
+      'مطابقة ملصقات الباركود الخارجية، لاصقات الأرقام التسلسلية، وشهادات المعايرة المعتمدة المطبوعة.',
+      'تجهيز باليتات الشحن السليمة، توفر زوايا الحماية الكرتونية، والالتزام بارتفاع الرص المعياري الآمن.',
+      'تنظيم المحطات وفق منهجية 5S وتفريغ حاويات الهالك (Reject Bins) والصناديق الكرتونية الفارغة ووضع البطاقات الحمراء.'
     ]
   }
 ];
@@ -726,11 +767,11 @@ export default function PreProductionChecklist() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 14 }}>
                 {/* Item Titles & Badges */}
                 <div style={{ flex: 1, minWidth: 280 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
                     <span style={{
-                      padding: '2px 8px',
+                      padding: '2px 9px',
                       borderRadius: 6,
-                      fontSize: '0.74rem',
+                      fontSize: '0.76rem',
                       fontWeight: 900,
                       background: '#f1f5f9',
                       color: 'var(--navy)',
@@ -738,57 +779,79 @@ export default function PreProductionChecklist() {
                     }}>
                       Cat: {item.cat}
                     </span>
-                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 900, color: 'var(--navy)' }}>
-                      {item.title}
+                    
+                    {/* Primary Title (Arabic highlighted and enlarged when in Arabic mode) */}
+                    <h3 style={{ 
+                      margin: 0, 
+                      fontSize: isArabic ? '1.18rem' : '1.02rem', 
+                      fontWeight: 900, 
+                      color: 'var(--navy)',
+                      lineHeight: 1.4
+                    }}>
+                      {isArabic ? (item.arabicTitle || item.title) : item.title}
                     </h3>
+
                     {item.critical && (
                       <span style={{
-                        fontSize: '0.65rem',
+                        fontSize: '0.68rem',
                         fontWeight: 900,
                         background: '#fee2e2',
                         color: '#b91c1c',
-                        padding: '1px 6px',
-                        borderRadius: 4
+                        padding: '2px 8px',
+                        borderRadius: 6,
+                        border: '1px solid #fca5a5'
                       }}>
-                        MANDATORY
+                        {isArabic ? 'إلزامي (MANDATORY)' : 'MANDATORY'}
                       </span>
                     )}
                   </div>
 
-                  {item.arabicTitle && (
-                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#0369a1', marginBottom: 6, direction: 'rtl', textAlign: 'right' }}>
-                      {item.arabicTitle}
+                  {/* Secondary Title */}
+                  {isArabic ? (
+                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                      {item.title}
                     </div>
+                  ) : (
+                    item.arabicTitle && (
+                      <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0369a1', marginBottom: 6, direction: 'rtl', textAlign: 'right' }}>
+                        {item.arabicTitle}
+                      </div>
+                    )
                   )}
 
-                  <p style={{ margin: '0 0 6px', fontSize: '0.82rem', color: '#475569', lineHeight: 1.45 }}>
-                    {item.summary}
+                  <p style={{ margin: '0 0 8px', fontSize: '0.84rem', color: '#475569', lineHeight: 1.5 }}>
+                    {isArabic && item.arabicSummary ? item.arabicSummary : item.summary}
                   </p>
 
                   {/* Stations badges */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
-                    <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8' }}>Applicable Stations:</span>
-                    {item.stations.map(st => (
-                      <span
-                        key={st}
-                        style={{
-                          fontSize: '0.68rem',
-                          fontWeight: 700,
-                          padding: '1px 6px',
-                          borderRadius: 4,
-                          background: '#f1f5f9',
-                          color: '#334155',
-                          border: '1px solid #e2e8f0'
-                        }}
-                      >
-                        {st}
-                      </span>
-                    ))}
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
+                      {isArabic ? 'المحطات المشمولة:' : 'Applicable Stations:'}
+                    </span>
+                    {item.stations.map(st => {
+                      const stArabicLabel = st === 'Assembly' ? 'التجميع' : st === 'Calibration' ? 'المعايرة' : st === 'Multi-Test' ? 'الفحص الشامل' : 'التغليف';
+                      return (
+                        <span
+                          key={st}
+                          style={{
+                            fontSize: '0.7rem',
+                            fontWeight: 800,
+                            padding: '2px 8px',
+                            borderRadius: 5,
+                            background: '#f8fafc',
+                            color: '#334155',
+                            border: '1px solid #cbd5e1'
+                          }}
+                        >
+                          {isArabic ? `${stArabicLabel} (${st})` : st}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Status Action Buttons: PASS / FAIL */}
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: isArabic ? 'flex-start' : 'flex-end', gap: 6 }}>
                   <div style={{ display: 'inline-flex', gap: 6, background: '#f8fafc', padding: 4, borderRadius: 8, border: '1px solid #cbd5e1' }}>
                     {/* PASS Button */}
                     <button
@@ -807,7 +870,7 @@ export default function PreProductionChecklist() {
                         border: isPass ? '2px solid #16a34a' : '1px solid transparent',
                         background: isPass ? '#16a34a' : 'transparent',
                         color: isPass ? '#ffffff' : '#15803d',
-                        boxShadow: isPass ? '0 2px 6px rgba(22, 163, 74, 0.35)' : 'none'
+                        boxShadow: isPass ? '0 2px 6px rgba(220, 38, 38, 0.35)' : 'none'
                       }}
                     >
                       <CheckCircle2 size={16} /> PASS
@@ -862,45 +925,87 @@ export default function PreProductionChecklist() {
                       border: 'none',
                       background: 'transparent',
                       color: '#0369a1',
-                      fontSize: '0.74rem',
-                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 4,
-                      padding: 2
+                      padding: '4px 6px',
+                      borderRadius: 6
                     }}
                   >
-                    {isDetailsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                    {isDetailsOpen ? 'Hide Inspection Details' : `Show Details (${item.details.length} checkpoints)`}
+                    {isDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                    {isDetailsOpen 
+                      ? (isArabic ? 'إخفاء معايير الفحص' : 'Hide Inspection Details') 
+                      : (isArabic ? `عرض معايير الفحص (${(item.arabicDetails || item.details).length} معايير)` : `Show Details (${item.details.length} checkpoints)`)}
                   </button>
                 </div>
               </div>
 
               {/* ── Sub-Checkpoints Details List ── */}
               {isDetailsOpen && (
-                <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid #f1f5f9' }}>
-                  <div style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', marginBottom: 6 }}>
-                    {t('mandatoryCriteria')}
+                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'space-between', 
+                    flexWrap: 'wrap', 
+                    gap: 8, 
+                    marginBottom: 10,
+                    paddingBottom: 6,
+                    borderBottom: '1px dashed #cbd5e1'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.88rem', fontWeight: 900, color: 'var(--navy)' }}>
+                      <ClipboardCheck size={18} color="#0284c7" />
+                      <span>{t('mandatoryCriteria')}</span>
+                    </div>
+                    <span style={{ 
+                      fontSize: '0.72rem', 
+                      fontWeight: 800, 
+                      background: '#e0f2fe', 
+                      color: '#0369a1', 
+                      padding: '2px 10px', 
+                      borderRadius: 12 
+                    }}>
+                      {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).length} {isArabic ? 'معايير فحص إلزامية' : 'Mandatory Criteria'}
+                    </span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 6 }}>
-                    {item.details.map((detail, dIdx) => (
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 8 }}>
+                    {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).map((detail, dIdx) => (
                       <div 
                         key={dIdx} 
                         style={{ 
                           display: 'flex', 
                           alignItems: 'flex-start', 
-                          gap: 8, 
-                          background: '#f8fafc', 
-                          padding: '6px 10px', 
-                          borderRadius: 6, 
-                          border: '1px solid #e2e8f0' 
+                          gap: 10, 
+                          background: isPass ? '#f0fdf4' : (isFail ? '#fef2f2' : '#f8fafc'), 
+                          padding: '9px 12px', 
+                          borderRadius: 8, 
+                          border: `1px solid ${isPass ? '#bbf7d0' : (isFail ? '#fecaca' : '#e2e8f0')}`,
+                          direction: isArabic ? 'rtl' : 'ltr',
+                          textAlign: isArabic ? 'right' : 'left',
+                          boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
                         }}
                       >
-                        <span style={{ color: isPass ? '#16a34a' : '#64748b', marginTop: 2 }}>
-                          {isPass ? <Check size={13} strokeWidth={3} /> : '•'}
-                        </span>
-                        <span style={{ fontSize: '0.76rem', color: '#334155', lineHeight: 1.35 }}>
+                        <div style={{
+                          minWidth: 22,
+                          height: 22,
+                          borderRadius: 6,
+                          background: isPass ? '#16a34a' : (isFail ? '#dc2626' : '#e2e8f0'),
+                          color: isPass || isFail ? '#ffffff' : '#475569',
+                          fontSize: '0.72rem',
+                          fontWeight: 900,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          marginTop: 1
+                        }}>
+                          {isPass ? <Check size={13} strokeWidth={3} /> : (dIdx + 1)}
+                        </div>
+                        <span style={{ fontSize: '0.84rem', color: '#1e293b', lineHeight: 1.5, fontWeight: 600 }}>
                           {detail}
                         </span>
                       </div>
@@ -1303,17 +1408,38 @@ function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t
                         <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>{item.tag}</div>
                       </td>
                       <td style={{ border: '1px solid #cbd5e1', padding: '6px 10px', verticalAlign: 'top' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.78rem', marginBottom: 2 }}>
-                          {item.title}
-                        </div>
-                        {item.arabicTitle && (
-                          <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0369a1', marginBottom: 4 }}>
-                            {item.arabicTitle}
-                          </div>
+                        {isArabic ? (
+                          <>
+                            <div style={{ fontWeight: 900, color: 'var(--navy)', fontSize: '0.88rem', marginBottom: 2 }}>
+                              {item.arabicTitle || item.title}
+                            </div>
+                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: 4 }}>
+                              {item.title}
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.8rem', marginBottom: 2 }}>
+                              {item.title}
+                            </div>
+                            {item.arabicTitle && (
+                              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0369a1', marginBottom: 4 }}>
+                                {item.arabicTitle}
+                              </div>
+                            )}
+                          </>
                         )}
-                        <ul style={{ margin: '2px 0 0', paddingInlineStart: 16, fontSize: '0.7rem', color: '#475569', lineHeight: 1.35 }}>
-                          {item.details.map((d, dIdx) => (
-                            <li key={dIdx} style={{ marginBottom: 2 }}>{d}</li>
+                        <ul style={{ 
+                          margin: '3px 0 0', 
+                          paddingInlineStart: 18, 
+                          fontSize: '0.72rem', 
+                          color: '#334155', 
+                          lineHeight: 1.45,
+                          direction: isArabic ? 'rtl' : 'ltr',
+                          textAlign: isArabic ? 'right' : 'left'
+                        }}>
+                          {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).map((d, dIdx) => (
+                            <li key={dIdx} style={{ marginBottom: 3 }}>{d}</li>
                           ))}
                         </ul>
                       </td>

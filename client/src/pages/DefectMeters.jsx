@@ -55,6 +55,7 @@ const STAGES = [
 const STAGE_IDS = STAGES.map(s => s.id);
 
 const COMMON_DEFECT_CODES = [
+  '0',
   '-640',
   'E-101',
   'KO_COMM',
@@ -84,7 +85,7 @@ export default function DefectMeters() {
   const [wizardStep, setWizardStep] = useState(1);
   const [scanSerial, setScanSerial] = useState('');
   const [selectedStage, setSelectedStage] = useState('Assembly');
-  const [defectCode, setDefectCode] = useState('-640');
+  const [defectCode, setDefectCode] = useState('');
   const [loggedBy, setLoggedBy] = useState(user?.name || 'Supervisor');
   const [defectNotes, setDefectNotes] = useState('');
 
@@ -105,6 +106,23 @@ export default function DefectMeters() {
   const [isSubmittingRepair, setIsSubmittingRepair] = useState(false);
 
   const [lifecycleModalMeter, setLifecycleModalMeter] = useState(null);
+
+  // ── Admin Edit Defect Meter State ──────────────────────────────────────────
+  const [adminEditModalMeter, setAdminEditModalMeter] = useState(null);
+  const [editFormData, setEditFormData] = useState({
+    serial_number: '',
+    stage: 'Assembly',
+    defect_code: '',
+    status: 'UNDER_INSPECTION',
+    entry_count: 1,
+    return_count: 0,
+    logged_by: '',
+    notes: '',
+    repaired_by: '',
+    repair_notes: '',
+    return_destination: ''
+  });
+  const [isSavingAdminEdit, setIsSavingAdminEdit] = useState(false);
 
   // ── Tab 2: Calibration & Statistical Analytics State ──────────────────────
   const [records, setRecords] = useState([]);
@@ -196,6 +214,45 @@ export default function DefectMeters() {
     return defectiveMeters.find(m => m.serial_number && m.serial_number.toLowerCase() === trimmed.toLowerCase()) || null;
   }, [scanSerial, defectiveMeters]);
 
+  // ── Strict Cycle Validation: (Defect Entry -> Repair & Return -> Next Defect Entry) ──
+  // A meter CANNOT be registered twice in a row without being repaired first!
+  const meterBlockReason = useMemo(() => {
+    if (!detectedPreviousMeter) return null;
+
+    // 1. Permanently scrapped / KO meter cannot be re-registered
+    if (detectedPreviousMeter.status === 'SCRAPPED_KO') {
+      return {
+        type: 'SCRAPPED',
+        title: isArabic ? '🛑 عداد مستبعد نهائياً (Scrap / KO)' : '🛑 Permanently Scrapped Meter',
+        message: isArabic 
+          ? `هذا العداد مستبعد نهائياً وتالف دائم ولا يمكن إعادة تسجيله أو إدخاله للإنتاج مجدداً.`
+          : `This meter was marked as permanently SCRAPPED/KO and cannot be re-registered in production.`,
+        rule: isArabic
+          ? 'حالة العداد: تالف دائم (Scrapped)'
+          : 'Status: Permanently Scrapped'
+      };
+    }
+
+    // 2. If status is NOT RETURNED_TO_LINE, or return_count < entry_count: meter is still pending repair!
+    const isRepairedAndReturned = detectedPreviousMeter.status === 'RETURNED_TO_LINE' ||
+      ((detectedPreviousMeter.return_count || 0) >= (detectedPreviousMeter.entry_count || 1));
+
+    if (!isRepairedAndReturned) {
+      return {
+        type: 'PENDING_REPAIR',
+        title: isArabic ? '🛑 غير مسموح بالتسجيل: العداد بانتظار الصيانة والإصلاح!' : '🛑 Registration Blocked: Meter Pending Repair!',
+        message: isArabic
+          ? `العداد مسجل مسبقاً في محطة (${detectedPreviousMeter.stage}) بكود (${detectedPreviousMeter.defect_code}) ولم تتم صيانته بعد.`
+          : `Meter is already logged at (${detectedPreviousMeter.stage}) with code (${detectedPreviousMeter.defect_code}) and has not been repaired yet.`,
+        rule: isArabic
+          ? 'التسلسل الإلزامي هو: (تسجيل عطل ← صيانة وإصلاح ← تسجيل عطل). يجب إتمام الصيانة والإعادة لخط الإنتاج أولاً قبل تسجيل أي عطل جديد.'
+          : 'Strict sequence rule: (Defect Entry -> Repair & Return -> Next Defect Entry). You must complete repair and return before logging another defect.'
+      };
+    }
+
+    return null;
+  }, [detectedPreviousMeter, isArabic]);
+
   // ── Handle Registering a Defective Meter ──────────────────────────────────
   const handleRegisterDefective = async (e) => {
     if (e) e.preventDefault();
@@ -211,8 +268,15 @@ export default function DefectMeters() {
       return;
     }
 
+    // ── STRICT SEQUENCING VALIDATION CHECK ──
+    if (meterBlockReason) {
+      alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
+      setWizardStep(1);
+      return;
+    }
+
     if (!defectCode.trim()) {
-      alert(isArabic ? 'يرجى إدخال أو اختيار كود العطل (مثال: -640).' : 'Please enter or select a defect code (e.g. -640).');
+      alert(isArabic ? 'يرجى إدخال أو اختيار كود العطل (أو 0 للأسمبلي خارج نظام التتبع).' : 'Please enter or select a defect code (or 0 for Assembly without Traceability).');
       setWizardStep(3);
       return;
     }
@@ -317,7 +381,7 @@ export default function DefectMeters() {
       setIsSubmittingDefect(false);
       setScanSerial('');
       setDefectNotes('');
-      setDefectCode('-640');
+      setDefectCode('');
       setWizardStep(1); // Reset immediately to Step 1 for next scan
       setTrackerSuccessMsg(
         isRecurring
@@ -445,6 +509,81 @@ export default function DefectMeters() {
     const nextList = defectiveMeters.filter(m => m.id !== id);
     setDefectiveMeters(nextList);
     localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
+  };
+
+  // ── Admin Edit Functions ──────────────────────────────────────────────────
+  const openAdminEditModal = (meter) => {
+    if (!isAdmin) return;
+    setAdminEditModalMeter(meter);
+    setEditFormData({
+      serial_number: meter.serial_number || '',
+      stage: meter.stage || 'Assembly',
+      defect_code: meter.defect_code || '',
+      status: meter.status || 'UNDER_INSPECTION',
+      entry_count: meter.entry_count || 1,
+      return_count: meter.return_count || 0,
+      logged_by: meter.logged_by || '',
+      notes: meter.notes || '',
+      repaired_by: meter.repaired_by || '',
+      repair_notes: meter.repair_notes || '',
+      return_destination: meter.return_destination || ''
+    });
+  };
+
+  const handleSaveAdminEdit = async () => {
+    if (!adminEditModalMeter || !isAdmin) return;
+    const cleanSerial = editFormData.serial_number.trim();
+    if (!cleanSerial) {
+      alert(isArabic ? 'يرجى إدخال سيريال العداد.' : 'Please enter meter serial number.');
+      return;
+    }
+    if (!editFormData.defect_code.trim()) {
+      alert(isArabic ? 'يرجى إدخال كود العطل.' : 'Please enter defect code.');
+      return;
+    }
+
+    setIsSavingAdminEdit(true);
+    const nowIso = new Date().toISOString();
+
+    const updatedRecord = {
+      ...adminEditModalMeter,
+      serial_number: cleanSerial,
+      stage: editFormData.stage,
+      defect_code: editFormData.defect_code.trim(),
+      status: editFormData.status,
+      entry_count: parseInt(editFormData.entry_count, 10) || 1,
+      return_count: parseInt(editFormData.return_count, 10) || 0,
+      logged_by: editFormData.logged_by.trim() || 'Supervisor',
+      notes: editFormData.notes.trim(),
+      repaired_by: editFormData.repaired_by.trim(),
+      repair_notes: editFormData.repair_notes.trim(),
+      return_destination: editFormData.return_destination,
+      updated_at: nowIso
+    };
+
+    try {
+      const { error } = await supabase
+        .from('defective_meters')
+        .update(updatedRecord)
+        .eq('id', adminEditModalMeter.id);
+
+      if (error) throw error;
+
+      setDefectiveMeters(prev => prev.map(m => m.id === adminEditModalMeter.id ? updatedRecord : m));
+    } catch {
+      const nextList = defectiveMeters.map(m => m.id === adminEditModalMeter.id ? updatedRecord : m);
+      setDefectiveMeters(nextList);
+      localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
+    } finally {
+      setIsSavingAdminEdit(false);
+      setAdminEditModalMeter(null);
+      setTrackerSuccessMsg(
+        isArabic
+          ? `✅ تم تعديل بيانات العداد (${cleanSerial}) بنجاح بواسطة الأدمن.`
+          : `✅ Defective meter (${cleanSerial}) updated successfully by Admin.`
+      );
+      setTimeout(() => setTrackerSuccessMsg(''), 5000);
+    }
   };
 
   // ── Filtered Defective Meters List ────────────────────────────────────────
@@ -763,9 +902,12 @@ export default function DefectMeters() {
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        if (scanSerial.trim()) {
-                          setWizardStep(2);
+                        if (!scanSerial.trim()) return;
+                        if (meterBlockReason) {
+                          alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
+                          return;
                         }
+                        setWizardStep(2);
                       }
                     }}
                     placeholder={isArabic ? 'مثال: 2601004523 (Enter)' : 'e.g. 2601004523 (Enter)'}
@@ -775,43 +917,121 @@ export default function DefectMeters() {
                       fontWeight: 900,
                       textAlign: 'center',
                       letterSpacing: '0.06em',
-                      border: detectedPreviousMeter ? '2.5px solid #f59e0b' : '2px solid #0284c7',
-                      boxShadow: '0 4px 14px rgba(2, 132, 199, 0.14)',
+                      border: meterBlockReason 
+                        ? '2.5px solid #ef4444' 
+                        : (detectedPreviousMeter ? '2.5px solid #f59e0b' : '2px solid #0284c7'),
+                      boxShadow: meterBlockReason
+                        ? '0 4px 14px rgba(239, 68, 68, 0.2)'
+                        : '0 4px 14px rgba(2, 132, 199, 0.14)',
                       borderRadius: 12
                     }}
                     autoFocus
                   />
 
-                  {/* Recurring Meter Alert Pill */}
-                  {detectedPreviousMeter && (
+                  {/* 🛑 Strict Block Banner (Cannot register twice without repair) */}
+                  {meterBlockReason && detectedPreviousMeter && (
                     <div style={{
-                      background: detectedPreviousMeter.entry_count >= 2 ? '#fee2e2' : '#fef3c7',
-                      color: detectedPreviousMeter.entry_count >= 2 ? '#991b1b' : '#92400e',
-                      border: detectedPreviousMeter.entry_count >= 2 ? '1.5px solid #ef4444' : '1px solid #f59e0b',
-                      borderRadius: 8,
-                      padding: '8px 14px',
-                      fontSize: '0.8rem',
+                      background: '#fef2f2',
+                      color: '#991b1b',
+                      border: '2px solid #ef4444',
+                      borderRadius: 12,
+                      padding: '14px 18px',
+                      textAlign: isArabic ? 'right' : 'left',
+                      direction: isArabic ? 'rtl' : 'ltr',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      boxShadow: '0 4px 12px rgba(239, 68, 68, 0.08)'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.94rem', fontWeight: 900 }}>
+                        <ShieldAlert size={20} color="#dc2626" />
+                        <span>{meterBlockReason.title}</span>
+                      </div>
+                      
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#7f1d1d', lineHeight: 1.45, fontWeight: 700 }}>
+                        {meterBlockReason.message}
+                      </p>
+
+                      <div style={{
+                        background: '#fee2e2',
+                        padding: '6px 12px',
+                        borderRadius: 6,
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        color: '#991b1b',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6
+                      }}>
+                        <span>🔄</span>
+                        <span>{meterBlockReason.rule}</span>
+                      </div>
+
+                      {meterBlockReason.type === 'PENDING_REPAIR' && (
+                        <button
+                          type="button"
+                          onClick={() => openRepairModal(detectedPreviousMeter)}
+                          style={{
+                            marginTop: 4,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            padding: '10px 16px',
+                            borderRadius: 8,
+                            background: '#16a34a',
+                            color: '#ffffff',
+                            border: 'none',
+                            fontWeight: 900,
+                            fontSize: '0.86rem',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)'
+                          }}
+                        >
+                          <Wrench size={16} />
+                          <span>{isArabic ? 'فتح نافذة الصيانة والإصلاح لهذا العداد الآن' : 'Open Repair Modal for this Meter Now'}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ⚠️ Recurring Meter Notice (Repaired previously, now registering next defect cycle) */}
+                  {!meterBlockReason && detectedPreviousMeter && (
+                    <div style={{
+                      background: detectedPreviousMeter.entry_count >= 2 ? '#fef3c7' : '#f0fdf4',
+                      color: detectedPreviousMeter.entry_count >= 2 ? '#92400e' : '#166534',
+                      border: detectedPreviousMeter.entry_count >= 2 ? '1.5px solid #f59e0b' : '1.5px solid #86efac',
+                      borderRadius: 10,
+                      padding: '10px 14px',
+                      fontSize: '0.84rem',
                       fontWeight: 800,
                       textAlign: 'center',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: 6
+                      gap: 8
                     }}>
-                      <ShieldAlert size={16} />
-                      {detectedPreviousMeter.entry_count >= 2
-                        ? (isArabic ? `🛑 عداد مكرر عالي الخطورة! دخل ${detectedPreviousMeter.entry_count} مرات سابقاً - ستكون هذه الدورة #${detectedPreviousMeter.entry_count + 1}` : `🛑 Critical repeated failure! Entered ${detectedPreviousMeter.entry_count} times previously`)
-                        : (isArabic ? `⚠️ تنبيه: مسجل سابقاً في مرحلة ${detectedPreviousMeter.stage} (كود ${detectedPreviousMeter.defect_code}) - ستكون الدورة #2` : `⚠️ Notice: Previously entered at ${detectedPreviousMeter.stage} (Code ${detectedPreviousMeter.defect_code})`)}
+                      <CheckCircle2 size={18} />
+                      <span>
+                        {isArabic 
+                          ? `⚠️ عداد عائد من صيانة سابقة (أعيد للخط سابقاً). سيتم تسجيل خروج جديد كـ دورة رقم #${(detectedPreviousMeter.entry_count || 1) + 1}.` 
+                          : `⚠️ Meter returned from previous repair. Ready to log as Defect Cycle #${(detectedPreviousMeter.entry_count || 1) + 1}.`}
+                      </span>
                     </div>
                   )}
 
                   <button
                     type="button"
-                    disabled={!scanSerial.trim()}
+                    disabled={!scanSerial.trim() || !!meterBlockReason}
                     onClick={() => {
-                      if (scanSerial.trim()) setWizardStep(2);
+                      if (!scanSerial.trim()) return;
+                      if (meterBlockReason) {
+                        alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
+                        return;
+                      }
+                      setWizardStep(2);
                     }}
-                    className="btn-primary"
+                    className={meterBlockReason ? 'btn-secondary' : 'btn-primary'}
                     style={{
                       height: 48,
                       fontSize: '0.98rem',
@@ -821,11 +1041,19 @@ export default function DefectMeters() {
                       justifyContent: 'center',
                       gap: 8,
                       borderRadius: 10,
-                      opacity: scanSerial.trim() ? 1 : 0.6
+                      opacity: (!scanSerial.trim() || meterBlockReason) ? 0.6 : 1,
+                      cursor: meterBlockReason ? 'not-allowed' : 'pointer',
+                      background: meterBlockReason ? '#e2e8f0' : undefined,
+                      color: meterBlockReason ? '#64748b' : undefined,
+                      border: meterBlockReason ? '1px solid #cbd5e1' : undefined
                     }}
                   >
-                    <span>{isArabic ? 'المتابعة لاختيار المرحلة' : 'Continue to Stage Selection'}</span>
-                    <ArrowRight size={18} />
+                    <span>
+                      {meterBlockReason 
+                        ? (isArabic ? '🛑 التسجيل محظور (العداد بانتظار الصيانة أولاً)' : '🛑 Blocked (Pending Repair)') 
+                        : (isArabic ? 'المتابعة لاختيار المرحلة' : 'Continue to Stage Selection')}
+                    </span>
+                    {!meterBlockReason && <ArrowRight size={18} />}
                   </button>
                 </div>
               </div>
@@ -990,13 +1218,13 @@ export default function DefectMeters() {
                   </h2>
                   <p style={{ margin: '6px 0 0', fontSize: '0.86rem', color: '#64748b' }}>
                     {isArabic 
-                      ? 'اكتب كود العطل (مثل -640) أو اختر من الأكواد الشائعة ثم اضغط Enter للحفظ' 
-                      : 'Type defect code (e.g. -640) or pick a quick code chip and press Enter'}
+                      ? 'اكتب كود العطل ثم اضغط Enter للحفظ' 
+                      : 'Type defect code and press Enter to save'}
                   </p>
                 </div>
 
                 {/* Big Code Input Form */}
-                <div style={{ width: '100%', maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div style={{ width: '100%', maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 14 }}>
                   <input
                     ref={codeInputRef}
                     type="text"
@@ -1009,7 +1237,7 @@ export default function DefectMeters() {
                         handleRegisterDefective();
                       }
                     }}
-                    placeholder={t('defectCodePlaceholder')}
+                    placeholder={isArabic ? 'اكتب كود العطل هنا...' : 'Enter defect code...'}
                     style={{
                       height: 54,
                       fontSize: '1.35rem',
@@ -1022,39 +1250,26 @@ export default function DefectMeters() {
                     autoFocus
                   />
 
-                  {/* Quick Code Chips */}
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-                    {COMMON_DEFECT_CODES.map(cd => (
-                      <button
-                        key={cd}
-                        type="button"
-                        onClick={() => setDefectCode(cd)}
-                        style={{
-                          border: defectCode === cd ? '2px solid #dc2626' : '1px solid #cbd5e1',
-                          background: defectCode === cd ? '#fee2e2' : '#f8fafc',
-                          color: defectCode === cd ? '#b91c1c' : '#475569',
-                          fontSize: '0.74rem',
-                          fontWeight: 800,
-                          padding: '4px 10px',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          transition: 'all 0.12s ease'
-                        }}
-                      >
-                        {cd}
-                      </button>
-                    ))}
+                  {/* 💡 Assembly & Traceability Rule Alert Note */}
+                  <div style={{
+                    background: '#f0fdf4',
+                    border: '1.5px solid #86efac',
+                    borderRadius: 10,
+                    padding: '12px 16px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    direction: isArabic ? 'rtl' : 'ltr',
+                    textAlign: isArabic ? 'right' : 'left',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                  }}>
+                    <span style={{ fontSize: '1.25rem' }}>💡</span>
+                    <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#166534', lineHeight: 1.45 }}>
+                      {isArabic 
+                        ? 'ملاحظة: في حال كان العداد في مرحلة التجميع (Assembly) ولم يدخل نظام التتبع، يكون الكود 0' 
+                        : 'Note: If the meter is at Assembly and has not entered the traceability system, code is 0'}
+                    </span>
                   </div>
-
-                  {/* Optional Notes */}
-                  <input
-                    type="text"
-                    className="search-input"
-                    value={defectNotes}
-                    onChange={e => setDefectNotes(e.target.value)}
-                    placeholder={isArabic ? 'ملاحظات إضافية حول العطل (اختياري)...' : 'Optional defect symptom notes...'}
-                    style={{ fontSize: '0.82rem', textAlign: 'center' }}
-                  />
 
                   {/* Actions */}
                   <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
@@ -1069,7 +1284,7 @@ export default function DefectMeters() {
 
                     <button
                       type="button"
-                      disabled={isSubmittingDefect || isViewer || !defectCode.trim()}
+                      disabled={isSubmittingDefect || isViewer || !defectCode.trim() || !!meterBlockReason}
                       onClick={handleRegisterDefective}
                       className="btn-primary"
                       style={{
@@ -1431,6 +1646,29 @@ export default function DefectMeters() {
                                 </button>
                               )}
 
+                              {/* Admin Edit Button */}
+                              {isAdmin && (
+                                <button
+                                  type="button"
+                                  className="btn-outline"
+                                  onClick={() => openAdminEditModal(meter)}
+                                  title={isArabic ? 'تعديل بيانات العداد (للأدمن)' : 'Edit Defect Record (Admin)'}
+                                  style={{
+                                    borderColor: '#0284c7',
+                                    color: '#0369a1',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 800,
+                                    padding: '4px 8px',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                    background: '#f0f9ff'
+                                  }}
+                                >
+                                  <Edit3 size={13} /> {isArabic ? 'تعديل' : 'Edit'}
+                                </button>
+                              )}
+
                               {/* Admin Delete */}
                               {isAdmin && (
                                 <button
@@ -1674,6 +1912,196 @@ export default function DefectMeters() {
                 <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <button type="button" className="btn-secondary" onClick={() => setLifecycleModalMeter(null)}>
                     {t('close')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Modal: Admin Edit Defective Meter ── */}
+          {adminEditModalMeter && (
+            <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setAdminEditModalMeter(null)}>
+              <div className="modal" style={{ maxWidth: 620 }}>
+                <div className="modal-header">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Edit3 size={20} color="#0284c7" />
+                    <span className="modal-title">
+                      {isArabic ? 'تعديل بيانات العداد المعطل (صلاحية الأدمن)' : 'Edit Defective Meter (Admin Privileges)'}
+                    </span>
+                  </div>
+                  <button type="button" className="modal-close" onClick={() => setAdminEditModalMeter(null)}>×</button>
+                </div>
+
+                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {/* Grid fields: Serial, Stage, Code, Status, Cycles */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                    {/* Serial Number */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'سيريال العداد:' : 'Serial Number:'} <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="search-input"
+                        value={editFormData.serial_number}
+                        onChange={e => setEditFormData(prev => ({ ...prev, serial_number: e.target.value }))}
+                        style={{ fontWeight: 800, fontSize: '0.9rem' }}
+                      />
+                    </div>
+
+                    {/* Stage */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'مرحلة الخروج:' : 'Failure Stage:'}
+                      </label>
+                      <select
+                        className="search-input"
+                        value={editFormData.stage}
+                        onChange={e => setEditFormData(prev => ({ ...prev, stage: e.target.value }))}
+                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
+                      >
+                        {STAGES.map(st => (
+                          <option key={st.id} value={st.id}>{st.name} ({st.arabic})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Defect Code */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'كود العطل:' : 'Defect Code:'} <span style={{ color: '#dc2626' }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        className="search-input"
+                        value={editFormData.defect_code}
+                        onChange={e => setEditFormData(prev => ({ ...prev, defect_code: e.target.value }))}
+                        placeholder={isArabic ? 'مثال: 0 أو -640' : 'e.g. 0 or -640'}
+                        style={{ fontWeight: 800, fontSize: '0.9rem', color: '#dc2626' }}
+                      />
+                    </div>
+
+                    {/* Status */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'حالة العداد:' : 'Status:'}
+                      </label>
+                      <select
+                        className="search-input"
+                        value={editFormData.status}
+                        onChange={e => setEditFormData(prev => ({ ...prev, status: e.target.value }))}
+                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
+                      >
+                        <option value="UNDER_INSPECTION">{isArabic ? '⏳ قيد المعاينة / بانتظار الإصلاح' : 'UNDER_INSPECTION (Pending Repair)'}</option>
+                        <option value="RETURNED_TO_LINE">{isArabic ? '✅ تم الإصلاح وأعيد للخط' : 'RETURNED_TO_LINE (Repaired)'}</option>
+                        <option value="SCRAPPED_KO">{isArabic ? '🛑 تالف دائم (Scrapped / KO)' : 'SCRAPPED_KO (Scrapped)'}</option>
+                      </select>
+                    </div>
+
+                    {/* Entry Count */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'مرات الدخول (دورة العطل):' : 'Entry Cycles:'}
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="search-input"
+                        value={editFormData.entry_count}
+                        onChange={e => setEditFormData(prev => ({ ...prev, entry_count: e.target.value }))}
+                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
+                      />
+                    </div>
+
+                    {/* Return Count */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'مرات الخروج / الإصلاح:' : 'Return Cycles:'}
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        className="search-input"
+                        value={editFormData.return_count}
+                        onChange={e => setEditFormData(prev => ({ ...prev, return_count: e.target.value }))}
+                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
+                      />
+                    </div>
+
+                    {/* Logged By */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'مسؤول التسجيل / المشرف:' : 'Logged By:'}
+                      </label>
+                      <input
+                        type="text"
+                        className="search-input"
+                        value={editFormData.logged_by}
+                        onChange={e => setEditFormData(prev => ({ ...prev, logged_by: e.target.value }))}
+                        style={{ fontWeight: 700, fontSize: '0.86rem' }}
+                      />
+                    </div>
+
+                    {/* Repaired By */}
+                    <div>
+                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                        {isArabic ? 'فني الصيانة:' : 'Repaired By:'}
+                      </label>
+                      <input
+                        type="text"
+                        className="search-input"
+                        value={editFormData.repaired_by}
+                        onChange={e => setEditFormData(prev => ({ ...prev, repaired_by: e.target.value }))}
+                        placeholder={isArabic ? 'اسم الفني...' : 'Technician name...'}
+                        style={{ fontWeight: 700, fontSize: '0.86rem' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Defect Notes */}
+                  <div>
+                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                      {isArabic ? 'ملاحظات العطل أو العرض:' : 'Defect Symptom Notes:'}
+                    </label>
+                    <textarea
+                      rows={2}
+                      className="search-input"
+                      value={editFormData.notes}
+                      onChange={e => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
+                      placeholder={isArabic ? 'تفاصيل العطل...' : 'Defect details...'}
+                      style={{ width: '100%', padding: 8, fontSize: '0.82rem', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  {/* Repair Notes */}
+                  <div>
+                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
+                      {isArabic ? 'إجراءات وقطع الصيانة المستبدلة:' : 'Repair Action & Replaced Parts:'}
+                    </label>
+                    <textarea
+                      rows={2}
+                      className="search-input"
+                      value={editFormData.repair_notes}
+                      onChange={e => setEditFormData(prev => ({ ...prev, repair_notes: e.target.value }))}
+                      placeholder={isArabic ? 'الإجراء التصحيحي...' : 'Corrective action taken...'}
+                      style={{ width: '100%', padding: 8, fontSize: '0.82rem', resize: 'vertical' }}
+                    />
+                  </div>
+                </div>
+
+                <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <button type="button" className="btn-secondary" onClick={() => setAdminEditModalMeter(null)}>
+                    {t('cancel')}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={isSavingAdminEdit}
+                    onClick={handleSaveAdminEdit}
+                    style={{ background: '#0284c7', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 900 }}
+                  >
+                    <Save size={16} />
+                    {isSavingAdminEdit ? 'Saving...' : (isArabic ? 'حفظ التعديلات' : 'Save Changes')}
                   </button>
                 </div>
               </div>
