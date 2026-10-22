@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 // Field definitions strictly matching the user's specification and image + actual factory excel headers (13 fields)
 const EXPECTED_FIELDS = [
@@ -49,6 +50,7 @@ function normalizeHeader(str) {
 
 export default function Batches() {
   const { user } = useAuth();
+  const { t, isArabic } = useLanguage();
   const isAdmin = user?.access === 'admin';
 
   // Batches state
@@ -532,11 +534,11 @@ export default function Batches() {
               fontWeight: 800, 
               letterSpacing: '0.04em' 
             }}>
-              SHIPMENTS
+              {isArabic ? 'الشحنات' : 'SHIPMENTS'}
             </span>
-            <h1 className="page-title" style={{ margin: 0 }}>Batches & Meter Records</h1>
+            <h1 className="page-title" style={{ margin: 0 }}>{t('batchesTitle')}</h1>
           </div>
-          <p className="page-subtitle">Manage, document, and track shipment batches and individual meter records with zero data loss</p>
+          <p className="page-subtitle">{t('batchesSubtitle')}</p>
         </div>
 
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -547,7 +549,7 @@ export default function Batches() {
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'white' }}
           >
             <RefreshCw size={15} />
-            Refresh
+            {isArabic ? 'تحديث' : 'Refresh'}
           </button>
 
           <button 
@@ -564,7 +566,7 @@ export default function Batches() {
             style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '10px 18px', background: 'linear-gradient(135deg, #0284c7, #0369a1)' }}
           >
             <Upload size={18} />
-            Upload Shipment Batch
+            {isArabic ? 'رفع دفعة شحن' : 'Upload Shipment Batch'}
           </button>
         </div>
       </div>
@@ -581,41 +583,41 @@ export default function Batches() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
         <div className="card-white" style={{ borderLeft: '4px solid var(--navy)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 700 }}>
-            <span>Total Shipment Batches</span>
+            <span>{isArabic ? 'إجمالي دفعات الشحن' : 'Total Shipment Batches'}</span>
             <Package size={18} color="var(--navy)" />
           </div>
           <div style={{ fontSize: '1.9rem', fontWeight: 900, color: 'var(--navy)', marginTop: 8 }}>
-            {stats.totalBatches.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>Batches</span>
+            {stats.totalBatches.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>{isArabic ? 'دفعة' : 'Batches'}</span>
           </div>
         </div>
 
         <div className="card-white" style={{ borderLeft: '4px solid #0284c7' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 700 }}>
-            <span>Total Shipped Meters</span>
+            <span>{isArabic ? 'إجمالي العدادات المشحونة' : 'Total Shipped Meters'}</span>
             <Layers size={18} color="#0284c7" />
           </div>
           <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#0369a1', marginTop: 8 }}>
-            {stats.totalMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>Meters</span>
+            {stats.totalMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>{isArabic ? 'عداد' : 'Meters'}</span>
           </div>
         </div>
 
         <div className="card-white" style={{ borderLeft: '4px solid #10b981' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 700 }}>
-            <span>Three Phase Meters</span>
+            <span>{isArabic ? 'عدادات 3 فاز (Three Phase)' : 'Three Phase Meters'}</span>
             <Cpu size={18} color="#10b981" />
           </div>
           <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#059669', marginTop: 8 }}>
-            {stats.threePhaseMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>Meters</span>
+            {stats.threePhaseMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>{isArabic ? 'عداد' : 'Meters'}</span>
           </div>
         </div>
 
         <div className="card-white" style={{ borderLeft: '4px solid #8b5cf6' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--gray-500)', fontSize: '0.8rem', fontWeight: 700 }}>
-            <span>Single Phase Meters</span>
+            <span>{isArabic ? 'عدادات 1 فاز (Single Phase)' : 'Single Phase Meters'}</span>
             <TrendingUp size={18} color="#8b5cf6" />
           </div>
           <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#7c3aed', marginTop: 8 }}>
-            {stats.singlePhaseMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>Meters</span>
+            {stats.singlePhaseMeters.toLocaleString()} <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-500)' }}>{isArabic ? 'عداد' : 'Meters'}</span>
           </div>
         </div>
       </div>
@@ -641,7 +643,7 @@ export default function Batches() {
           }}
         >
           <Package size={17} />
-          Shipment Batches
+          {t('batchesTabTitle')}
         </button>
 
         <button
@@ -663,7 +665,7 @@ export default function Batches() {
           }}
         >
           <Search size={17} />
-          Meter Trace & Search Lookup
+          {t('meterLookupTabTitle')}
         </button>
       </div>
 
@@ -676,7 +678,7 @@ export default function Batches() {
               <Search size={16} style={{ position: 'absolute', right: 12, top: 12, color: 'var(--gray-400)' }} />
               <input
                 type="text"
-                placeholder="Search by batch, destination, or file name..."
+                placeholder={isArabic ? 'بحث بالدفعة، الوجهة، أو اسم الملف...' : 'Search by batch, destination, or file name...'}
                 value={searchTerm}
                 onChange={e => setSearchTerm(e.target.value)}
                 style={{ width: '100%', padding: '9px 36px 9px 12px', borderRadius: 8, border: '1px solid var(--gray-200)', fontSize: '0.88rem' }}
@@ -690,9 +692,9 @@ export default function Batches() {
                 onChange={e => setProductFilter(e.target.value)}
                 style={{ padding: '9px 12px', borderRadius: 8, border: '1px solid var(--gray-200)', fontWeight: 700, fontSize: '0.85rem' }}
               >
-                <option value="ALL">All Products</option>
-                <option value="Three Phase">Three Phase</option>
-                <option value="Single Phase">Single Phase</option>
+                <option value="ALL">{isArabic ? 'جميع المنتجات' : 'All Products'}</option>
+                <option value="Three Phase">{isArabic ? 'ثلاثي الفاز (Three Phase)' : 'Three Phase'}</option>
+                <option value="Single Phase">{isArabic ? 'أحادي الفاز (Single Phase)' : 'Single Phase'}</option>
               </select>
             </div>
 
@@ -706,7 +708,7 @@ export default function Batches() {
               />
               {dateFilter && (
                 <button type="button" onClick={() => setDateFilter('')} style={{ border: 'none', background: 'transparent', color: 'var(--gray-500)', cursor: 'pointer', fontWeight: 700 }}>
-                  Clear
+                  {isArabic ? 'مسح' : 'Clear'}
                 </button>
               )}
             </div>
@@ -718,21 +720,23 @@ export default function Batches() {
               <table>
                 <thead>
                   <tr>
-                    <th>Batch Name</th>
-                    <th>Shipment Date</th>
-                    <th>Product Type</th>
-                    <th style={{ textAlign: 'center' }}>Shipped Qty</th>
-                    <th>Destination</th>
-                    <th>Original File Name</th>
-                    <th>Uploaded By</th>
-                    <th style={{ textAlign: 'center' }}>Actions</th>
+                    <th>{isArabic ? 'اسم الدفعة' : 'Batch Name'}</th>
+                    <th>{isArabic ? 'تاريخ الشحن' : 'Shipment Date'}</th>
+                    <th>{t('product')}</th>
+                    <th style={{ textAlign: 'center' }}>{isArabic ? 'الكمية المشحونة' : 'Shipped Qty'}</th>
+                    <th>{isArabic ? 'الوجهة' : 'Destination'}</th>
+                    <th>{isArabic ? 'اسم الملف الأصلي' : 'Original File Name'}</th>
+                    <th>{isArabic ? 'رُفع بواسطة' : 'Uploaded By'}</th>
+                    <th style={{ textAlign: 'center' }}>{t('actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredBatches.length === 0 ? (
                     <tr>
                       <td colSpan={8} style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--gray-500)' }}>
-                        {loading ? 'Loading batches...' : 'No shipment batches recorded yet. Click "Upload Shipment Batch" to start.'}
+                        {loading 
+                          ? (isArabic ? 'جارِ تحميل الدفعات...' : 'Loading batches...')
+                          : (isArabic ? 'لا توجد دفعات شحن مسجلة بعد. اضغط "رفع دفعة شحن" للبدء.' : 'No shipment batches recorded yet. Click "Upload Shipment Batch" to start.')}
                       </td>
                     </tr>
                   ) : (
@@ -757,19 +761,19 @@ export default function Batches() {
                         </td>
                         <td>
                           <span className={`badge ${b.product_type === 'Three Phase' ? 'badge-teal' : 'badge-purple'}`} style={{ fontSize: '0.78rem' }}>
-                            {b.product_type}
+                            {b.product_type === 'Three Phase' ? (isArabic ? '3 فاز' : 'Three Phase') : (isArabic ? '1 فاز' : 'Single Phase')}
                           </span>
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <span style={{ fontWeight: 900, fontSize: '1.05rem', color: '#0369a1' }}>
                             {(parseInt(b.total_meters, 10) || 0).toLocaleString()}
                           </span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>Meters</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>{isArabic ? 'عداد' : 'Meters'}</span>
                         </td>
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', color: 'var(--navy)' }}>
                             <MapPin size={14} color="#f59e0b" />
-                            <span>{b.destination || 'Nama / Field'}</span>
+                            <span>{b.destination || (isArabic ? 'نماء / الميدان' : 'Nama / Field')}</span>
                           </div>
                         </td>
                         <td style={{ fontSize: '0.8rem', color: 'var(--gray-500)', fontFamily: 'monospace' }}>
@@ -784,18 +788,18 @@ export default function Batches() {
                               type="button"
                               onClick={() => handleInspectBatch(b)}
                               className="btn-outline"
-                              title="View Batch Meters"
+                              title={isArabic ? 'معاينة عدادات الدفعة' : 'View Batch Meters'}
                               style={{ padding: '6px 10px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5, color: '#0284c7', borderColor: '#bae6fd', background: '#f0f9ff' }}
                             >
                               <Eye size={14} />
-                              View
+                              {isArabic ? 'عرض' : 'View'}
                             </button>
 
                             <button
                               type="button"
                               onClick={() => handleExportBatch(b)}
                               className="btn-outline"
-                              title="Export Excel with all fields"
+                              title={isArabic ? 'تصدير إكسيل بجميع الحقول' : 'Export Excel with all fields'}
                               style={{ padding: '6px 10px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: 5, color: '#16a34a', borderColor: '#bbf7d0', background: '#f0fdf4' }}
                             >
                               <Download size={14} />
@@ -807,7 +811,7 @@ export default function Batches() {
                                 type="button"
                                 onClick={() => handleDeleteBatch(b.id, b.batch_name)}
                                 className="btn-outline"
-                                title="Delete Batch"
+                                title={t('delete')}
                                 style={{ padding: '6px 10px', fontSize: '0.8rem', color: '#dc2626', borderColor: '#fecaca', background: '#fef2f2' }}
                               >
                                 <Trash2 size={14} />
@@ -830,10 +834,12 @@ export default function Batches() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div className="card-white" style={{ padding: '24px 28px' }}>
             <h3 style={{ margin: '0 0 8px', color: 'var(--navy)', fontSize: '1.15rem', fontWeight: 800 }}>
-              Search for Meters Across All Uploaded Batches
+              {isArabic ? 'البحث عن العدادات عبر جميع الدفعات المرفوعة' : 'Search for Meters Across All Uploaded Batches'}
             </h3>
             <p style={{ margin: '0 0 18px', color: 'var(--gray-500)', fontSize: '0.85rem' }}>
-              Search any meter by Serial Number, Factory SN, IMEI, ICCID, or Box Number.
+              {isArabic 
+                ? 'ابحث عن أي عداد برقم السيريال، سيريال المصنع، IMEI، ICCID، أو رقم الصندوق.'
+                : 'Search any meter by Serial Number, Factory SN, IMEI, ICCID, or Box Number.'}
             </p>
 
             <form onSubmit={handleGlobalLookup} style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
@@ -841,7 +847,7 @@ export default function Batches() {
                 <Search size={18} style={{ position: 'absolute', right: 14, top: 13, color: 'var(--gray-400)' }} />
                 <input
                   type="text"
-                  placeholder="Enter Serial Number, IMEI, or ICCID to search..."
+                  placeholder={isArabic ? 'أدخل السيريال نمبر، IMEI، أو ICCID للبحث...' : 'Enter Serial Number, IMEI, or ICCID to search...'}
                   value={lookupQuery}
                   onChange={e => setLookupQuery(e.target.value)}
                   style={{ width: '100%', padding: '11px 40px 11px 14px', borderRadius: 10, border: '1.5px solid #cbd5e1', fontSize: '0.95rem' }}
@@ -855,7 +861,7 @@ export default function Batches() {
                 style={{ padding: '11px 24px', display: 'flex', alignItems: 'center', gap: 8, background: '#0284c7' }}
               >
                 {lookupLoading ? <RefreshCw size={16} className="spin" /> : <Search size={16} />}
-                Search Now
+                {isArabic ? 'بحث الآن' : 'Search Now'}
               </button>
             </form>
           </div>
@@ -865,7 +871,7 @@ export default function Batches() {
             <div className="table-card">
               <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.95rem' }}>
-                  Search Results ({lookupResults.length} records)
+                  {isArabic ? `نتائج البحث (${lookupResults.length} سجل)` : `Search Results (${lookupResults.length} records)`}
                 </span>
               </div>
               <div className="table-wrap">
@@ -873,7 +879,7 @@ export default function Batches() {
                   <thead>
                     <tr>
                       <th>Serial Number</th>
-                      <th>Batch Name</th>
+                      <th>{isArabic ? 'اسم الدفعة' : 'Batch Name'}</th>
                       <th>Pallet Number</th>
                       <th>Device Box No</th>
                       <th>Factory SN</th>
@@ -892,7 +898,7 @@ export default function Batches() {
                     {lookupResults.length === 0 ? (
                       <tr>
                         <td colSpan={14} style={{ textAlign: 'center', padding: '30px 20px', color: 'var(--gray-500)' }}>
-                          No meters found matching your search query.
+                          {isArabic ? 'لا توجد عدادات مطابقة لاستعلام البحث.' : 'No meters found matching your search query.'}
                         </td>
                       </tr>
                     ) : (
@@ -939,7 +945,7 @@ export default function Batches() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <Upload size={22} color="#0284c7" />
                 <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>
-                  Upload & Document Shipment Batch
+                  {isArabic ? 'رفع وتوثيق دفعة شحن جديدة' : 'Upload & Document Shipment Batch'}
                 </h2>
               </div>
               {!isUploading && (
@@ -961,10 +967,12 @@ export default function Batches() {
               }}>
                 <FileSpreadsheet size={40} color="#0284c7" style={{ margin: '0 auto 10px' }} />
                 <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '1rem', marginBottom: 4 }}>
-                  {uploadFile ? uploadFile.name : 'Drag & drop Excel file (XLSX, XLS, CSV) here or click to browse'}
+                  {uploadFile ? uploadFile.name : (isArabic ? 'اسحب وأفلت ملف إكسيل (XLSX, XLS, CSV) هنا أو اضغط للاختيار' : 'Drag & drop Excel file (XLSX, XLS, CSV) here or click to browse')}
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>
-                  Includes all 13 fields: Device_pallet_number, Device_box_number, Factory serial number, Serial_number, Module_IMEI, Module_ICCID ...
+                  {isArabic 
+                    ? 'يشمل جميع الحقول الـ 13: رقم الباليت، رقم الصندوق، سيريال المصنع، السيريال، IMEI، ICCID...'
+                    : 'Includes all 13 fields: Device_pallet_number, Device_box_number, Factory serial number, Serial_number, Module_IMEI, Module_ICCID ...'}
                 </div>
                 <input
                   type="file"
@@ -987,12 +995,12 @@ export default function Batches() {
               {parsedStats && (
                 <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                   <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>Total meters read: </span>
-                    <strong style={{ fontSize: '1.1rem', color: '#16a34a' }}>{parsedStats.totalMeters.toLocaleString()} Meters</strong>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>{isArabic ? 'إجمالي العدادات المقروءة: ' : 'Total meters read: '}</span>
+                    <strong style={{ fontSize: '1.1rem', color: '#16a34a' }}>{parsedStats.totalMeters.toLocaleString()} {isArabic ? 'عداد' : 'Meters'}</strong>
                   </div>
                   <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>Matched columns: </span>
-                    <strong style={{ color: 'var(--navy)' }}>{parsedStats.mappedColumns} out of 13 fields</strong>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--gray-500)' }}>{isArabic ? 'الأعمدة المطابقة: ' : 'Matched columns: '}</span>
+                    <strong style={{ color: 'var(--navy)' }}>{parsedStats.mappedColumns} {isArabic ? 'من أصل 13 حقل' : 'out of 13 fields'}</strong>
                   </div>
                 </div>
               )}
@@ -1000,7 +1008,7 @@ export default function Batches() {
               {/* Metadata Form */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Batch Name *</label>
+                  <label style={{ fontWeight: 700 }}>{isArabic ? 'اسم الدفعة *' : 'Batch Name *'}</label>
                   <input
                     type="text"
                     placeholder="e.g. Batch 1 - Nama Dispatch"
@@ -1012,7 +1020,7 @@ export default function Batches() {
                 </div>
 
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Shipment Date *</label>
+                  <label style={{ fontWeight: 700 }}>{isArabic ? 'تاريخ الشحن *' : 'Shipment Date *'}</label>
                   <input
                     type="date"
                     value={shipmentDate}
@@ -1022,19 +1030,19 @@ export default function Batches() {
                 </div>
 
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Product Type *</label>
+                  <label style={{ fontWeight: 700 }}>{t('product')} *</label>
                   <select
                     value={productType}
                     onChange={e => setProductType(e.target.value)}
                     disabled={isUploading}
                   >
-                    <option value="Three Phase">Three Phase (3-Phase Smart Meter)</option>
-                    <option value="Single Phase">Single Phase (1-Phase Smart Meter)</option>
+                    <option value="Three Phase">{isArabic ? 'ثلاثي الفاز (Three Phase)' : 'Three Phase (3-Phase Smart Meter)'}</option>
+                    <option value="Single Phase">{isArabic ? 'أحادي الفاز (Single Phase)' : 'Single Phase (1-Phase Smart Meter)'}</option>
                   </select>
                 </div>
 
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Destination *</label>
+                  <label style={{ fontWeight: 700 }}>{isArabic ? 'الوجهة *' : 'Destination *'}</label>
                   <input
                     type="text"
                     value={destination}
@@ -1045,10 +1053,10 @@ export default function Batches() {
               </div>
 
               <div className="form-group">
-                <label style={{ fontWeight: 700 }}>Shipment Notes</label>
+                <label style={{ fontWeight: 700 }}>{t('notes')}</label>
                 <textarea
                   rows={2}
-                  placeholder="Any details regarding shipment, dispatch notes, or PO number..."
+                  placeholder={isArabic ? 'أي تفاصيل بخصوص الشحنة أو رقم أمر الشراء...' : 'Any details regarding shipment, dispatch notes, or PO number...'}
                   value={batchNotes}
                   onChange={e => setBatchNotes(e.target.value)}
                   disabled={isUploading}
@@ -1077,7 +1085,7 @@ export default function Batches() {
                 onClick={() => setShowUploadModal(false)}
                 disabled={isUploading}
               >
-                Cancel
+                {t('cancel')}
               </button>
               <button
                 type="button"
@@ -1087,7 +1095,7 @@ export default function Batches() {
                 style={{ background: '#0284c7', display: 'flex', alignItems: 'center', gap: 8 }}
               >
                 {isUploading ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
-                Save Shipment & Meter Records
+                {isArabic ? 'حفظ الشحنة وسجلات العدادات' : 'Save Shipment & Meter Records'}
               </button>
             </div>
           </div>
@@ -1107,11 +1115,13 @@ export default function Batches() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <Package size={22} color="#0284c7" />
                   <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>
-                    Meter Records: {inspectBatch.batch_name}
+                    {isArabic ? `سجلات العدادات: ${inspectBatch.batch_name}` : `Meter Records: ${inspectBatch.batch_name}`}
                   </h2>
                 </div>
                 <div style={{ fontSize: '0.8rem', color: 'var(--gray-500)', marginTop: 4 }}>
-                  Shipment Date: {inspectBatch.shipment_date} | Destination: {inspectBatch.destination} | Total: {inspectBatch.total_meters?.toLocaleString()} Meters
+                  {isArabic 
+                    ? `تاريخ الشحن: ${inspectBatch.shipment_date} | الوجهة: ${inspectBatch.destination} | الإجمالي: ${inspectBatch.total_meters?.toLocaleString()} عداد`
+                    : `Shipment Date: ${inspectBatch.shipment_date} | Destination: ${inspectBatch.destination} | Total: ${inspectBatch.total_meters?.toLocaleString()} Meters`}
                 </div>
               </div>
 
@@ -1123,7 +1133,7 @@ export default function Batches() {
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 6, color: '#16a34a', borderColor: '#86efac', background: '#f0fdf4' }}
                 >
                   <Download size={15} />
-                  Export Excel
+                  {isArabic ? 'تصدير إكسيل' : 'Export Excel'}
                 </button>
                 <button type="button" className="btn-close" onClick={() => setInspectBatch(null)}>
                   <X size={20} />
@@ -1137,7 +1147,7 @@ export default function Batches() {
                 <Search size={16} style={{ position: 'absolute', right: 12, top: 11, color: 'var(--gray-400)' }} />
                 <input
                   type="text"
-                  placeholder="Filter meters by serial number, IMEI, Box No..."
+                  placeholder={isArabic ? 'فلترة العدادات بالسيريال نمبر، IMEI، رقم الصندوق...' : 'Filter meters by serial number, IMEI, Box No...'}
                   value={inspectSearch}
                   onChange={e => {
                     setInspectSearch(e.target.value);
@@ -1172,13 +1182,13 @@ export default function Batches() {
                     {inspectLoading ? (
                       <tr>
                         <td colSpan={14} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
-                          Loading meters...
+                          {isArabic ? 'جارِ تحميل العدادات...' : 'Loading meters...'}
                         </td>
                       </tr>
                     ) : paginatedInspectMeters.length === 0 ? (
                       <tr>
                         <td colSpan={14} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-500)' }}>
-                          No matching meters found.
+                          {isArabic ? 'لا توجد عدادات مطابقة.' : 'No matching meters found.'}
                         </td>
                       </tr>
                     ) : (
@@ -1212,7 +1222,11 @@ export default function Batches() {
               {/* Pagination controls */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--gray-600)', paddingTop: 6 }}>
                 <div>
-                  Total Results: <b>{filteredInspectMeters.length.toLocaleString()}</b> meters (Page {inspectPage} of {totalInspectPages})
+                  {isArabic ? (
+                    <>إجمالي النتائج: <b>{filteredInspectMeters.length.toLocaleString()}</b> عداد (صفحة {inspectPage} من {totalInspectPages})</>
+                  ) : (
+                    <>Total Results: <b>{filteredInspectMeters.length.toLocaleString()}</b> meters (Page {inspectPage} of {totalInspectPages})</>
+                  )}
                 </div>
 
                 <div style={{ display: 'flex', gap: 6 }}>
@@ -1223,7 +1237,7 @@ export default function Batches() {
                     onClick={() => setInspectPage(p => Math.max(1, p - 1))}
                     style={{ padding: '4px 10px', fontSize: '0.8rem' }}
                   >
-                    Previous
+                    {isArabic ? 'السابق' : 'Previous'}
                   </button>
                   <button
                     type="button"
@@ -1232,7 +1246,7 @@ export default function Batches() {
                     onClick={() => setInspectPage(p => Math.min(totalInspectPages, p + 1))}
                     style={{ padding: '4px 10px', fontSize: '0.8rem' }}
                   >
-                    Next
+                    {isArabic ? 'التالي' : 'Next'}
                   </button>
                 </div>
               </div>
@@ -1244,7 +1258,7 @@ export default function Batches() {
                 className="btn-outline"
                 onClick={() => setInspectBatch(null)}
               >
-                Close
+                {t('close')}
               </button>
             </div>
           </div>

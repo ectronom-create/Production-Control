@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 // ─── Access options ───────────────────────────────────────────────────────────
 const ACCESS_OPTIONS = ['admin', 'supervisor', 'viewer'];
@@ -22,6 +23,7 @@ function emptyForm() {
 
 // ─── User Form Modal ──────────────────────────────────────────────────────────
 function UserModal({ mode, initial, onClose, onSaved }) {
+  const { t, isArabic } = useLanguage();
   const isEdit = mode === 'edit';
   const [form,    setForm]    = useState(initial || emptyForm());
   const [error,   setError]   = useState('');
@@ -35,8 +37,8 @@ function UserModal({ mode, initial, onClose, onSaved }) {
     e.preventDefault();
     setError('');
 
-    if (!form.name.trim()) { setError('Name is required.'); return; }
-    if (!isEdit && !form.password.trim()) { setError('Password is required.'); return; }
+    if (!form.name.trim()) { setError(isArabic ? 'الاسم مطلوب.' : 'Name is required.'); return; }
+    if (!isEdit && !form.password.trim()) { setError(isArabic ? 'كلمة المرور مطلوبة.' : 'Password is required.'); return; }
 
     setLoading(true);
     try {
@@ -57,7 +59,7 @@ function UserModal({ mode, initial, onClose, onSaved }) {
       }
       onSaved(savedUser, isEdit);
     } catch (err) {
-      setError(err?.message || 'An error occurred. Please try again.');
+      setError(err?.message || (isArabic ? 'حدث خطأ. يرجى المحاولة مرة أخرى.' : 'An error occurred. Please try again.'));
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,9 @@ function UserModal({ mode, initial, onClose, onSaved }) {
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <span className="modal-title">{isEdit ? 'Edit User' : 'Add User'}</span>
+          <span className="modal-title">
+            {isEdit ? (isArabic ? 'تعديل المستخدم' : 'Edit User') : (isArabic ? 'إضافة مستخدم جديد' : 'Add User')}
+          </span>
           <button className="modal-close" onClick={onClose} disabled={loading}>×</button>
         </div>
 
@@ -76,10 +80,10 @@ function UserModal({ mode, initial, onClose, onSaved }) {
             {error && <div className="modal-error">{error}</div>}
 
             <div className="form-group">
-              <label>Name *</label>
+              <label>{t('name')} *</label>
               <input
                 type="text"
-                placeholder="Full name"
+                placeholder={isArabic ? 'الاسم بالكامل' : 'Full name'}
                 value={form.name}
                 onChange={set('name')}
                 disabled={loading}
@@ -88,19 +92,19 @@ function UserModal({ mode, initial, onClose, onSaved }) {
             </div>
 
             <div className="form-group">
-              <label>{isEdit ? 'New Password' : 'Password *'}</label>
+              <label>{isEdit ? (isArabic ? 'كلمة مرور جديدة' : 'New Password') : (isArabic ? 'كلمة المرور *' : 'Password *')}</label>
               <input
                 type="password"
-                placeholder={isEdit ? 'Leave blank to keep current password' : 'Set a password'}
+                placeholder={isEdit ? (isArabic ? 'اتركه فارغاً للحفاظ على كلمة المرور الحالية' : 'Leave blank to keep current password') : (isArabic ? 'تعيين كلمة مرور' : 'Set a password')}
                 value={form.password}
                 onChange={set('password')}
                 disabled={loading}
               />
-              {isEdit && <p className="hint">Leave blank to keep the existing password.</p>}
+              {isEdit && <p className="hint">{isArabic ? 'اتركه فارغاً للحفاظ على كلمة المرور الحالية.' : 'Leave blank to keep the existing password.'}</p>}
             </div>
 
             <div className="form-group">
-              <label>Company ID</label>
+              <label>{t('companyId')}</label>
               <input
                 type="text"
                 placeholder="e.g. ECTRON-001"
@@ -111,7 +115,7 @@ function UserModal({ mode, initial, onClose, onSaved }) {
             </div>
 
             <div className="form-group">
-              <label>Email</label>
+              <label>{t('email')}</label>
               <input
                 type="email"
                 placeholder="user@ectron.com"
@@ -122,7 +126,7 @@ function UserModal({ mode, initial, onClose, onSaved }) {
             </div>
 
             <div className="form-group">
-              <label>Phone Number</label>
+              <label>{t('phone')}</label>
               <input
                 type="tel"
                 placeholder="+968 xxxx xxxx"
@@ -133,7 +137,7 @@ function UserModal({ mode, initial, onClose, onSaved }) {
             </div>
 
             <div className="form-group">
-              <label>Access Level</label>
+              <label>{t('accessLevel')}</label>
               <select
                 className="form-select"
                 value={form.access}
@@ -141,13 +145,17 @@ function UserModal({ mode, initial, onClose, onSaved }) {
                 disabled={loading}
               >
                 {ACCESS_OPTIONS.map(a => (
-                  <option key={a} value={a}>{a.charAt(0).toUpperCase() + a.slice(1)}</option>
+                  <option key={a} value={a}>
+                    {isArabic 
+                      ? (a === 'admin' ? 'مدير (Admin)' : a === 'supervisor' ? 'مشرف (Supervisor)' : 'مشاهد (Viewer)')
+                      : (a.charAt(0).toUpperCase() + a.slice(1))}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="form-group">
-              <label>Team Name</label>
+              <label>{t('team')}</label>
               <input
                 type="text"
                 placeholder="e.g. Group w, Team Alpha, Shift A"
@@ -160,10 +168,10 @@ function UserModal({ mode, initial, onClose, onSaved }) {
 
           <div className="modal-footer">
             <button type="button" className="btn-secondary" onClick={onClose} disabled={loading}>
-              Cancel
+              {t('cancel')}
             </button>
             <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? <span className="spinner" /> : isEdit ? 'Save Changes' : 'Add User'}
+              {loading ? <span className="spinner" /> : isEdit ? t('saveChanges') : (isArabic ? 'إضافة المستخدم' : 'Add User')}
             </button>
           </div>
         </form>
@@ -174,6 +182,7 @@ function UserModal({ mode, initial, onClose, onSaved }) {
 
 // ─── Delete Confirm Modal ─────────────────────────────────────────────────────
 function DeleteModal({ user, onClose, onDeleted }) {
+  const { t, isArabic } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
@@ -183,7 +192,7 @@ function DeleteModal({ user, onClose, onDeleted }) {
       await supabase.from('users').delete().eq('id', user.id);
       onDeleted(user.id);
     } catch (err) {
-      setError(err?.message || 'Could not delete user.');
+      setError(err?.message || (isArabic ? 'تعذر حذف المستخدم.' : 'Could not delete user.'));
       setLoading(false);
     }
   }
@@ -192,7 +201,7 @@ function DeleteModal({ user, onClose, onDeleted }) {
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal" style={{ maxWidth: 360 }}>
         <div className="modal-header">
-          <span className="modal-title">Delete User</span>
+          <span className="modal-title">{isArabic ? 'حذف المستخدم' : 'Delete User'}</span>
           <button className="modal-close" onClick={onClose} disabled={loading}>×</button>
         </div>
 
@@ -204,16 +213,19 @@ function DeleteModal({ user, onClose, onDeleted }) {
             </svg>
           </div>
           <p className="confirm-msg">
-            Delete user <span className="confirm-name">"{user.name}"</span>?<br />
-            This action cannot be undone.
+            {isArabic ? (
+              <>حذف المستخدم <span className="confirm-name">"{user.name}"</span>؟<br />لا يمكن التراجع عن هذا الإجراء.</>
+            ) : (
+              <>Delete user <span className="confirm-name">"{user.name}"</span>?<br />This action cannot be undone.</>
+            )}
           </p>
           {error && <div className="modal-error" style={{ width: '100%' }}>{error}</div>}
         </div>
 
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose} disabled={loading}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose} disabled={loading}>{t('cancel')}</button>
           <button className="btn-danger" onClick={handleDelete} disabled={loading}>
-            {loading ? <span className="spinner" style={{ borderTopColor: 'white' }} /> : 'Delete'}
+            {loading ? <span className="spinner" style={{ borderTopColor: 'white' }} /> : t('delete')}
           </button>
         </div>
       </div>
@@ -224,6 +236,7 @@ function DeleteModal({ user, onClose, onDeleted }) {
 // ─── Main Users Page ──────────────────────────────────────────────────────────
 export default function Users() {
   const { user: currentUser } = useAuth();
+  const { t, isArabic } = useLanguage();
   const isViewer = currentUser?.access === 'viewer';
 
   const [users,   setUsers]   = useState([]);
@@ -278,8 +291,8 @@ export default function Users() {
     <div>
       {/* Header */}
       <div className="page-header">
-        <h1 className="page-title">Users</h1>
-        <p className="page-subtitle">Manage system users and access levels</p>
+        <h1 className="page-title">{t('usersTitle')}</h1>
+        <p className="page-subtitle">{t('usersSubtitle')}</p>
       </div>
 
       {/* Toolbar */}
@@ -291,7 +304,7 @@ export default function Users() {
           <input
             className="search-input"
             type="text"
-            placeholder="Search users…"
+            placeholder={t('searchUsers')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -302,7 +315,7 @@ export default function Users() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            Add User
+            {t('addNewUser')}
           </button>
         )}
       </div>
@@ -313,13 +326,13 @@ export default function Users() {
           <table>
             <thead>
               <tr>
-                <th>Name</th>
-                <th>Team</th>
-                <th>Company ID</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Access</th>
-                <th style={{ width: 80, textAlign: 'center' }}>Actions</th>
+                <th>{t('name')}</th>
+                <th>{t('team')}</th>
+                <th>{t('companyId')}</th>
+                <th>{t('email')}</th>
+                <th>{t('phone')}</th>
+                <th>{t('accessLevel')}</th>
+                <th style={{ width: 80, textAlign: 'center' }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -332,7 +345,7 @@ export default function Users() {
               ) : users.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="table-empty">
-                    {search ? `No users match "${search}".` : 'No users found. Add one to get started.'}
+                    {search ? (isArabic ? `لا يوجد مستخدمون يطابقون "${search}".` : `No users match "${search}".`) : (isArabic ? 'لم يتم العثور على مستخدمين.' : 'No users found.')}
                   </td>
                 </tr>
               ) : (
@@ -355,7 +368,7 @@ export default function Users() {
                         <div className="action-btns" style={{ justifyContent: 'center' }}>
                           <button
                             className="btn-icon btn-edit"
-                            title="Edit"
+                            title={t('edit')}
                             onClick={() => setModal({ type: 'edit', user: { ...u, password: '' } })}
                           >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -365,7 +378,7 @@ export default function Users() {
                           </button>
                           <button
                             className="btn-icon btn-delete"
-                            title="Delete"
+                            title={t('delete')}
                             onClick={() => setModal({ type: 'delete', user: u })}
                           >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -376,7 +389,7 @@ export default function Users() {
                         </div>
                       ) : (
                         <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--gray-500)' }}>
-                          Read only
+                          {isArabic ? 'للقراءة فقط' : 'Read only'}
                         </div>
                       )}
                     </td>
@@ -388,7 +401,9 @@ export default function Users() {
         </div>
         {!loading && users.length > 0 && (
           <div className="table-count">
-            {users.length} {users.length === 1 ? 'user' : 'users'}{search ? ` matching "${search}"` : ' total'}
+            {isArabic 
+              ? `${users.length} مستخدم ${search ? `مطابق لـ "${search}"` : 'مسجل'}`
+              : `${users.length} ${users.length === 1 ? 'user' : 'users'}${search ? ` matching "${search}"` : ' total'}`}
           </div>
         )}
       </div>

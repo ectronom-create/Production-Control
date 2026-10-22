@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 // Direct Google Cloud Apps Script Web API (accessible globally from any computer/browser)
 const GOOGLE_DRIVE_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec';
@@ -293,6 +294,7 @@ function getTodayString() {
 
 export default function Production() {
   const { user } = useAuth();
+  const { isArabic, t } = useLanguage();
   const isAdmin = user?.access === 'admin';
   const isSupervisor = user?.access === 'supervisor';
   const isViewer = user?.access === 'viewer';
@@ -862,8 +864,8 @@ export default function Production() {
       {/* ── Page Header ── */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 className="page-title">Production Operations & Records</h1>
-          <p className="page-subtitle">Auto-synced with Update PCs (1 & 2), FPY Excel inspection, and production tracking</p>
+          <h1 className="page-title">{t('prodTitle')}</h1>
+          <p className="page-subtitle">{t('prodSubtitle')}</p>
         </div>
 
         {/* Action Buttons at Top */}
@@ -891,14 +893,14 @@ export default function Production() {
               }}
             >
               <Upload size={18} />
-              Upload FPY Report (Excel)
+              {t('uploadFpyBtn')}
             </button>
           )}
 
           <button 
             type="button" 
             className="btn-outline" 
-            title="Refresh Data"
+            title={t('refresh')}
             onClick={loadRecords}
             style={{ padding: '9px 12px' }}
           >
@@ -909,43 +911,43 @@ export default function Production() {
 
       {/* ── Summary Counters ── */}
       <div className="kpi-grid">
-        <div className="kpi-card" style={{ borderLeft: '4px solid var(--teal)' }}>
+        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid var(--teal)', borderRight: isArabic ? '4px solid var(--teal)' : 'none' }}>
           <div className="kpi-icon" style={{ background: 'var(--teal-light)', color: 'var(--teal-dark)' }}>
             <FileSpreadsheet size={24} />
           </div>
           <div>
             <div className="kpi-val">{stats.totalRecs}</div>
-            <div className="kpi-lbl">Total Records Logged</div>
+            <div className="kpi-lbl">{t('totalRecordsLogged')}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: '4px solid #3b82f6' }}>
+        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #3b82f6', borderRight: isArabic ? '4px solid #3b82f6' : 'none' }}>
           <div className="kpi-icon" style={{ background: '#dbeafe', color: '#1d4ed8' }}>
             <Layers size={24} />
           </div>
           <div>
             <div className="kpi-val">{stats.totalBoards.toLocaleString()}</div>
-            <div className="kpi-lbl">Total Boards Input</div>
+            <div className="kpi-lbl">{t('totalBoardsInput')}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: '4px solid #10b981' }}>
+        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #10b981', borderRight: isArabic ? '4px solid #10b981' : 'none' }}>
           <div className="kpi-icon" style={{ background: '#d1fae5', color: '#047857' }}>
             <CheckCircle size={24} />
           </div>
           <div>
             <div className="kpi-val">{stats.totalAchieved.toLocaleString()}</div>
-            <div className="kpi-lbl">Final OK Output</div>
+            <div className="kpi-lbl">{t('finalOkOutput')}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: '4px solid #7c3aed' }}>
+        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #7c3aed', borderRight: isArabic ? '4px solid #7c3aed' : 'none' }}>
           <div className="kpi-icon" style={{ background: '#ede9fe', color: '#7c3aed' }}>
             <Cpu size={24} />
           </div>
           <div>
             <div className="kpi-val" style={{ color: '#7c3aed' }}>{stats.totalFw.toLocaleString()}</div>
-            <div className="kpi-lbl">Updated FW QTY Total</div>
+            <div className="kpi-lbl">{t('updatedFwQtyTotal')}</div>
           </div>
         </div>
       </div>
@@ -957,7 +959,7 @@ export default function Production() {
           <input 
             type="text" 
             className="search-input" 
-            placeholder="Search by product, team, or operator..." 
+            placeholder={isArabic ? 'بحث بالمنتج، الفريق، أو اسم المدخل...' : 'Search by product, team, or operator...'} 
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
@@ -971,9 +973,9 @@ export default function Production() {
             value={filterTeam} 
             onChange={e => setFilterTeam(e.target.value)}
           >
-            <option value="ALL">All Teams</option>
-            {availableTeams.map(t => (
-              <option key={t} value={t}>{t}</option>
+            <option value="ALL">{isArabic ? 'جميع الفِرق' : 'All Teams'}</option>
+            {availableTeams.map(tName => (
+              <option key={tName} value={tName}>{tName}</option>
             ))}
           </select>
         </div>
@@ -985,9 +987,9 @@ export default function Production() {
             value={filterShift} 
             onChange={e => setFilterShift(e.target.value)}
           >
-            <option value="ALL">All Shifts</option>
-            <option value="Morning">☀️ Morning Shift</option>
-            <option value="Evening">🌙 Evening Shift</option>
+            <option value="ALL">{isArabic ? 'جميع الورديات' : 'All Shifts'}</option>
+            <option value="Morning">{isArabic ? '☀️ الوردية الصباحية' : '☀️ Morning Shift'}</option>
+            <option value="Evening">{isArabic ? '🌙 الوردية المسائية' : '🌙 Evening Shift'}</option>
           </select>
         </div>
 
@@ -1002,7 +1004,7 @@ export default function Production() {
           />
           {filterDate && (
             <button type="button" className="btn-outline" style={{ padding: '6px 10px', fontSize: '0.78rem' }} onClick={() => setFilterDate('')}>
-              Clear Date
+              {isArabic ? 'مسح التاريخ' : 'Clear Date'}
             </button>
           )}
         </div>
@@ -1014,17 +1016,17 @@ export default function Production() {
           <table>
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Product Name</th>
-                <th>Team Name</th>
-                <th>Entered By</th>
-                <th style={{ textAlign: 'center' }}>Total Boards</th>
-                <th style={{ textAlign: 'center' }}>Achieved (OK)</th>
-                <th style={{ textAlign: 'center' }}>FPY Yield</th>
+                <th>{t('date')}</th>
+                <th>{t('product')}</th>
+                <th>{t('team')}</th>
+                <th>{isArabic ? 'المُدخِل' : 'Entered By'}</th>
+                <th style={{ textAlign: 'center' }}>{isArabic ? 'إجمالي اللوحات' : 'Total Boards'}</th>
+                <th style={{ textAlign: 'center' }}>{isArabic ? 'المنجز (OK)' : 'Achieved (OK)'}</th>
+                <th style={{ textAlign: 'center' }}>{isArabic ? 'معدل الجودة FPY' : 'FPY Yield'}</th>
                 <th style={{ textAlign: 'center', background: 'rgba(124, 58, 237, 0.06)' }}>
-                  <span style={{ color: '#7c3aed', fontWeight: 800 }}>⚡ Updated FW QTY</span>
+                  <span style={{ color: '#7c3aed', fontWeight: 800 }}>{isArabic ? '⚡ كمية تحديث الفيرموير' : '⚡ Updated FW QTY'}</span>
                 </th>
-                <th style={{ width: 120, textAlign: 'center' }}>Actions</th>
+                <th style={{ width: 120, textAlign: 'center' }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>

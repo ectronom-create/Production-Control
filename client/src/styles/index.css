@@ -285,6 +285,81 @@ input, select { font-family: inherit; }
   border-color: rgba(220,38,38,0.3);
 }
 
+.btn-lang-toggle {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(18, 168, 157, 0.15);
+  color: #5eead4;
+  border: 1px solid rgba(18, 168, 157, 0.35);
+  border-radius: var(--radius);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: all var(--transition);
+  cursor: pointer;
+}
+
+.btn-lang-toggle:hover {
+  background: rgba(18, 168, 157, 0.3);
+  color: #ffffff;
+  border-color: var(--teal);
+  transform: translateY(-1px);
+}
+
+/* ─── RTL SUPPORT (Arabic) ────────────────────────────────────────────────── */
+[dir="rtl"] {
+  text-align: right;
+  direction: rtl;
+}
+
+[dir="rtl"] .sidebar {
+  left: auto;
+  right: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  border-right: none;
+}
+
+[dir="rtl"] .main-content {
+  margin-left: 0;
+  margin-right: var(--sidebar-w);
+}
+
+[dir="rtl"] .nav-item {
+  border-left: none;
+  border-right: 3px solid transparent;
+}
+
+[dir="rtl"] .nav-item.active {
+  border-left-color: transparent;
+  border-right-color: var(--teal);
+}
+
+[dir="rtl"] .search-wrap .search-icon {
+  left: auto;
+  right: 12px;
+}
+
+[dir="rtl"] .search-wrap .search-input {
+  padding-left: 14px;
+  padding-right: 34px;
+}
+
+@media (max-width: 768px) {
+  [dir="rtl"] .sidebar {
+    transform: translateX(100%);
+  }
+  [dir="rtl"] .sidebar.open {
+    transform: translateX(0);
+  }
+  [dir="rtl"] .main-content {
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
+
 /* ─── TOP BAR (mobile) ───────────────────────────────────────────────────── */
 .topbar {
   display: none;
@@ -1188,23 +1263,128 @@ tbody tr:hover { background: var(--gray-100); }
   padding-bottom: 2px;
 }
 
+/* ─── CHECKLIST REPORT BADGES & PRINT HELPER STYLES ───────────────────────── */
+[dir="rtl"] .report-title-box {
+  text-align: left;
+}
+
+[dir="rtl"] .report-table th,
+[dir="rtl"] .report-table td {
+  text-align: right;
+}
+
+[dir="rtl"] .report-table th.text-center,
+[dir="rtl"] .report-table td.text-center {
+  text-align: center;
+}
+
+.report-badge-pass {
+  background: #dcfce7 !important;
+  color: #15803d !important;
+  border: 1.5px solid #16a34a !important;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  display: inline-block;
+  text-align: center;
+}
+
+.report-badge-fail {
+  background: #fee2e2 !important;
+  color: #b91c1c !important;
+  border: 1.5px solid #dc2626 !important;
+  font-weight: 900;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  display: inline-block;
+  text-align: center;
+}
+
+.report-badge-pending {
+  background: #f1f5f9 !important;
+  color: #64748b !important;
+  border: 1.5px solid #cbd5e1 !important;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.76rem;
+  display: inline-block;
+  text-align: center;
+}
+
 /* ─── PRINT RULES ────────────────────────────────────────────────────────── */
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Unconstrain modal layers so Chromium print engine doesn't clip or blank out */
+  .modal-backdrop {
+    position: static !important;
+    inset: auto !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: block !important;
+    width: 100% !important;
+    animation: none !important;
+    transform: none !important;
+    z-index: auto !important;
+  }
+
+  .modal, .modal-box, .report-modal {
+    position: static !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: none !important;
+    height: auto !important;
+    overflow: visible !important;
+    animation: none !important;
+    transform: none !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    z-index: auto !important;
+  }
+
   body * {
     visibility: hidden;
   }
+
   #report-printable-area, #report-printable-area * {
-    visibility: visible;
+    visibility: visible !important;
   }
+
   #report-printable-area {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
     margin: 0;
-    padding: 20px;
+    padding: 0 !important;
     background: white !important;
+    display: block !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
+
   .sidebar, .topbar, .modal-header, .modal-footer, .modal-close, .btn-primary, .btn-secondary, .users-toolbar, .tracker-card, .table-card {
     display: none !important;
   }

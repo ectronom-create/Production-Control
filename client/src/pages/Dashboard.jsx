@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 Chart.register(...registerables);
 
@@ -44,6 +45,7 @@ const DOWNTIME_REASONS = {
 export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { isArabic, t } = useLanguage();
   const isAdmin = user?.access === 'admin';
 
   const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'downtime', 'trend'
@@ -417,9 +419,9 @@ export default function Dashboard() {
         <div>
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <Activity className="text-teal" size={26} color="var(--teal)" />
-            Executive Production & FPY Dashboard
+            {t('dashboardTitle')}
           </h1>
-          <p className="page-subtitle">Real-time yields, stage throughput, station bottlenecks, and downtime analytics</p>
+          <p className="page-subtitle">{t('dashboardSubtitle')}</p>
         </div>
 
         {/* Tab Switcher, Management Link & Refresh */}
@@ -443,7 +445,7 @@ export default function Dashboard() {
             onClick={() => navigate('/management-dashboard')}
           >
             <Target size={16} color="#38bdf8" />
-            <span>Management Dashboard</span>
+            <span>{t('management')}</span>
           </button>
 
           <div style={{ display: 'flex', background: 'var(--white)', padding: 4, borderRadius: 10, border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
@@ -452,27 +454,27 @@ export default function Dashboard() {
               onClick={() => setActiveTab('overview')}
               style={{ padding: '7px 14px', borderRadius: 8 }}
             >
-              <BarChart2 size={16} /> Overview & FPY
+              <BarChart2 size={16} /> {t('overviewFpyTab')}
             </button>
             <button 
               className={`tab-btn ${activeTab === 'downtime' ? 'active' : ''}`}
               onClick={() => setActiveTab('downtime')}
               style={{ padding: '7px 14px', borderRadius: 8 }}
             >
-              <Clock size={16} /> Downtime Analysis
+              <Clock size={16} /> {t('downtimeTab')}
             </button>
             <button 
               className={`tab-btn ${activeTab === 'trend' ? 'active' : ''}`}
               onClick={() => setActiveTab('trend')}
               style={{ padding: '7px 14px', borderRadius: 8 }}
             >
-              <TrendingUp size={16} /> Production Trends
+              <TrendingUp size={16} /> {t('trendTab')}
             </button>
           </div>
 
           <button 
             className="btn-outline" 
-            title="Refresh Data"
+            title={t('refresh')}
             onClick={fetchData}
             style={{ padding: '9px 12px', background: 'var(--white)' }}
           >
@@ -487,9 +489,9 @@ export default function Dashboard() {
           {reports.length === 0 ? (
             <div className="card-white" style={{ textAlign: 'center', padding: 60 }}>
               <div style={{ fontSize: '3rem', marginBottom: 12 }}>📊</div>
-              <h3 style={{ marginBottom: 6 }}>No Production Records Found</h3>
+              <h3 style={{ marginBottom: 6 }}>{isArabic ? 'لم يتم العثور على سجلات إنتاج' : 'No Production Records Found'}</h3>
               <p style={{ color: 'var(--gray-500)', maxWidth: 450, margin: '0 auto' }}>
-                Navigate to the <b>Production</b> page to upload SAGEMCOM Excel reports or manually add FW updates to populate dashboard charts.
+                {isArabic ? 'انتقل إلى صفحة الإنتاج لرفع تقارير إكسيل أو إضافة التحديثات يدوياً.' : 'Navigate to the Production page to upload SAGEMCOM Excel reports or manually add FW updates to populate dashboard charts.'}
               </p>
             </div>
           ) : (
@@ -510,10 +512,10 @@ export default function Dashboard() {
                     </div>
                     <div>
                       <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '0.02em' }}>
-                        Cumulative Stage Throughput
+                        {t('cumulativeThroughput')}
                       </h3>
                       <p style={{ margin: '2px 0 0', fontSize: '0.82rem', color: '#94a3b8' }}>
-                        Total tested and validated smart meters across filtered period
+                        {t('cumulativeThroughputDesc')}
                       </p>
                     </div>
                   </div>
@@ -521,11 +523,11 @@ export default function Dashboard() {
                   {/* Filter range buttons */}
                   <div style={{ display: 'flex', background: 'rgba(255,255,255,0.08)', padding: 3, borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)' }}>
                     {[
-                      { id: 'today', label: 'Today' },
-                      { id: 'week', label: 'Past 7 Days' },
-                      { id: 'month', label: 'Past 30 Days' },
-                      { id: 'all', label: 'All Records' },
-                      { id: 'custom', label: 'Custom' }
+                      { id: 'today', label: t('today') },
+                      { id: 'week', label: t('past7Days') },
+                      { id: 'month', label: t('past30Days') },
+                      { id: 'all', label: t('allRecords') },
+                      { id: 'custom', label: t('custom') }
                     ].map(f => (
                       <button
                         key={f.id}
@@ -706,7 +708,7 @@ export default function Dashboard() {
               {/* KPI Cards Grid */}
               {currentReport && (
                 <div className="kpi-grid">
-                  <div className="kpi-card" style={{ borderLeft: '4px solid #16a34a' }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #16a34a', borderRight: isArabic ? '4px solid #16a34a' : 'none' }}>
                     <div className="kpi-icon" style={{ background: '#dcfce7', color: '#16a34a' }}>
                       <Activity size={24} />
                     </div>
@@ -714,31 +716,31 @@ export default function Dashboard() {
                       <div className="kpi-val" style={{ color: '#16a34a' }}>
                         {displayOverallFPY != null ? `${displayOverallFPY.toFixed(2)}%` : 'N/A'}
                       </div>
-                      <div className="kpi-lbl">Overall FPY (Yield)</div>
+                      <div className="kpi-lbl">{t('overallFpy')}</div>
                     </div>
                   </div>
 
-                  <div className="kpi-card" style={{ borderLeft: '4px solid #3b82f6' }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #3b82f6', borderRight: isArabic ? '4px solid #3b82f6' : 'none' }}>
                     <div className="kpi-icon" style={{ background: '#dbeafe', color: '#1d4ed8' }}>
                       <Layers size={24} />
                     </div>
                     <div>
                       <div className="kpi-val">{displayTotalBoards.toLocaleString()}</div>
-                      <div className="kpi-lbl">Total Boards Input</div>
+                      <div className="kpi-lbl">{t('totalBoardsInput')}</div>
                     </div>
                   </div>
 
-                  <div className="kpi-card" style={{ borderLeft: '4px solid var(--teal)' }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid var(--teal)', borderRight: isArabic ? '4px solid var(--teal)' : 'none' }}>
                     <div className="kpi-icon" style={{ background: 'var(--teal-light)', color: 'var(--teal-dark)' }}>
                       <CheckCircle size={24} />
                     </div>
                     <div>
                       <div className="kpi-val">{currentReport.achieved?.toLocaleString() || 0}</div>
-                      <div className="kpi-lbl">Final OK (Multi-Test)</div>
+                      <div className="kpi-lbl">{t('finalOkOutput')}</div>
                     </div>
                   </div>
 
-                  <div className="kpi-card" style={{ borderLeft: `4px solid ${bottleneck && bottleneck.fpy < 75 ? '#dc2626' : '#d97706'}` }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : `4px solid ${bottleneck && bottleneck.fpy < 75 ? '#dc2626' : '#d97706'}`, borderRight: isArabic ? `4px solid ${bottleneck && bottleneck.fpy < 75 ? '#dc2626' : '#d97706'}` : 'none' }}>
                     <div className="kpi-icon" style={{ background: bottleneck && bottleneck.fpy < 75 ? '#fee2e2' : '#fef3c7', color: bottleneck && bottleneck.fpy < 75 ? '#dc2626' : '#d97706' }}>
                       <AlertOctagon size={24} />
                     </div>
@@ -746,27 +748,27 @@ export default function Dashboard() {
                       <div className="kpi-val" style={{ color: bottleneck && bottleneck.fpy < 75 ? '#dc2626' : '#d97706' }}>
                         {bottleneck ? `${bottleneck.fpy.toFixed(1)}%` : 'N/A'}
                       </div>
-                      <div className="kpi-lbl">Bottleneck ({bottleneck?.stationName || 'None'})</div>
+                      <div className="kpi-lbl">{t('bottleneckStation')} ({bottleneck?.stationName || (isArabic ? 'لا يوجد' : 'None')})</div>
                     </div>
                   </div>
 
-                  <div className="kpi-card" style={{ borderLeft: '4px solid #8b5cf6' }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #8b5cf6', borderRight: isArabic ? '4px solid #8b5cf6' : 'none' }}>
                     <div className="kpi-icon" style={{ background: '#ede9fe', color: '#7c3aed' }}>
                       <Cpu size={24} />
                     </div>
                     <div>
                       <div className="kpi-val" style={{ color: '#7c3aed' }}>{currentReport.updated_fw_qty || 0}</div>
-                      <div className="kpi-lbl">Updated FW QTY Today</div>
+                      <div className="kpi-lbl">{t('updatedFwQtyTotal')}</div>
                     </div>
                   </div>
 
-                  <div className="kpi-card" style={{ borderLeft: '4px solid #dc2626' }}>
+                  <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #dc2626', borderRight: isArabic ? '4px solid #dc2626' : 'none' }}>
                     <div className="kpi-icon" style={{ background: '#fee2e2', color: '#dc2626' }}>
                       <AlertTriangle size={24} />
                     </div>
                     <div>
                       <div className="kpi-val" style={{ color: '#dc2626' }}>{totalDefects}</div>
-                      <div className="kpi-lbl">Total Failures Detected</div>
+                      <div className="kpi-lbl">{t('totalDefects')}</div>
                     </div>
                   </div>
                 </div>

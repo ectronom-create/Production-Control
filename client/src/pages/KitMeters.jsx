@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { 
   Package, 
   Plus, 
@@ -26,6 +27,7 @@ const LOCAL_STORAGE_KEY = 'ectron_kit_meters_records';
 
 export default function KitMeters() {
   const { user } = useAuth();
+  const { t, isArabic } = useLanguage();
   const isViewer = user?.access === 'viewer';
 
   const [records, setRecords] = useState([]);
@@ -396,8 +398,8 @@ export default function KitMeters() {
       {/* ── Page Header ── */}
       <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <div>
-          <h1 className="page-title">Kit Meters (Kit Quantities & Batch Management)</h1>
-          <p className="page-subtitle">Track incoming meter kits, batch quantities, Three Phase & Single Phase allocation</p>
+          <h1 className="page-title">{t('kitMetersTitle')}</h1>
+          <p className="page-subtitle">{t('kitMetersSubtitle')}</p>
         </div>
 
         {/* Action Button at Top */}
@@ -418,7 +420,7 @@ export default function KitMeters() {
             onClick={handleOpenAddModal}
           >
             <Plus size={18} />
-            Add Kit Batch
+            {t('addKitBatch')}
           </button>
         )}
       </div>
@@ -431,12 +433,16 @@ export default function KitMeters() {
             <CheckCircle size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Received Kits (Actual)</span>
+            <span className="kpi-title">{isArabic ? 'الكيتات المستلمة (الفعلي)' : 'Received Kits (Actual)'}</span>
             <span className="kpi-val" style={{ color: '#15803d' }}>
               {stats.receivedKits.toLocaleString()}
             </span>
             <span className="kpi-sub">
-              <strong>{stats.receivedBatches}</strong> received batches • {stats.receivedPct.toFixed(1)}% of total
+              {isArabic ? (
+                <><strong>{stats.receivedBatches}</strong> دفعات مستلمة • {stats.receivedPct.toFixed(1)}% من الإجمالي</>
+              ) : (
+                <><strong>{stats.receivedBatches}</strong> received batches • {stats.receivedPct.toFixed(1)}% of total</>
+              )}
             </span>
           </div>
         </div>
@@ -447,12 +453,16 @@ export default function KitMeters() {
             <Clock size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Delivery Plan (Incoming)</span>
+            <span className="kpi-title">{isArabic ? 'خطة التوريد (المتوقع وصوله)' : 'Delivery Plan (Incoming)'}</span>
             <span className="kpi-val" style={{ color: '#4338ca' }}>
               {stats.plannedKits.toLocaleString()}
             </span>
             <span className="kpi-sub">
-              <strong>{stats.plannedBatches}</strong> planned batches {stats.nearestIncomingDays ? `• Next in ${stats.nearestIncomingDays}d` : ''}
+              {isArabic ? (
+                <><strong>{stats.plannedBatches}</strong> دفعات مجدولة {stats.nearestIncomingDays ? `• القادم بعد ${stats.nearestIncomingDays} يوم` : ''}</>
+              ) : (
+                <><strong>{stats.plannedBatches}</strong> planned batches {stats.nearestIncomingDays ? `• Next in ${stats.nearestIncomingDays}d` : ''}</>
+              )}
             </span>
           </div>
         </div>
@@ -463,12 +473,14 @@ export default function KitMeters() {
             <Layers size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Total Pipeline Batches</span>
+            <span className="kpi-title">{isArabic ? 'إجمالي دفعات الخط' : 'Total Pipeline Batches'}</span>
             <span className="kpi-val" style={{ color: 'var(--navy)' }}>
               {stats.totalBatches}
             </span>
             <span className="kpi-sub">
-              {stats.receivedBatches} Received • {stats.plannedBatches} Delivery Plan
+              {isArabic 
+                ? `${stats.receivedBatches} مستلم • ${stats.plannedBatches} خطة توريد`
+                : `${stats.receivedBatches} Received • ${stats.plannedBatches} Delivery Plan`}
             </span>
           </div>
         </div>
@@ -479,12 +491,14 @@ export default function KitMeters() {
             <Package size={24} />
           </div>
           <div className="kpi-data">
-            <span className="kpi-title">Total Kits (All Shipments)</span>
+            <span className="kpi-title">{isArabic ? 'إجمالي كيتات الشحنات' : 'Total Kits (All Shipments)'}</span>
             <span className="kpi-val" style={{ color: 'var(--teal-dark)' }}>
               {stats.totalKits.toLocaleString()}
             </span>
             <span className="kpi-sub">
-              {stats.threePhaseKits.toLocaleString()} 3-Phase • {stats.singlePhaseKits.toLocaleString()} 1-Phase
+              {isArabic 
+                ? `${stats.threePhaseKits.toLocaleString()} 3 فاز • ${stats.singlePhaseKits.toLocaleString()} 1 فاز`
+                : `${stats.threePhaseKits.toLocaleString()} 3-Phase • ${stats.singlePhaseKits.toLocaleString()} 1-Phase`}
             </span>
           </div>
         </div>
@@ -496,7 +510,7 @@ export default function KitMeters() {
           <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--gray-400)' }} />
           <input 
             type="text" 
-            placeholder="Search by Batch Number or Notes..." 
+            placeholder={isArabic ? 'بحث برقم الدفعة أو الملاحظات...' : 'Search by Batch Number or Notes...'} 
             className="search-input"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
@@ -512,9 +526,9 @@ export default function KitMeters() {
             onChange={e => setFilterStatus(e.target.value)}
             style={{ width: 'auto', fontWeight: 700 }}
           >
-            <option value="ALL">All Statuses (Received & Planned)</option>
-            <option value="RECEIVED">🟢 Received Only (Actual)</option>
-            <option value="PLANNED">🔵 Delivery Plan Only (Incoming)</option>
+            <option value="ALL">{isArabic ? 'جميع الحالات (مستلم ومخطط)' : 'All Statuses (Received & Planned)'}</option>
+            <option value="RECEIVED">{isArabic ? '🟢 المستلم فقط (فعلي)' : '🟢 Received Only (Actual)'}</option>
+            <option value="PLANNED">{isArabic ? '🔵 خطة التوريد فقط (المتوقع)' : '🔵 Delivery Plan Only (Incoming)'}</option>
           </select>
         </div>
 
@@ -525,9 +539,9 @@ export default function KitMeters() {
             onChange={e => setFilterProduct(e.target.value)}
             style={{ width: 'auto' }}
           >
-            <option value="ALL">All Products</option>
-            <option value="Three Phase">Three Phase</option>
-            <option value="Single Phase">Single Phase</option>
+            <option value="ALL">{isArabic ? 'جميع المنتجات' : 'All Products'}</option>
+            <option value="Three Phase">{isArabic ? 'ثلاثي الفاز (Three Phase)' : 'Three Phase'}</option>
+            <option value="Single Phase">{isArabic ? 'أحادي الفاز (Single Phase)' : 'Single Phase'}</option>
           </select>
         </div>
 
@@ -547,7 +561,7 @@ export default function KitMeters() {
               onClick={() => setFilterDate('')}
               style={{ padding: '6px 10px', fontSize: '0.78rem' }}
             >
-              Clear
+              {isArabic ? 'مسح' : 'Clear'}
             </button>
           )}
         </div>
@@ -557,7 +571,7 @@ export default function KitMeters() {
       <div className="table-card">
         <div className="table-header">
           <div className="table-title">
-            <span>Kit Batches Log ({filteredRecords.length})</span>
+            <span>{isArabic ? `سجل دفعات الكيت (${filteredRecords.length})` : `Kit Batches Log (${filteredRecords.length})`}</span>
           </div>
         </div>
 
@@ -565,14 +579,14 @@ export default function KitMeters() {
           <table>
             <thead>
               <tr>
-                <th>Batch Number</th>
-                <th>Status</th>
-                <th>Receipt / Scheduled Date</th>
-                <th>Product Type</th>
-                <th style={{ textAlign: 'right' }}>Kit Quantity</th>
-                <th>Entered By</th>
-                <th>Notes</th>
-                <th style={{ textAlign: 'center' }}>Actions</th>
+                <th>{t('batchNumber')}</th>
+                <th>{t('status')}</th>
+                <th>{isArabic ? 'تاريخ الاستلام / الجدولة' : 'Receipt / Scheduled Date'}</th>
+                <th>{t('product')}</th>
+                <th style={{ textAlign: 'right' }}>{t('quantity')}</th>
+                <th>{isArabic ? 'أُدخل بواسطة' : 'Entered By'}</th>
+                <th>{t('notes')}</th>
+                <th style={{ textAlign: 'center' }}>{t('actions')}</th>
               </tr>
             </thead>
             <tbody>
@@ -580,14 +594,14 @@ export default function KitMeters() {
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', padding: 40 }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--gray-500)' }}>
-                      <span className="spinner" /> Loading kit meter batches...
+                      <span className="spinner" /> {t('loading')}
                     </div>
                   </td>
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
                   <td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--gray-400)' }}>
-                    No kit batches found matching current filters.
+                    {isArabic ? 'لا توجد دفعات كيت مطابقة للفلاتر الحالية.' : 'No kit batches found matching current filters.'}
                   </td>
                 </tr>
               ) : (
@@ -617,7 +631,7 @@ export default function KitMeters() {
                             width: 'fit-content'
                           }}>
                             {bStatus.isPlanned ? <Clock size={12} /> : <CheckCircle size={12} />}
-                            {bStatus.label}
+                            {isArabic ? (bStatus.isPlanned ? 'خطة توريد (مجدول)' : 'مستلم (فعلي)') : bStatus.label}
                           </span>
                           <span style={{ fontSize: '0.72rem', color: bStatus.isPlanned ? '#4338ca' : '#64748b', fontWeight: bStatus.isPlanned ? 700 : 500, paddingLeft: 2 }}>
                             {bStatus.sublabel}
@@ -638,14 +652,16 @@ export default function KitMeters() {
                           background: r.product_name === 'Three Phase' ? '#dbeafe' : '#ede9fe',
                           color: r.product_name === 'Three Phase' ? '#1d4ed8' : '#6d28d9'
                         }}>
-                          {r.product_name === 'Three Phase' ? '⚡ Three Phase' : '🔌 Single Phase'}
+                          {r.product_name === 'Three Phase' 
+                            ? (isArabic ? '⚡ 3 فاز' : '⚡ Three Phase') 
+                            : (isArabic ? '🔌 1 فاز' : '🔌 Single Phase')}
                         </span>
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         <span style={{ fontWeight: 900, fontSize: '1.05rem', color: 'var(--navy)' }}>
                           {r.kit_quantity?.toLocaleString()}
                         </span>
-                        <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>Kits</span>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--gray-500)', marginLeft: 4 }}>{isArabic ? 'كيت' : 'Kits'}</span>
                       </td>
                       <td>
                         <span style={{ fontSize: '0.82rem', color: 'var(--gray-600)' }}>
@@ -665,7 +681,7 @@ export default function KitMeters() {
                                 type="button"
                                 className="btn-icon" 
                                 style={{ background: '#e0f2fe', color: '#0369a1' }}
-                                title="Edit Batch"
+                                title={t('edit')}
                                 onClick={() => handleOpenEditModal(r)}
                               >
                                 <Edit3 size={15} />
@@ -674,7 +690,7 @@ export default function KitMeters() {
                               <button 
                                 type="button"
                                 className="btn-icon btn-delete" 
-                                title="Delete Batch"
+                                title={t('delete')}
                                 onClick={() => handleDeleteRecord(r.id, r.batch_number)}
                               >
                                 <Trash2 size={15} />
@@ -700,7 +716,9 @@ export default function KitMeters() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Package size={20} color="var(--teal)" />
                 <span className="modal-title">
-                  {editingRecord ? `Edit Kit Batch (${editingRecord.batch_number})` : 'Add New Kit Batch'}
+                  {editingRecord 
+                    ? (isArabic ? `تعديل دفعة الكيت (${editingRecord.batch_number})` : `Edit Kit Batch (${editingRecord.batch_number})`)
+                    : (isArabic ? 'إضافة دفعة كيت جديدة' : 'Add New Kit Batch')}
                 </span>
               </div>
               <button type="button" className="modal-close" onClick={() => setShowModal(false)}>×</button>
@@ -713,7 +731,7 @@ export default function KitMeters() {
                 {/* Batch Number & Kit Quantity */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Batch Number *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>{t('batchNumber')} *</label>
                     <input 
                       type="text" 
                       placeholder="e.g. Batch 1 / Batch 25" 
@@ -726,7 +744,7 @@ export default function KitMeters() {
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--teal-dark)' }}>Kit Quantity *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--teal-dark)' }}>{t('quantity')} *</label>
                     <input 
                       type="number" 
                       placeholder="e.g. 25000" 
@@ -738,7 +756,7 @@ export default function KitMeters() {
                       style={{ fontWeight: 800, fontSize: '1rem', color: 'var(--navy)' }}
                     />
                     <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2, display: 'block' }}>
-                      e.g. 25,000 kits
+                      {isArabic ? 'مثال: 25,000 كيت' : 'e.g. 25,000 kits'}
                     </span>
                   </div>
                 </div>
@@ -746,7 +764,7 @@ export default function KitMeters() {
                 {/* Date & Product Type */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Date *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>{t('date')} *</label>
                     <input 
                       type="date" 
                       value={recordDate}
@@ -773,9 +791,9 @@ export default function KitMeters() {
                         }}>
                           {st.isPlanned ? <Clock size={14} /> : <CheckCircle size={14} />}
                           <span>
-                            {st.isPlanned 
-                              ? `Future date (${st.sublabel}): Scheduled under Incoming Delivery Plan.`
-                              : `Current/Past date (${st.sublabel}): Logged as Received Shipment.`}
+                            {isArabic 
+                              ? (st.isPlanned ? `تاريخ مستقبلي (${st.sublabel}): مجدول ضمن خطة التوريد القادمة.` : `تاريخ حالي/سابق (${st.sublabel}): مسجل كشحنة مستلمة فعلياً.`)
+                              : (st.isPlanned ? `Future date (${st.sublabel}): Scheduled under Incoming Delivery Plan.` : `Current/Past date (${st.sublabel}): Logged as Received Shipment.`)}
                           </span>
                         </div>
                       );
@@ -783,7 +801,7 @@ export default function KitMeters() {
                   </div>
 
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Product Name *</label>
+                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>{t('product')} *</label>
                     <select 
                       className="form-select"
                       value={productName}
@@ -791,8 +809,8 @@ export default function KitMeters() {
                       disabled={isSubmitting}
                       style={{ fontWeight: 700 }}
                     >
-                      <option value="Three Phase">Three Phase</option>
-                      <option value="Single Phase">Single Phase</option>
+                      <option value="Three Phase">{isArabic ? 'ثلاثي الفاز (Three Phase)' : 'Three Phase'}</option>
+                      <option value="Single Phase">{isArabic ? 'أحادي الفاز (Single Phase)' : 'Single Phase'}</option>
                     </select>
                   </div>
                 </div>
@@ -800,13 +818,13 @@ export default function KitMeters() {
                 {/* Notes */}
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <FileText size={15} /> Notes / Description
+                    <FileText size={15} /> {t('notes')}
                   </label>
                   <textarea 
                     rows={2}
                     className="search-input"
                     style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
-                    placeholder="Any additional notes regarding shipment or storage location..."
+                    placeholder={isArabic ? 'أي ملاحظات إضافية بخصوص الشحنة أو موقع التخزين...' : 'Any additional notes regarding shipment or storage location...'}
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
                     disabled={isSubmitting}
@@ -816,10 +834,10 @@ export default function KitMeters() {
 
               <div className="modal-footer">
                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)} disabled={isSubmitting}>
-                  Cancel
+                  {t('cancel')}
                 </button>
                 <button type="submit" className="btn-primary" disabled={isSubmitting}>
-                  {isSubmitting ? <span className="spinner" /> : (editingRecord ? 'Save Changes' : 'Add Kit Batch')}
+                  {isSubmitting ? <span className="spinner" /> : (editingRecord ? t('saveChanges') : t('addKitBatch'))}
                 </button>
               </div>
             </form>

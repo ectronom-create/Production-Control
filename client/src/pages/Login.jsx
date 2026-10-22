@@ -23,8 +23,13 @@ export default function Login() {
 
     setLoading(true);
     try {
-      await login(companyId.trim(), password);
-      navigate('/dashboard', { replace: true });
+      const res = await login(companyId.trim(), password);
+      const role = (res?.user?.access || '').toLowerCase();
+      if (role === 'viewer') {
+        navigate('/management-dashboard', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err) {
       setError(
         err?.message || 'Login failed. Please verify your Company ID and Password.'
