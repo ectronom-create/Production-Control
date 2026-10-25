@@ -2,12 +2,14 @@
  * Utility to reliably print printable report documents across all modern browsers
  * without modal clipping, background filter issues, or blank pages.
  */
-export function printReportDocument(targetId = 'report-printable-area') {
+export function printReportDocument(targetId = 'report-printable-area', options = {}) {
   const element = document.getElementById(targetId);
   if (!element) {
     window.print();
     return;
   }
+
+  const orientation = options.orientation || 'landscape';
 
   // Remove any leftover print iframe
   const existingFrame = document.getElementById('print-report-iframe');
@@ -47,8 +49,8 @@ export function printReportDocument(targetId = 'report-printable-area') {
     ${styles}
     <style>
       @page {
-        size: A4 portrait;
-        margin: 10mm 12mm;
+        size: A4 ${orientation};
+        margin: ${orientation === 'landscape' ? '3mm 5mm' : '6mm 8mm'};
       }
       *, *::before, *::after {
         box-sizing: border-box;
@@ -61,6 +63,9 @@ export function printReportDocument(targetId = 'report-printable-area') {
         font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
+        height: auto !important;
+        min-height: 100% !important;
+        overflow: visible !important;
       }
       #report-printable-area {
         position: static !important;
@@ -71,6 +76,8 @@ export function printReportDocument(targetId = 'report-printable-area') {
         visibility: visible !important;
         display: block !important;
         background: #ffffff !important;
+        page-break-inside: avoid !important;
+        page-break-after: avoid !important;
       }
       #report-printable-area * {
         visibility: visible !important;
@@ -78,17 +85,19 @@ export function printReportDocument(targetId = 'report-printable-area') {
       .report-document {
         padding: 0 !important;
         width: 100% !important;
+        page-break-inside: avoid !important;
       }
       .report-table {
         width: 100% !important;
-        page-break-inside: auto;
+        border-collapse: collapse !important;
+        page-break-inside: avoid !important;
       }
-      .report-table tr {
-        page-break-inside: avoid;
+      .report-table tr, .report-table th, .report-table td {
+        page-break-inside: avoid !important;
         page-break-after: auto;
       }
       .report-sign-block {
-        page-break-inside: avoid;
+        page-break-inside: avoid !important;
       }
     </style>
   </head>

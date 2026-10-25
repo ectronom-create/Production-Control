@@ -4,7 +4,34 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
 // ─── Access options ───────────────────────────────────────────────────────────
-const ACCESS_OPTIONS = ['admin', 'supervisor', 'viewer'];
+const ACCESS_OPTIONS = ['admin', 'supervisor', 'operator', 'viewer'];
+
+const STAGES = [
+  'Assembly',
+  'Insulation',
+  'RF',
+  'Calibration',
+  'Multin test',
+  'Perso',
+  'Packaging',
+  'Firmware update'
+];
+
+function parseTeamMeta(teamName) {
+  if (!teamName) return { team: '', supervisor: '', station: '', status: 'active' };
+  try {
+    if (teamName.startsWith('{')) {
+      const p = JSON.parse(teamName);
+      return {
+        team: p.team || '',
+        supervisor: p.supervisor || '',
+        station: p.station || '',
+        status: p.status || 'active'
+      };
+    }
+  } catch {}
+  return { team: teamName, supervisor: '', station: '', status: 'active' };
+}
 
 // ─── Badge component ──────────────────────────────────────────────────────────
 function AccessBadge({ access }) {
@@ -12,8 +39,14 @@ function AccessBadge({ access }) {
   const cls =
     norm === 'admin'      ? 'badge badge-admin'      :
     norm === 'supervisor' ? 'badge badge-supervisor' :
+    norm === 'operator'   ? 'badge badge-operator'   :
                             'badge badge-viewer';
-  return <span className={cls}>{norm}</span>;
+  const label =
+    norm === 'admin'      ? 'Admin' :
+    norm === 'supervisor' ? 'Supervisor' :
+    norm === 'operator'   ? 'Operator' :
+                            'Viewer';
+  return <span className={cls}>{label}</span>;
 }
 
 // ─── Empty form state ─────────────────────────────────────────────────────────
@@ -22,12 +55,17 @@ function emptyForm() {
 }
 
 // ─── User Form Modal ──────────────────────────────────────────────────────────
-function UserModal({ mode, initial, onClose, onSaved }) {
+function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
   const { t, isArabic } = useLanguage();
   const isEdit = mode === 'edit';
   const [form,    setForm]    = useState(initial || emptyForm());
   const [error,   setError]   = useState('');
   const [loading, setLoading] = useState(false);
+
+  // If operator, extract supervisor and station from JSON team_name
+  const parsedMeta = parseTeamMeta(initial?.team_name);
+  const [operatorSupervisor, setOperatorSupervisor] = useState(parsedMeta.supervisor || supervisors[0]?.name || '');
+  const [operatorStation, setOperatorStation] = useState(parsedMeta.station || STAGES[0]);
 
   function set(field) {
     return e => setForm(f => ({ ...f, [field]: e.target.value }));
@@ -38,24 +76,41 @@ function UserModal({ mode, initial, onClose, onSaved }) {
     setError('');
 
     if (!form.name.trim()) { setError(isArabic ? 'الاسم مطلوب.' : 'Name is required.'); return; }
-    if (!isEdit && !form.password.trim()) { setError(isArabic ? 'كلمة المرور مطلوبة.' : 'Password is required.'); return; }
+    if (!isEdit && !form.password.trim() && form.access !== 'operator') {
+      setError(isArabic ? 'كلمة المرور مطلوبة.' : 'Password is required.');
+      return;
+    }
 
     setLoading(true);
     try {
+      const payload = { ...form };
+      if (form.access === 'operator') {
+        payload.team_name = JSON.stringify({
+          supervisor: operatorSupervisor || supervisors[0]?.name || 'Supervisor',
+          station: operatorStation,
+          status: 'active'
+        });
+        if (!payload.password) {
+          payload.password = payload.company_id || '1234';
+        }
+      }
+
       let savedUser;
       if (isEdit) {
         const { data, error: err } = await supabase
           .from('users')
-          .update(form)
+          .update(payload)
           .eq('id', initial.id)
           .select();
-        savedUser = data?.[0] || { ...initial, ...form };
+        if (err) throw err;
+        savedUser = data?.[0] || { ...initial, ...payload };
       } else {
         const { data, error: err } = await supabase
           .from('users')
-          .insert([form])
+          .insert([payload])
           .select();
-        savedUser = data?.[0] || { ...form, id: Date.now() };
+        if (err) throw err;
+        savedUser = data?.[0] || { ...payload, id: Date.now() };
       }
       onSaved(savedUser, isEdit);
     } catch (err) {
@@ -147,23 +202,59 @@ function UserModal({ mode, initial, onClose, onSaved }) {
                 {ACCESS_OPTIONS.map(a => (
                   <option key={a} value={a}>
                     {isArabic 
-                      ? (a === 'admin' ? 'مدير (Admin)' : a === 'supervisor' ? 'مشرف (Supervisor)' : 'مشاهد (Viewer)')
+                      ? (a === 'admin' ? 'مدير (Admin)' : a === 'supervisor' ? 'مشرف (Supervisor)' : a === 'operator' ? 'مشغل خط (Operator)' : 'مشاهد (Viewer)')
                       : (a.charAt(0).toUpperCase() + a.slice(1))}
                   </option>
                 ))}
               </select>
             </div>
 
-            <div className="form-group">
-              <label>{t('team')}</label>
-              <input
-                type="text"
-                placeholder="e.g. Group w, Team Alpha, Shift A"
-                value={form.team_name || ''}
-                onChange={set('team_name')}
-                disabled={loading}
-              />
-            </div>
+            {form.access === 'operator' ? (
+              <>
+                <div className="form-group">
+                  <label>{isArabic ? 'المشرف المسؤول *' : 'Responsible Supervisor *'}</label>
+                  <select
+                    className="form-select"
+                    value={operatorSupervisor}
+                    onChange={e => setOperatorSupervisor(e.target.value)}
+                    disabled={loading}
+                  >
+                    {supervisors.map(s => (
+                      <option key={s.id || s.name} value={s.name}>
+                        {s.name} {s.team_name ? `(${s.team_name})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>{isArabic ? 'المحطة الأساسية / المهارة' : 'Primary Station'}</label>
+                  <select
+                    className="form-select"
+                    value={operatorStation}
+                    onChange={e => setOperatorStation(e.target.value)}
+                    disabled={loading}
+                  >
+                    {STAGES.map((st, idx) => (
+                      <option key={st} value={st}>
+                        {idx + 1}. {st}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </>
+            ) : (
+              <div className="form-group">
+                <label>{t('team')}</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Group w, Team Alpha, Shift A"
+                  value={form.team_name || ''}
+                  onChange={set('team_name')}
+                  disabled={loading}
+                />
+              </div>
+            )}
           </div>
 
           <div className="modal-footer">
@@ -182,11 +273,16 @@ function UserModal({ mode, initial, onClose, onSaved }) {
 
 // ─── Delete Confirm Modal ─────────────────────────────────────────────────────
 function DeleteModal({ user, onClose, onDeleted }) {
+  const { user: currentUser } = useAuth();
   const { t, isArabic } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
   async function handleDelete() {
+    if (currentUser?.access !== 'admin') {
+      setError(isArabic ? 'صلاحية الحذف مقتصرة على الأدمن فقط.' : 'Delete permission is restricted to admin only.');
+      return;
+    }
     setLoading(true);
     try {
       await supabase.from('users').delete().eq('id', user.id);
@@ -238,11 +334,20 @@ export default function Users() {
   const { user: currentUser } = useAuth();
   const { t, isArabic } = useLanguage();
   const isViewer = currentUser?.access === 'viewer';
+  const isAdmin = currentUser?.access === 'admin';
 
   const [users,   setUsers]   = useState([]);
   const [search,  setSearch]  = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [modal,   setModal]   = useState(null); // null | { type: 'add'|'edit'|'delete', user? }
+
+  const supervisorsList = users.filter(u => u.access === 'supervisor');
+
+  const filteredUsers = users.filter(u => {
+    if (roleFilter !== 'all' && u.access !== roleFilter) return false;
+    return true;
+  });
 
   const fetchUsers = useCallback(async (q = '') => {
     setLoading(true);
@@ -296,18 +401,51 @@ export default function Users() {
       </div>
 
       {/* Toolbar */}
-      <div className="users-toolbar">
-        <div className="search-wrap">
-          <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            className="search-input"
-            type="text"
-            placeholder={t('searchUsers')}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+      <div className="users-toolbar" style={{ flexWrap: 'wrap', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div className="search-wrap">
+            <svg className="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              className="search-input"
+              type="text"
+              placeholder={t('searchUsers')}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Quick Role Filter Pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--gray-100)', padding: '3px', borderRadius: '8px' }}>
+            {[
+              { id: 'all', label: isArabic ? 'الكل' : 'All' },
+              { id: 'supervisor', label: isArabic ? 'المشرفين' : 'Supervisors' },
+              { id: 'operator', label: isArabic ? 'مشغلي الخط' : 'Operators' },
+              { id: 'admin', label: isArabic ? 'المدراء' : 'Admins' },
+              { id: 'viewer', label: isArabic ? 'المشاهدين' : 'Viewers' }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setRoleFilter(tab.id)}
+                style={{
+                  border: 'none',
+                  background: roleFilter === tab.id ? 'var(--white)' : 'transparent',
+                  color: roleFilter === tab.id ? 'var(--navy)' : 'var(--gray-600)',
+                  fontWeight: roleFilter === tab.id ? 700 : 500,
+                  fontSize: '0.78rem',
+                  padding: '5px 10px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  boxShadow: roleFilter === tab.id ? 'var(--shadow-sm)' : 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {!isViewer && (
@@ -327,7 +465,7 @@ export default function Users() {
             <thead>
               <tr>
                 <th>{t('name')}</th>
-                <th>{t('team')}</th>
+                <th>{isArabic ? 'الفريق / المشرف المسؤول' : 'Team / Responsible Supervisor'}</th>
                 <th>{t('companyId')}</th>
                 <th>{t('email')}</th>
                 <th>{t('phone')}</th>
@@ -342,18 +480,34 @@ export default function Users() {
                     <span className="spinner" style={{ borderColor: 'rgba(18,168,157,.2)', borderTopColor: 'var(--teal)' }} />
                   </td>
                 </tr>
-              ) : users.length === 0 ? (
+              ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="table-empty">
                     {search ? (isArabic ? `لا يوجد مستخدمون يطابقون "${search}".` : `No users match "${search}".`) : (isArabic ? 'لم يتم العثور على مستخدمين.' : 'No users found.')}
                   </td>
                 </tr>
               ) : (
-                users.map(u => (
+                filteredUsers.map(u => (
                   <tr key={u.id}>
                     <td style={{ fontWeight: 600, color: 'var(--gray-900)' }}>{u.name}</td>
                     <td>
-                      {u.team_name ? (
+                      {u.access === 'operator' ? (
+                        (() => {
+                          const meta = parseTeamMeta(u.team_name);
+                          return (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.8rem' }}>
+                              <span style={{ color: 'var(--navy)', fontWeight: 700 }}>
+                                👨‍💼 {meta.supervisor || '—'}
+                              </span>
+                              {meta.station && (
+                                <span style={{ color: 'var(--teal-dark)', fontWeight: 600, fontSize: '0.75rem' }}>
+                                  🏭 {meta.station}
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()
+                      ) : u.team_name ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 4, fontSize: '0.78rem', background: 'var(--teal-light)', color: 'var(--teal-dark)', fontWeight: 600 }}>
                           👥 {u.team_name}
                         </span>
@@ -376,16 +530,18 @@ export default function Users() {
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                           </button>
-                          <button
-                            className="btn-icon btn-delete"
-                            title={t('delete')}
-                            onClick={() => setModal({ type: 'delete', user: u })}
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
-                              <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
-                            </svg>
-                          </button>
+                          {isAdmin && (
+                            <button
+                              className="btn-icon btn-delete"
+                              title={isArabic ? 'حذف المستخدم (للأدمن فقط)' : 'Delete User (Admin only)'}
+                              onClick={() => setModal({ type: 'delete', user: u })}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--gray-500)' }}>
@@ -399,11 +555,11 @@ export default function Users() {
             </tbody>
           </table>
         </div>
-        {!loading && users.length > 0 && (
+        {!loading && filteredUsers.length > 0 && (
           <div className="table-count">
             {isArabic 
-              ? `${users.length} مستخدم ${search ? `مطابق لـ "${search}"` : 'مسجل'}`
-              : `${users.length} ${users.length === 1 ? 'user' : 'users'}${search ? ` matching "${search}"` : ' total'}`}
+              ? `${filteredUsers.length} مستخدم ${search ? `مطابق لـ "${search}"` : 'مسجل'}`
+              : `${filteredUsers.length} ${filteredUsers.length === 1 ? 'user' : 'users'}${search ? ` matching "${search}"` : ' total'}`}
           </div>
         )}
       </div>
@@ -412,6 +568,7 @@ export default function Users() {
       {modal?.type === 'add' && (
         <UserModal
           mode="add"
+          supervisors={supervisorsList}
           onClose={() => setModal(null)}
           onSaved={onSaved}
         />
@@ -420,11 +577,12 @@ export default function Users() {
         <UserModal
           mode="edit"
           initial={modal.user}
+          supervisors={supervisorsList}
           onClose={() => setModal(null)}
           onSaved={onSaved}
         />
       )}
-      {modal?.type === 'delete' && (
+      {isAdmin && modal?.type === 'delete' && (
         <DeleteModal
           user={modal.user}
           onClose={() => setModal(null)}

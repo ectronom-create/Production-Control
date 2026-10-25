@@ -32,6 +32,7 @@ const PRODUCTION_STAGES = [
   { stage_id: 'Multin test', stage_name: 'Multi-Test', color: '#10b981', icon: '🧪' },
   { stage_id: 'Perso', stage_name: 'Perso', color: '#a855f7', icon: '🌐' },
   { stage_id: 'Packaging', stage_name: 'Packaging', color: '#64748b', icon: '📦' },
+  { stage_id: 'Firmware update', stage_name: 'Firmware Update', color: '#06b6d4', icon: '💾' },
 ];
 
 const DOWNTIME_REASONS = {

@@ -10,6 +10,7 @@ import DefectMeters from './pages/DefectMeters';
 import KitMeters from './pages/KitMeters';
 import Batches from './pages/Batches';
 import PreProductionChecklist from './pages/PreProductionChecklist';
+import CrewManagement from './pages/CrewManagement';
 import Users from './pages/Users';
 
 function PrivateRoute({ children }) {
@@ -71,6 +72,14 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={['admin', 'supervisor']}>
               <Production />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="crew"
+          element={
+            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+              <CrewManagement />
             </RoleRoute>
           }
         />

@@ -40,6 +40,18 @@ const NAV_ITEMS = [
     ),
   },
   {
+    to: '/crew',
+    label: 'Line Crew',
+    labelAr: 'طاقم العمل والمحطات',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+  {
     to: '/pre-production-checklist',
     label: 'Pre-Shift Checklist',
     labelAr: 'مهام التحقق قبل الإنتاج',
@@ -112,6 +124,67 @@ const NAV_ITEMS = [
       </svg>
     ),
   },
+];
+
+const MOBILE_BOTTOM_ITEMS = [
+  {
+    to: '/dashboard',
+    labelAr: 'الرئيسية',
+    labelEn: 'Home',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" />
+        <rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+      </svg>
+    )
+  },
+  {
+    to: '/production',
+    labelAr: 'الإنتاج',
+    labelEn: 'Production',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 20h20M5 20V10l7-7 7 7v10" /><path d="M9 20v-5h6v5" />
+      </svg>
+    )
+  },
+  {
+    to: '/crew',
+    labelAr: 'طاقم العمل',
+    labelEn: 'Crew',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    )
+  },
+  {
+    to: '/pre-production-checklist',
+    labelAr: 'التحقق',
+    labelEn: 'Checklist',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 11l3 3L22 4" />
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+      </svg>
+    )
+  },
+  {
+    to: '/downtime',
+    labelAr: 'التوقفات',
+    labelEn: 'Downtime',
+    roles: ['admin', 'supervisor'],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+      </svg>
+    )
+  }
 ];
 
 export default function Layout() {
@@ -247,6 +320,38 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* ── Mobile Bottom Navigation Bar (Phone Experience) ── */}
+      <nav className="mobile-bottom-nav">
+        {MOBILE_BOTTOM_ITEMS.filter(it => !it.roles || it.roles.includes(userRole)).map(item => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className={({ isActive }) => `mobile-nav-btn ${isActive ? 'active' : ''}`}
+            onClick={closeSidebar}
+          >
+            <span className="mobile-nav-icon">{item.icon}</span>
+            <span className="mobile-nav-label">{isArabic ? item.labelAr : item.labelEn}</span>
+          </NavLink>
+        ))}
+
+        {/* More / Menu Drawer Toggle */}
+        <button
+          type="button"
+          className={`mobile-nav-btn ${sidebarOpen ? 'active' : ''}`}
+          onClick={() => setSidebarOpen(o => !o)}
+          aria-label="Toggle Navigation Menu"
+        >
+          <span className="mobile-nav-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="18" x2="21" y2="18" />
+            </svg>
+          </span>
+          <span className="mobile-nav-label">{isArabic ? 'المزيد' : 'More'}</span>
+        </button>
+      </nav>
     </div>
   );
 }

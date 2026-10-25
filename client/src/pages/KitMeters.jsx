@@ -29,6 +29,7 @@ export default function KitMeters() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
   const isViewer = user?.access === 'viewer';
+  const isAdmin = user?.access === 'admin';
 
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -238,8 +239,12 @@ export default function KitMeters() {
     }
   };
 
-  // Delete record
+  // Delete record (Strictly Admin only)
   const handleDeleteRecord = async (id, batch) => {
+    if (!isAdmin) {
+      alert('Only administrators have permission to delete kit records.');
+      return;
+    }
     if (!window.confirm(`Are you sure you want to delete kit batch "${batch}"?`)) return;
 
     try {
@@ -687,14 +692,16 @@ export default function KitMeters() {
                                 <Edit3 size={15} />
                               </button>
 
-                              <button 
-                                type="button"
-                                className="btn-icon btn-delete" 
-                                title={t('delete')}
-                                onClick={() => handleDeleteRecord(r.id, r.batch_number)}
-                              >
-                                <Trash2 size={15} />
-                              </button>
+                              {isAdmin && (
+                                <button 
+                                  type="button"
+                                  className="btn-icon btn-delete" 
+                                  title={isArabic ? 'حذف (للأدمن فقط)' : 'Delete (Admin only)'}
+                                  onClick={() => handleDeleteRecord(r.id, r.batch_number)}
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              )}
                             </>
                           )}
                         </div>

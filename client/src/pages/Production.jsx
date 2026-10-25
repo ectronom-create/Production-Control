@@ -797,8 +797,12 @@ export default function Production() {
     }
   };
 
-  // Delete Record from Supabase
+  // Delete Record from Supabase (Strictly Admin only)
   const handleDeleteRecord = async (id, date) => {
+    if (!isAdmin) {
+      alert('Only administrators have permission to delete production records.');
+      return;
+    }
     if (!window.confirm(`Are you sure you want to permanently delete the production record for ${date}?`)) return;
 
     try {
@@ -1151,14 +1155,16 @@ export default function Production() {
                               <Edit3 size={15} />
                             </button>
 
-                            <button 
-                              type="button"
-                              className="btn-icon btn-delete" 
-                              title="Delete Record"
-                              onClick={() => handleDeleteRecord(r.id, r.date)}
-                            >
-                              <Trash2 size={15} />
-                            </button>
+                            {isAdmin && (
+                              <button 
+                                type="button"
+                                className="btn-icon btn-delete" 
+                                title="Delete Record (Admin Only)"
+                                onClick={() => handleDeleteRecord(r.id, r.date)}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </>
                         )}
                       </div>

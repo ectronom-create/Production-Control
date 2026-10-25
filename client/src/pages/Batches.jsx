@@ -465,8 +465,12 @@ export default function Batches() {
     }
   };
 
-  // Delete Batch
+  // Delete Batch (Strictly Admin only)
   const handleDeleteBatch = async (batchId, batchName) => {
+    if (!isAdmin) {
+      alert('Only administrators have permission to delete batches.');
+      return;
+    }
     if (!window.confirm(`Are you sure you want to delete batch "${batchName}"? All corresponding meter records will be permanently removed.`)) {
       return;
     }

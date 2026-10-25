@@ -2,14 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
-import emailjs from '@emailjs/browser';
 import { printReportDocument } from '../utils/printReport';
-
-// ─── EmailJS Configuration ────────────────────────────────────────────────────
-const EMAILJS_SERVICE_ID  = 'service_bhu8628';
-const EMAILJS_TEMPLATE_ID = 'template_xdr7gag';     // ✅ Real Template ID
-const EMAILJS_PUBLIC_KEY  = 'hlUnMVuU8YRuxhfwP';       // ✅ EmailJS Account Public Key
-const DOWNTIME_ALERT_THRESHOLD_SECS = 1800;          // 30 minutes
 
 const STAGES = [
   'Assembly',
@@ -18,10 +11,11 @@ const STAGES = [
   'Calibration',
   'Multin test',
   'Perso',
-  'Packaging'
+  'Packaging',
+  'Firmware update'
 ];
 
-const STORAGE_KEY = 'ectron_active_downtime';
+const getStorageKey = (userName) => `ectron_live_downtime_${userName || 'default'}`;
 const LOCAL_STOPPAGES_KEY = 'ectron_downtime_local_records';
 
 function formatMinutes(minutes) {
@@ -446,11 +440,16 @@ function DowntimeModal({ mode, initial, users, currentUserName, onClose, onSaved
 
 // ─── Delete Confirm Modal ─────────────────────────────────────────────────────
 function DeleteModal({ record, onClose, onDeleted }) {
+  const { user } = useAuth();
   const { t, isArabic } = useLanguage();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   async function handleDelete() {
+    if (user?.access !== 'admin') {
+      setError(isArabic ? 'صلاحية الحذف مقتصرة على الأدمن فقط.' : 'Delete permission is restricted to admin only.');
+      return;
+    }
     setLoading(true);
     try {
       await supabase.from('stoppages').delete().eq('id', record.id);
@@ -502,6 +501,7 @@ export default function Downtime() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
   const isViewer = user?.access === 'viewer';
+  const isAdmin = user?.access === 'admin';
 
   const [records, setRecords] = useState([]);
   const [users, setUsers] = useState([]);
@@ -514,218 +514,70 @@ export default function Downtime() {
 
   // ─── Easy Live Recording State ──────────────────────────────────────────────
   const [selectedPillStage, setSelectedPillStage] = useState(STAGES[0]);
-  const [activeSession, setActiveSession] = useState(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      return null;
-    }
-  });
+  const [activeSession, setActiveSession] = useState(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [isSavingLive, setIsSavingLive] = useState(false);
-  const lastAlertMinuteRef = useRef(0);        // tracks last alert milestone in minutes (30, 90, 150...)
-  const adminEmailsRef = useRef([]);           // cached list of admin emails
 
-  // Pre-load admin emails & sync any active live stoppage from Supabase
+  // Sync active live stoppage scoped to the current user (across browsers & devices)
   useEffect(() => {
-    supabase.from('users')
-      .select('email, name')
-      .eq('access', 'admin')
-      .then(res => {
-        adminEmailsRef.current = (res.data || []).filter(u => u.email);
-      })
-      .catch(() => {});
+    const currentUserName = user?.name;
+    if (!currentUserName) return;
 
-    // Check Supabase for any active live stoppage (resumed_at IS NULL)
+    const userStorageKey = getStorageKey(currentUserName);
+
+    // 1. Immediately hydrate from user-scoped localStorage if available
+    try {
+      const stored = localStorage.getItem(userStorageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && parsed.startTimestamp) {
+          setActiveSession(parsed);
+        }
+      }
+    } catch {}
+
+    // 2. Query Supabase for any active live stoppage (resumed_at IS NULL) for this specific user
     supabase.from('stoppages')
       .select('*')
       .is('resumed_at', null)
+      .eq('supervisor_id', currentUserName)
       .order('id', { ascending: false })
       .limit(1)
       .then(({ data, error }) => {
-        if (!error && data && data[0]) {
+        if (!error && data && data.length > 0) {
           const row = data[0];
           const startMs = new Date(row.stopped_at).getTime();
           const restored = {
             id: row.id,
             stage: row.stage_id || STAGES[0],
-            user_name: row.supervisor_id || 'Supervisor',
+            user_name: row.supervisor_id || currentUserName,
             startTimestamp: startMs,
-            date: row.stopped_at.split('T')[0],
+            date: row.stopped_at ? row.stopped_at.split('T')[0] : getTodayString(),
             start_time: new Date(row.stopped_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
           };
           setActiveSession(restored);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(restored));
+          localStorage.setItem(userStorageKey, JSON.stringify(restored));
+        } else if (!error && (!data || data.length === 0)) {
+          // If no active stoppage exists on Supabase for this user, clear local session
+          setActiveSession(null);
+          localStorage.removeItem(userStorageKey);
         }
       })
-      .catch(() => {});
-  }, []);
+      .catch((err) => {
+        console.warn('Sync live downtime from Supabase error:', err);
+      });
+  }, [user?.name]);
 
-  // ─── Send recurring downtime alert emails (30m, then +60m: 90m, 150m...) ────
-  async function sendDowntimeAlert(session, elapsedSecs) {
-    const mins = Math.floor(elapsedSecs / 60);
-    const recipients = adminEmailsRef.current;
-
-    if (!recipients.length) {
-      console.warn('[DowntimeAlert] No admin emails found in users table.');
-      return;
-    }
-
-    // Exact English format requested by management
-    const messageBody =
-`Dear Team / Production Management,
-
-Please be advised that an active production stoppage has reached ${mins} minutes and requires immediate attention and intervention.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📍 DOWNTIME INCIDENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Production Stage: ${session.stage}
-• Initiated By     : ${session.user_name}
-• Start Time       : ${session.start_time} - ${session.date}
-• Current Duration : ${mins} Minutes
-• Status           : ONGOING / UNRESOLVED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-This is an automated operational alert generated by the Ectron Production Control System.
-
-Best regards,`;
-
-    for (const admin of recipients) {
-      try {
-        await emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            to_email: admin.email,                             // {{to_email}}
-            email: admin.email,                                // fallback {{email}}
-            name: session.user_name,                           // {{name}}
-            time: `${session.start_time} — ${session.date}`,  // {{time}}
-            message: messageBody,                              // {{message}}
-            stage_name: session.stage,                        // {{stage_name}}
-          },
-          EMAILJS_PUBLIC_KEY
-        );
-        console.log(`[DowntimeAlert] ✅ Alert (${mins}m) sent to ${admin.email}`);
-      } catch (err) {
-        console.error(`[DowntimeAlert] ❌ Failed for ${admin.email}:`, err);
-      }
-    }
-  }
-
-  // ─── Direct Test Alert (Admin only test) ───────────────────────────────────
-  const [isSendingTestAlert, setIsSendingTestAlert] = useState(false);
-  async function handleSendTestAlert() {
-    setIsSendingTestAlert(true);
-    const testSession = activeSession || {
-      stage: selectedPillStage || 'Assembly',
-      user_name: user?.name || 'Admin',
-      start_time: getCurrentTimeString(new Date()),
-      date: getTodayString()
-    };
-
-    // Fetch fresh admin emails directly to guarantee we have them
-    let recipients = adminEmailsRef.current;
-    if (!recipients || recipients.length === 0) {
-      try {
-        const { data } = await supabase.from('users').select('email, name').eq('access', 'admin');
-        recipients = (data || []).filter(u => u.email);
-        adminEmailsRef.current = recipients;
-      } catch (err) {
-        console.error('Failed to fetch admin users:', err);
-      }
-    }
-
-    if (!recipients || recipients.length === 0) {
-      showToast('⚠️ No admin emails found in database');
-      setIsSendingTestAlert(false);
-      return;
-    }
-
-    let successCount = 0;
-    let lastError = null;
-
-    const testBody =
-`Dear Team / Production Management,
-
-Please be advised that an active production stoppage has exceeded 30 minutes and requires immediate attention and intervention.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📍 DOWNTIME INCIDENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Production Stage: ${testSession.stage}
-• Initiated By     : ${testSession.user_name}
-• Start Time       : ${testSession.start_time} - ${testSession.date}
-• Current Duration : Exceeded 30 Minutes (Test Alert)
-• Status           : ONGOING / UNRESOLVED
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-This is an automated operational alert generated by the Ectron Production Control System.
-
-Best regards,`;
-
-    for (const admin of recipients) {
-      try {
-        const res = await emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            to_email: admin.email,
-            email: admin.email,
-            name: testSession.user_name,
-            time: `${testSession.start_time} — ${testSession.date}`,
-            message: testBody,
-            stage_name: `${testSession.stage} (Test)`
-          },
-          EMAILJS_PUBLIC_KEY
-        );
-        console.log(`[EmailJS Test] Success for ${admin.email}:`, res);
-        successCount++;
-      } catch (e) {
-        console.error(`[EmailJS Test Error for ${admin.email}]:`, e);
-        lastError = e?.text || e?.message || JSON.stringify(e);
-      }
-    }
-
-    setIsSendingTestAlert(false);
-    if (successCount > 0) {
-      showToast(`✅ Test alert email sent to all administrators (${successCount} recipients)!`);
-    } else {
-      showToast(`❌ Failed to send email: ${lastError || 'EmailJS connection error'}`);
-    }
-  }
-
-  // Timer ticker
+  // ─── Live Timer Ticker (Display only) ───────────────────────────────────────
   useEffect(() => {
     if (!activeSession) {
       setElapsedSeconds(0);
-      lastAlertMinuteRef.current = 0; // reset alert milestones when session ends
       return;
     }
 
     const updateTimer = () => {
       const diff = Math.max(0, Math.floor((Date.now() - activeSession.startTimestamp) / 1000));
       setElapsedSeconds(diff);
-
-      const elapsedMins = Math.floor(diff / 60);
-
-      // 🚨 Recurring Alert Schedule:
-      // 1st Alert: at 30 minutes (elapsedMins >= 30 and lastAlertMinuteRef < 30)
-      // Subsequent Alerts: every +60 mins (90m, 150m, 210m...)
-      if (elapsedMins >= 30) {
-        let triggerMilestone = null;
-        if (lastAlertMinuteRef.current === 0) {
-          triggerMilestone = 30;
-        } else if (elapsedMins >= lastAlertMinuteRef.current + 60) {
-          triggerMilestone = lastAlertMinuteRef.current + 60;
-        }
-
-        if (triggerMilestone !== null) {
-          lastAlertMinuteRef.current = triggerMilestone;
-          sendDowntimeAlert(activeSession, diff);
-        }
-      }
     };
 
     updateTimer();
@@ -829,7 +681,7 @@ Best regards,`;
       console.warn('Could not register active live stoppage in Supabase:', e);
     }
 
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    localStorage.setItem(getStorageKey(user?.name), JSON.stringify(session));
     setActiveSession(session);
     showToast(`Downtime recording started for "${selectedPillStage}"`);
   }
@@ -905,7 +757,7 @@ Best regards,`;
         localStorage.setItem(LOCAL_STOPPAGES_KEY, JSON.stringify(storedList.slice(0, 100)));
       } catch {}
 
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(getStorageKey(user?.name));
       setActiveSession(null);
       setElapsedSeconds(0);
       showToast(`Saved downtime for "${payload.stage}" (${durationMins}m, ${payload.start_time} - ${payload.end_time})!`);
@@ -928,7 +780,7 @@ Best regards,`;
           console.warn('Could not delete canceled stoppage from Supabase:', e);
         }
       }
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(getStorageKey(user?.name));
       setActiveSession(null);
       setElapsedSeconds(0);
       showToast('Recording cancelled.');
@@ -1021,31 +873,6 @@ Best regards,`;
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            {user?.access === 'admin' && (
-              <button
-                type="button"
-                onClick={handleSendTestAlert}
-                disabled={isSendingTestAlert}
-                style={{
-                  background: 'transparent',
-                  border: '1px solid var(--teal)',
-                  color: 'var(--teal)',
-                  borderRadius: '6px',
-                  padding: '4px 10px',
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  cursor: isSendingTestAlert ? 'not-allowed' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-                title={isArabic ? 'إرسال بريد تجريبي لجميع إيميلات المدراء' : 'Send test email to all registered admin emails'}
-              >
-                <span>📧</span>
-                <span>{isSendingTestAlert ? (isArabic ? 'جارِ الإرسال...' : 'Sending Test...') : t('testAlertEmail')}</span>
-              </button>
-            )}
-
             <div style={{ fontSize: '0.85rem', color: 'var(--gray-500)' }}>
               {isArabic ? 'مسجل الدخول كـ: ' : 'Logged in as: '}<strong style={{ color: 'var(--navy)' }}>{user?.name || 'Admin'}</strong>
             </div>
@@ -1396,16 +1223,18 @@ Best regards,`;
                               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                             </svg>
                           </button>
-                          <button
-                            className="btn-icon btn-delete"
-                            title={t('delete')}
-                            onClick={() => setModal({ type: 'delete', record: r })}
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
-                              <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
-                            </svg>
-                          </button>
+                          {isAdmin && (
+                            <button
+                              className="btn-icon btn-delete"
+                              title={isArabic ? 'حذف (للأدمن فقط)' : 'Delete (Admin only)'}
+                              onClick={() => setModal({ type: 'delete', record: r })}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
+                              </svg>
+                            </button>
+                          )}
                         </div>
                       ) : (
                         <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--gray-500)' }}>
@@ -1462,7 +1291,7 @@ Best regards,`;
         />
       )}
 
-      {modal?.type === 'delete' && (
+      {isAdmin && modal?.type === 'delete' && (
         <DeleteModal
           record={modal.record}
           onClose={() => setModal(null)}

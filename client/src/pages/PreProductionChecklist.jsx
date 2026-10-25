@@ -28,6 +28,129 @@ import { printReportDocument } from '../utils/printReport';
 
 const LOCAL_STORAGE_KEY = 'ectron_pre_production_checklists';
 
+// ─── Standard 8 Production Stations Sequence ──────────────────────────────────
+export const STANDARD_8_STATIONS = [
+  { id: 'Assembly', nameAr: 'التجميع', nameEn: 'Assembly', num: 1 },
+  { id: 'Insulation', nameAr: 'العزل', nameEn: 'Insulation', num: 2 },
+  { id: 'RF', nameAr: 'التردد اللاسلكي', nameEn: 'RF', num: 3 },
+  { id: 'Calibration', nameAr: 'المعايرة', nameEn: 'Calibration', num: 4 },
+  { id: 'Multin test', nameAr: 'الفحص الشامل', nameEn: 'Multin test', num: 5 },
+  { id: 'Perso', nameAr: 'التخصيص', nameEn: 'Perso', num: 6 },
+  { id: 'Packaging', nameAr: 'التغليف', nameEn: 'Packaging', num: 7 },
+  { id: 'Firmware update', nameAr: 'تحديث الفيرموير', nameEn: 'Firmware update', num: 8 }
+];
+
+const ALL_STATION_IDS = STANDARD_8_STATIONS.map(s => s.id);
+const ALL_STATIONS = ALL_STATION_IDS;
+
+// ─── 5M Manufacturing Category Clarification ──────────────────────────────────
+export function getCategoryInfo(cat, isArabic) {
+  switch (cat) {
+    case 'A':
+      return {
+        code: 'Cat A',
+        name: isArabic ? 'الأفراد والكوادر' : 'Manpower & Safety',
+        desc: isArabic ? 'حضور المشغلين، مصفوفة المهارات، واجتماع الوردية' : 'Line Operators, Skill Grid & Standup Meeting'
+      };
+    case 'B':
+      return {
+        code: 'Cat B',
+        name: isArabic ? 'طرق وتعليمات العمل' : 'Methods & WI',
+        desc: isArabic ? 'تعليمات العمل المعتمدة WI ومعايير الجودة FI' : 'Standard Work Instructions & Quality Criteria'
+      };
+    case 'C':
+      return {
+        code: 'Cat C',
+        name: isArabic ? 'الآلات والتجهيزات' : 'Machines & Tools',
+        desc: isArabic ? 'ضغط الكمبريسر، ماكينات الفحص، وعزم المفكات' : 'Air Pressure, Test Benches & Tool Calibration'
+      };
+    case 'D':
+      return {
+        code: 'Cat D',
+        name: isArabic ? 'القياس والتتبع' : 'Measurement & QA',
+        desc: isArabic ? 'العينة المعيارية، نظام التتبع، وسجلات الفحص' : 'Golden Sample, Traceability & Quality Logs'
+      };
+    case 'E':
+      return {
+        code: 'Cat E',
+        name: isArabic ? 'المواد ونظافة 5S' : 'Materials & 5S',
+        desc: isArabic ? 'مطابقة كيت التشغيل، إخلاء الخط، وبيئة 5S' : 'Kit Matching, Line Clearance & 5S'
+      };
+    case 'A & D':
+      return {
+        code: 'Cat A & D',
+        name: isArabic ? 'الكوادر والجودة' : 'People & Quality',
+        desc: isArabic ? 'تأهيل المشغلين والسلامة ومطابقة معايير الجودة' : 'Skill Matrix, HSE & Quality Compliance'
+      };
+    case 'B & C':
+      return {
+        code: 'Cat B & C',
+        name: isArabic ? 'التعليمات والأدوات' : 'Methods & Tools',
+        desc: isArabic ? 'تعليمات التشغيل ومعايرة عزم المفكات والمثبتات' : 'WI Display, Torque Screwdrivers & Fixtures'
+      };
+    case 'C & D':
+      return {
+        code: 'Cat C & D',
+        name: isArabic ? 'التجهيزات والتتبع' : 'Machines & QA',
+        desc: isArabic ? 'سيرفر التتبع، العينة المعيارية، ومحطات الفحص' : 'Traceability Database, Golden Sample & QC'
+      };
+    case 'D & E':
+      return {
+        code: 'Cat D & E',
+        name: isArabic ? 'التغليف وبيئة 5S' : 'Packaging & 5S',
+        desc: isArabic ? 'كراتين التغليف، ملصقات الشحن، ونظافة 5S' : 'Packing Boxes, Shipping Labels & 5S Clearance'
+      };
+    default:
+      return { code: `Cat ${cat}`, name: `Cat ${cat}`, desc: '' };
+  }
+}
+
+// ─── Stations Mapping & Formatting Helper ─────────────────────────────────────
+export function getStationsDisplay(stations, isArabic) {
+  if (!stations || stations.length === 0) {
+    return {
+      isAll: false,
+      label: isArabic ? '—' : '—',
+      short: '—',
+      names: ''
+    };
+  }
+
+  if (stations.length >= 8) {
+    return {
+      isAll: true,
+      label: isArabic ? 'جميع الـ 8 محطات (1 - 8)' : 'All 8 Stations (1 - 8)',
+      short: isArabic ? 'كامل الـ 8 محطات' : 'All 8 Stations',
+      names: isArabic ? '1.التجميع 2.العزل 3.التردد 4.المعايرة 5.الفحص 6.التخصيص 7.التغليف 8.الفيرموير' : '1.Assembly 2.Insulation 3.RF 4.Calibration 5.Multin 6.Perso 7.Packaging 8.FW'
+    };
+  }
+
+  const map = {
+    'Assembly': { num: 1, ar: 'التجميع', en: 'Assembly' },
+    'Insulation': { num: 2, ar: 'العزل', en: 'Insulation' },
+    'RF': { num: 3, ar: 'التردد', en: 'RF' },
+    'Calibration': { num: 4, ar: 'المعايرة', en: 'Calibration' },
+    'Multin test': { num: 5, ar: 'الفحص الشامل', en: 'Multin test' },
+    'Perso': { num: 6, ar: 'التخصيص', en: 'Perso' },
+    'Packaging': { num: 7, ar: 'التغليف', en: 'Packaging' },
+    'Firmware update': { num: 8, ar: 'الفيرموير', en: 'Firmware' }
+  };
+
+  const matched = stations.map(s => map[s] || { num: '?', ar: s, en: s });
+  matched.sort((a, b) => (typeof a.num === 'number' && typeof b.num === 'number') ? a.num - b.num : 0);
+
+  const numsAr = matched.map(m => m.num).join('، ');
+  const numsEn = matched.map(m => m.num).join(', ');
+  const names = matched.map(m => isArabic ? `${m.num}.${m.ar}` : `${m.num}.${m.en}`).join(isArabic ? '، ' : ', ');
+
+  return {
+    isAll: false,
+    label: isArabic ? `محطات (${numsAr}): ${names}` : `Stations (${numsEn}): ${names}`,
+    short: isArabic ? `محطات: ${numsAr}` : `St: ${numsEn}`,
+    names
+  };
+}
+
 // ─── Streamlined Checklist Items with Detailed Inspection Criteria ───────────
 // Form PSM-CHK-06-2026 (Start of Production Checklist / قائمة تحقق بدء الإنتاج)
 const CHECKLIST_ITEMS = [
@@ -36,20 +159,20 @@ const CHECKLIST_ITEMS = [
     cat: 'A',
     title: 'Pre-Shift Standup Meeting & Shift Briefing',
     arabicTitle: 'اجتماع الوقوف وبداية الوردية (Standup Meeting) والتوجيهات',
-    stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
+    stations: ALL_STATION_IDS,
     critical: true,
     tag: 'Briefing & Alignment',
     color: '#4f46e5',
     summary: 'Conducted pre-shift standup meeting with all line operators, reviewed daily targets, previous shift defects/lessons learned, and assigned station roles.',
     arabicSummary: 'عقد اجتماع الوقوف الصباحي السريع مع جميع مشغلي الخط، استعراض أهداف الوردية، مناقشة أخطاء وعيوب الوردية السابقة، وتوزيع المهام على المحطات.',
     details: [
-      'Line operators attendance check completed; all critical workstations manned and ready.',
+      'Line operators attendance check completed across all 8 stations; all critical workstations manned and ready.',
       'Daily production targets, meter batch numbers, and scheduled run plan clearly communicated.',
       'Quality & defect briefing: review of previous shift defects, KO boards, and lessons learned to prevent recurrence.',
       'Workstation assignment confirmed, safety/HSE reminders briefed, and operator questions addressed.'
     ],
     arabicDetails: [
-      'حصر حضور مشغلي الخط والتأكد من تواجد وتغطية مشغلي المحطات الحساسة في مواقعهم.',
+      'حصر حضور مشغلي الخط لكافة الـ 8 محطات والتأكد من تواجد وتغطية مشغلي المحطات الحساسة في مواقعهم.',
       'استعراض أهداف الإنتاج اليومية، رقم تشغيلة العدادات (Batch)، وخطة التشغيل الزمنية بدقة.',
       'مراجعة تنبيهات الجودة وأعطال الوردية السابقة وحالات التوقف (KO) لتفادي تكرارها.',
       'تأكيد توزيع المهام على المحطات، والتذكير بتعليمات السلامة المهنية وتفريغ الشحنات (ESD).'
@@ -60,19 +183,19 @@ const CHECKLIST_ITEMS = [
     cat: 'A & D',
     title: 'Operator Qualification, HSE & Safety Standards',
     arabicTitle: 'تأهيل المشغلين (Skill Grid) والسلامة المهنية (HSE/PPE) والالتزام',
-    stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
+    stations: ALL_STATION_IDS,
     critical: true,
     tag: 'People & HSE',
     color: '#0284c7',
     summary: 'Operators qualified in skill matrix, wearing full PPE, and compliant with safety & workstation rules.',
     arabicSummary: 'التأكد من إدراج وتأهيل المشغلين بقائمة المهارات، ارتداء مهمات الوقاية كاملة، والالتزام بقواعد السلامة والعمل ومعايير الجودة.',
     details: [
-      'Operators listed in Skill Matrix & certified for their assigned station (Assembly, Calibration, Multi-Test, Packaging).',
+      'Operators listed in Skill Matrix & certified for their assigned station across the 8 production stages.',
       'Required PPE worn: safety shoes, ESD lab coats, grounded wrist straps, and hairnets/gloves where applicable.',
       'Emergency stop buttons and workstation safety rules fully understood by all active operators.'
     ],
     arabicDetails: [
-      'اعتماد وتأهيل المشغلين في مصفوفة المهارات (Skill Matrix) للعمل على المحطة المحددة (Assembly, Calibration, Multi-Test, Packaging).',
+      'اعتماد وتأهيل المشغلين في مصفوفة المهارات (Skill Matrix) للعمل على المحطة المحددة عبر الـ 8 محطات.',
       'الالتزام الكامل بارتداء مهمات الوقاية الشخصية (أحذية السلامة، روب ESD، أساور التأريض، وقفازات/أغطية الشعر عند اللزوم).',
       'التأكد من جاهزية أزرار الإيقاف في حالات الطوارئ (Emergency Stop) واستيعاب قواعد السلامة بمواقع العمل.'
     ]
@@ -82,20 +205,20 @@ const CHECKLIST_ITEMS = [
     cat: 'B & C',
     title: 'Work Instructions (WI/FI) & Tool Calibration',
     arabicTitle: 'تعليمات العمل المعتمدة (WI/FI) وصلاحية معايرة الأدوات والمثبتات',
-    stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
+    stations: ALL_STATION_IDS,
     critical: true,
     tag: 'Standards & Tools',
     color: '#7c3aed',
     summary: 'Latest signed work instructions mounted & readable; electric torque screwdrivers and assembly jigs calibrated.',
     arabicSummary: 'توفر تعليمات العمل المحدثة والموقعة ومقروءة، وتوفر الأدوات والمثبتات (Fixtures/Torque) مع ملصقات معايرة سارية.',
     details: [
-      'Latest revision signed Work Instructions (WI) and Quality Inspection standards (FI) displayed and readable at each station.',
+      'Latest revision signed Work Instructions (WI) and Quality Inspection standards (FI) displayed and readable at each of the 8 stations.',
       'Electric torque screwdrivers verified with valid calibration tags and set to specified torque (Nm) for terminal/cover screws.',
       'Assembly jigs, fixtures, holding clamps, and manual presses inspected for wear, alignment, and secure mounting.',
       'Workbench ESD grounding mats and ground wires verified and physically connected.'
     ],
     arabicDetails: [
-      'توفر تعليمات العمل المعتمدة (WI) ومعايير فحص الجودة (FI) محدثة وموقعة ومقروءة عند كل محطة.',
+      'توفر تعليمات العمل المعتمدة (WI) ومعايير فحص الجودة (FI) محدثة وموقعة ومقروءة عند كل محطة من المحطات الـ 8.',
       'فحص المفكات الكهربائية (Torque Screwdrivers) والتأكد من ملصقات المعايرة السارية وضبط عزم الدوران (Nm) بدقة.',
       'فحص مثبتات التجميع والمكابس اليدوية (Fixtures/Jigs) للتأكد من خلوها من التآكل وتثبيتها بإحكام.',
       'التحقق من توصيل بساط تفريغ الشحنات الكهربائية (ESD Grounding Mats) وأسلاك التأريض بجميع طاولات العمل.'
@@ -105,23 +228,23 @@ const CHECKLIST_ITEMS = [
     id: 'chk-3',
     cat: 'C',
     title: 'Air Compressor, Machines & Test Benches',
-    arabicTitle: 'ضغط الكمبريسر، جاهزية الآلات ومحطات فحص Multi-Test',
-    stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
+    arabicTitle: 'ضغط الكمبريسر، جاهزية الآلات ومحطات فحص Multin test وتحديث الفيرموير',
+    stations: ['Assembly', 'Calibration', 'Multin test', 'Firmware update'],
     critical: true,
     tag: 'Machines & Air',
     color: '#059669',
-    summary: 'Air compressor pressure nominal (6-8 Bar), Multi-Test benches active with zero alarm codes, and update PCs connected.',
-    arabicSummary: 'فحص ضغط الهواء بالكمبريسر، جاهزية أجهزة الاختبار Multi-Test والآلات، ونظام التحديث بدون أي أعطال أو إنذارات.',
+    summary: 'Air compressor pressure nominal (6-8 Bar), Multin test & Calibration benches active with zero alarm codes, and Firmware update PCs connected.',
+    arabicSummary: 'فحص ضغط الهواء بالكمبريسر، جاهزية أجهزة الاختبار Multin test والمعايرة والآلات، ونظام تحديث الفيرموير بدون أي أعطال أو إنذارات.',
     details: [
       'Central air compressor operating pressure within nominal range (6.0 - 8.0 Bar) with zero moisture or air leaks.',
-      'Multi-Test benches powered on, calibration due dates valid, and automated testing software running with zero error codes.',
-      'Update PC 1 and Update PC 2 connected to local network with firmware logging directories active and synchronized.',
+      'Calibration and Multin test benches powered on, calibration due dates valid, and automated testing software running with zero error codes.',
+      'Firmware Update PCs connected to local network with firmware flashing directories active and synchronized.',
       'Laser marking machines, label printers, and handheld barcode scanners operational and communicating.'
     ],
     arabicDetails: [
       'ضغط الهواء بالكمبريسر المركزي ضمن النطاق المعياري (6.0 - 8.0 Bar) مع خلو الخطوط من أي تسريب أو رطوبة.',
-      'تشغيل محطات الفحص الشامل (Multi-Test)، سريان صلاحية المعايرة، وعمل برامج الاختبار دون أي إنذارات أو أكواد أخطاء.',
-      'اتصال أجهزة التحديث (Update PC 1 & PC 2) بالشبكة الداخلية وتزامن مجلدات تسجيل الفيرموير (Logs).',
+      'تشغيل محطات المعايرة والفحص الشامل (Multin test)، سريان صلاحية المعايرة، وعمل برامج الاختبار دون أي إنذارات أو أكواد أخطاء.',
+      'اتصال أجهزة تحديث الفيرموير (Firmware Update PCs) بالشبكة الداخلية وتزامن مجلدات تسجيل الفيرموير (Logs).',
       'جاهزية ماكينات وسم الليزر وطابعات ملصقات الباركود وقارئات الباركود اليدوية للعمل بكفاءة.'
     ]
   },
@@ -130,20 +253,20 @@ const CHECKLIST_ITEMS = [
     cat: 'C & D',
     title: 'Traceability System, Golden Sample & Quality Verification',
     arabicTitle: 'نظام التتبع (Traceability)، فحص العينة المعيارية وجودة المحطات',
-    stations: ['Calibration', 'Multi-Test', 'Packaging'],
+    stations: ['RF', 'Calibration', 'Multin test', 'Perso', 'Firmware update'],
     critical: true,
     tag: 'Traceability & Quality',
     color: '#0891b2',
     summary: 'Traceability server connected, pre-shift golden sample test passed 100%, and defect logging sheets ready.',
-    arabicSummary: 'فحص نظام التتبع وقارئات الباركود، اجتياز العينة المعيارية لاختبار الـ Multi-Test بنجاح 100%، وجاهزية سجلات الفحص.',
+    arabicSummary: 'فحص نظام التتبع وقارئات الباركود، اجتياز العينة المعيارية لاختبار الـ Multin test والمعايرة بنجاح 100%، وجاهزية سجلات الفحص.',
     details: [
-      'Traceability database online; automated serial number and MAC address logging confirmed without latency.',
+      'Traceability database online; automated serial number, RF test, and MAC address logging confirmed without latency.',
       'Pre-shift "Golden Sample" / Reference Meter run completed on test benches with 100% PASS result.',
       'Quality defect logging sheets and digital inspection forms ready at each inspection checkpoint.',
       'Defect classification guide and visual quality acceptance samples visible at inspection stations.'
     ],
     arabicDetails: [
-      'اتصال قاعدة بيانات نظام التتبع (Traceability) ومطابقة قراءة الأرقام التسلسلية وعناوين الماك (MAC) فورياً دون تأخير.',
+      'اتصال قاعدة بيانات نظام التتبع (Traceability) ومطابقة قراءة الأرقام التسلسلية وفحص RF وعناوين الماك (MAC) فورياً دون تأخير.',
       'اجتياز اختبار العينة المعيارية (Golden Sample) بنجاح 100% (PASS) على أجهزة الفحص قبل بدء تشغيل الوردية.',
       'جاهزية سجلات ونماذج الفحص الرقمية والورقية لتوثيق أي عيوب أو ملاحظات عند نقاط التفتيش.',
       'توفر دليل تصنيف العيوب ونماذج العينات البصرية المقبولة والمعيبة بوضوح عند محطات الفحص.'
@@ -154,7 +277,7 @@ const CHECKLIST_ITEMS = [
     cat: 'E',
     title: 'Raw Materials, Components & Kit Batch Matching',
     arabicTitle: 'فحص المواد الخام ومطابقة كيت الباتش مع أمر التشغيل',
-    stations: ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'],
+    stations: ['Assembly', 'Insulation', 'Perso', 'Packaging'],
     critical: true,
     tag: 'Materials & Kit',
     color: '#d97706',
@@ -178,7 +301,7 @@ const CHECKLIST_ITEMS = [
     cat: 'D & E',
     title: 'Packaging, Palletizing & 5S Line Clearance',
     arabicTitle: 'التغليف النهائي، الملصقات، نظافة 5S وتفريغ الهالك والكراتين',
-    stations: ['Packaging', 'Assembly'],
+    stations: ALL_STATION_IDS,
     critical: true,
     tag: 'Packaging & 5S',
     color: '#dc2626',
@@ -199,8 +322,6 @@ const CHECKLIST_ITEMS = [
   }
 ];
 
-const ALL_STATIONS = ['Assembly', 'Calibration', 'Multi-Test', 'Packaging'];
-
 function getTodayString() {
   const d = new Date();
   const y = d.getFullYear();
@@ -218,6 +339,7 @@ export default function PreProductionChecklist() {
   const { user } = useAuth();
   const { isArabic, t } = useLanguage();
   const isViewer = user?.access === 'viewer';
+  const isAdmin = user?.access === 'admin';
 
   // Official Form Header Fields (Form No: PSM-CHK-06-2026, Rev: 00)
   const [activeDate, setActiveDate] = useState(getTodayString());
@@ -228,10 +350,10 @@ export default function PreProductionChecklist() {
   // Station filter ('ALL', 'Assembly', 'Calibration', 'Multi-Test', 'Packaging')
   const [stationFilter, setStationFilter] = useState('ALL');
 
-  // Expanded details cards state { [itemId]: boolean }
+  // Expanded details cards state { [itemId]: boolean } (hidden by default)
   const [expandedDetails, setExpandedDetails] = useState(() => {
     const exp = {};
-    CHECKLIST_ITEMS.forEach(it => { exp[it.id] = true; });
+    CHECKLIST_ITEMS.forEach(it => { exp[it.id] = false; });
     return exp;
   });
 
@@ -255,6 +377,65 @@ export default function PreProductionChecklist() {
   const openPrintModal = (rec = null) => {
     setPrintModalRecord(rec);
     setShowPrintModal(true);
+  };
+
+  // Morning Standup Meeting Attendance for chk-0
+  const [standupAttendance, setStandupAttendance] = useState([]);
+
+  // Fetch operators belonging to the active supervisor
+  useEffect(() => {
+    supabase.from('users').select('*').eq('access', 'operator').then(res => {
+      const allOps = res.data || [];
+      const myOps = allOps.filter(op => {
+        try {
+          const meta = JSON.parse(op.team_name);
+          return meta.supervisor?.trim().toLowerCase() === supervisorName?.trim().toLowerCase();
+        } catch {
+          return false;
+        }
+      });
+
+      const targetOps = myOps.length > 0 ? myOps : (user?.access === 'admin' ? allOps : []);
+
+      setStandupAttendance(prev => {
+        const map = {};
+        prev.forEach(p => { map[p.id] = p; });
+
+        return targetOps.map(op => ({
+          id: op.id,
+          name: op.name,
+          company_id: op.company_id,
+          status: map[op.id]?.status || 'PRESENT',
+          reason: map[op.id]?.reason || ''
+        }));
+      });
+    });
+  }, [supervisorName, user]);
+
+  const handleSetOperatorAttendance = (opId, status) => {
+    setStandupAttendance(prev => prev.map(op => {
+      if (op.id === opId) {
+        return { ...op, status, reason: status === 'PRESENT' ? '' : op.reason };
+      }
+      return op;
+    }));
+  };
+
+  const handleSetOperatorReason = (opId, reason) => {
+    setStandupAttendance(prev => prev.map(op => {
+      if (op.id === opId) {
+        return { ...op, reason };
+      }
+      return op;
+    }));
+  };
+
+  const handleMarkAllAttendancePresent = () => {
+    setStandupAttendance(prev => prev.map(op => ({
+      ...op,
+      status: 'PRESENT',
+      reason: ''
+    })));
   };
 
   // History search & filter
@@ -409,7 +590,13 @@ export default function PreProductionChecklist() {
       passed_count: stats.passedCount,
       failed_count: stats.failedCount,
       total_items: stats.total,
-      item_details: itemStatuses,
+      item_details: {
+        ...itemStatuses,
+        'chk-0': {
+          ...itemStatuses['chk-0'],
+          attendance: standupAttendance
+        }
+      },
       general_notes: generalNotes.trim(),
       created_at: new Date().toISOString()
     };
@@ -444,8 +631,9 @@ export default function PreProductionChecklist() {
     }
   };
 
-  // Delete history item
+  // Delete history item (Strictly Admin only)
   const handleDeleteHistory = async (id) => {
+    if (!isAdmin) return;
     if (!window.confirm('Delete this checklist inspection record?')) return;
     try {
       await supabase.from('pre_production_checklists').delete().eq('id', id);
@@ -618,101 +806,212 @@ export default function PreProductionChecklist() {
         </div>
       </div>
 
-      {/* ── KPI & Readiness Score Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-        {/* Score Gauge */}
-        <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : `5px solid ${stats.overallStatus === 'LINE_CLEARED_PASS' ? '#10b981' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#ef4444' : '#0ea5e9')}`, borderRight: isArabic ? `5px solid ${stats.overallStatus === 'LINE_CLEARED_PASS' ? '#10b981' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#ef4444' : '#0ea5e9')}` : 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div className="card-kpi-label">{t('lineReadinessScore')}</div>
-              <div className="card-kpi-val" style={{ color: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#16a34a' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#dc2626' : 'var(--navy)') }}>
-                {stats.readinessPct}%
-              </div>
-            </div>
-            <div style={{ padding: 10, borderRadius: '50%', background: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#dcfce7' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#fee2e2' : '#e0f2fe') }}>
-              {stats.overallStatus === 'LINE_CLEARED_PASS' ? (
-                <ShieldCheck size={26} color="#16a34a" />
-              ) : stats.overallStatus === 'CRITICAL_BLOCKER' ? (
-                <AlertTriangle size={26} color="#dc2626" />
-              ) : (
-                <Clock size={26} color="#0284c7" />
-              )}
-            </div>
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <div style={{ height: 6, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: `${stats.readinessPct}%`, background: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#10b981' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#ef4444' : '#0ea5e9'), transition: 'width 0.4s ease' }} />
-            </div>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, marginTop: 4, color: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#16a34a' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#dc2626' : '#64748b') }}>
-              {stats.overallStatus === 'LINE_CLEARED_PASS' && (isArabic ? '✅ ناجح - تم إخلاء الخط وجاهز لبدء الإنتاج' : '✅ PASS - Line Cleared & Ready for Kick-off')}
-              {stats.overallStatus === 'CRITICAL_BLOCKER' && (isArabic ? '🛑 راسب - تم رصد مانع حرج (يمنع بدء الخط)' : '🛑 FAIL - Critical Blocker Detected (Do Not Start)')}
-              {stats.overallStatus === 'FAILED_ISSUES' && (isArabic ? '⚠️ راسب - تم رصد مشاكل على الخط' : '⚠️ FAIL - Issues Flagged on Line')}
-              {stats.overallStatus === 'IN_PROGRESS' && (isArabic ? '⏳ قيد الفحص والتحقق...' : '⏳ Verification In Progress...')}
-              {stats.overallStatus === 'PENDING' && (isArabic ? 'في انتظار الفحص' : 'Pending Verification')}
-            </div>
-          </div>
-        </div>
-
-        {/* VERIFIED (PASS) */}
-        <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #10b981', borderRight: isArabic ? '5px solid #10b981' : 'none' }}>
-          <div className="card-kpi-label">{t('verifiedPass')}</div>
-          <div className="card-kpi-val" style={{ color: '#16a34a' }}>
-            {stats.passedCount} <span style={{ fontSize: '0.8rem', color: '#64748b' }}>/ {stats.total}</span>
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600, marginTop: 4 }}>
-            {isArabic ? 'مطابق ومحقق للشروط المعيارية' : 'Standard verified & compliant'}
-          </div>
-        </div>
-
-        {/* FAILED / ISSUES (FAIL) */}
-        <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #ef4444', borderRight: isArabic ? '5px solid #ef4444' : 'none' }}>
-          <div className="card-kpi-label">{t('failedIssues')}</div>
-          <div className="card-kpi-val" style={{ color: stats.failedCount > 0 ? '#dc2626' : '#64748b' }}>
-            {stats.failedCount}
-            {stats.criticalFailedCount > 0 && (
-              <span style={{ fontSize: '0.75rem', color: '#dc2626', fontWeight: 800, margin: '0 6px' }}>
-                ({stats.criticalFailedCount} {isArabic ? 'حرج' : 'Critical'})
-              </span>
+      {/* ── Sleek Compact KPI & Readiness Score Bar ── */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', 
+        gap: 10,
+        marginBottom: 16
+      }}>
+        {/* 1. Readiness Score */}
+        <div style={{
+          background: 'var(--white)',
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12
+        }}>
+          <div style={{
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            background: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#dcfce7' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#fee2e2' : '#e0f2fe'),
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            {stats.overallStatus === 'LINE_CLEARED_PASS' ? (
+              <ShieldCheck size={20} color="#16a34a" />
+            ) : stats.overallStatus === 'CRITICAL_BLOCKER' ? (
+              <AlertTriangle size={20} color="#dc2626" />
+            ) : (
+              <Clock size={20} color="#0284c7" />
             )}
           </div>
-          <div style={{ fontSize: '0.72rem', color: stats.failedCount > 0 ? '#b91c1c' : '#64748b', fontWeight: 600, marginTop: 4 }}>
-            {stats.failedCount > 0 ? (isArabic ? 'يتطلب تدخلاً فورياً من المشرف' : 'Requires immediate supervisor resolution') : (isArabic ? 'لا توجد أي معوقات على الخط' : 'Zero line impediments')}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+              {t('lineReadinessScore')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: '1.35rem', fontWeight: 900, color: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#16a34a' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#dc2626' : 'var(--navy)') }}>
+                {stats.readinessPct}%
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: stats.overallStatus === 'LINE_CLEARED_PASS' ? '#16a34a' : (stats.overallStatus === 'CRITICAL_BLOCKER' ? '#dc2626' : '#64748b'), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {stats.overallStatus === 'LINE_CLEARED_PASS' ? (isArabic ? 'جاهز' : 'Ready') : (stats.overallStatus === 'CRITICAL_BLOCKER' ? (isArabic ? 'مانع حرج' : 'Blocker') : (isArabic ? 'قيد الفحص' : 'Pending'))}
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* REMAINING PENDING */}
-        <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #d97706', borderRight: isArabic ? '5px solid #d97706' : 'none' }}>
-          <div className="card-kpi-label">{t('remainingPending')}</div>
-          <div className="card-kpi-val" style={{ color: stats.pendingCount > 0 ? '#d97706' : '#16a34a' }}>
-            {stats.pendingCount}
+        {/* 2. Verified PASS */}
+        <div style={{
+          background: 'var(--white)',
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12
+        }}>
+          <div style={{
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            background: '#dcfce7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <CheckCircle2 size={20} color="#16a34a" />
           </div>
-          <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, marginTop: 4 }}>
-            {stats.pendingCount === 0 ? (isArabic ? 'تم التحقق من كافة البنود' : 'All check points verified') : (isArabic ? 'بنود بانتظار التأكيد' : 'Check points awaiting confirmation')}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+              {t('verifiedPass')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontSize: '1.35rem', fontWeight: 900, color: '#16a34a' }}>
+                {stats.passedCount}
+              </span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#94a3b8' }}>
+                / {stats.total}
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#16a34a', marginInlineStart: 'auto' }}>
+                {isArabic ? 'مطابق' : 'Pass'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 3. Failed / Issues */}
+        <div style={{
+          background: 'var(--white)',
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12
+        }}>
+          <div style={{
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            background: stats.failedCount > 0 ? '#fee2e2' : '#f1f5f9',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <XCircle size={20} color={stats.failedCount > 0 ? '#dc2626' : '#64748b'} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+              {t('failedIssues')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: '1.35rem', fontWeight: 900, color: stats.failedCount > 0 ? '#dc2626' : '#64748b' }}>
+                {stats.failedCount}
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: stats.failedCount > 0 ? '#dc2626' : '#64748b', marginInlineStart: 'auto' }}>
+                {stats.failedCount > 0 ? (isArabic ? 'يتطلب معالجة' : 'Issues') : (isArabic ? 'لا معوقات' : 'Zero')}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4. Remaining Pending */}
+        <div style={{
+          background: 'var(--white)',
+          padding: '10px 14px',
+          borderRadius: 10,
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12
+        }}>
+          <div style={{
+            width: 38,
+            height: 38,
+            borderRadius: 8,
+            background: stats.pendingCount > 0 ? '#fef3c7' : '#dcfce7',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            <Clock size={20} color={stats.pendingCount > 0 ? '#d97706' : '#16a34a'} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+              {t('remainingPending')}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: '1.35rem', fontWeight: 900, color: stats.pendingCount > 0 ? '#d97706' : '#16a34a' }}>
+                {stats.pendingCount}
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: stats.pendingCount > 0 ? '#d97706' : '#16a34a', marginInlineStart: 'auto' }}>
+                {stats.pendingCount === 0 ? (isArabic ? 'مكتمل' : 'All done') : (isArabic ? 'متبقي' : 'Pending')}
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Station Filter Tabs ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, background: '#f8fafc', padding: '10px 16px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--navy)' }}>{t('filterByStation')}</span>
-          {['ALL', ...ALL_STATIONS].map(st => (
+      {/* ── Station Filter Tabs (8 Stations) ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, background: '#f8fafc', padding: '8px 14px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)' }}>{t('filterByStation')}</span>
+          <button
+            type="button"
+            onClick={() => setStationFilter('ALL')}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 6,
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              border: stationFilter === 'ALL' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+              background: stationFilter === 'ALL' ? '#e0f2fe' : '#ffffff',
+              color: stationFilter === 'ALL' ? '#0369a1' : '#64748b'
+            }}
+          >
+            {t('allStations')}
+          </button>
+          {STANDARD_8_STATIONS.map(st => (
             <button
-              key={st}
+              key={st.id}
               type="button"
-              onClick={() => setStationFilter(st)}
+              onClick={() => setStationFilter(st.id)}
               style={{
-                padding: '4px 10px',
+                padding: '4px 8px',
                 borderRadius: 6,
-                fontSize: '0.75rem',
+                fontSize: '0.74rem',
                 fontWeight: 700,
                 cursor: 'pointer',
-                border: stationFilter === st ? '1px solid #0284c7' : '1px solid #cbd5e1',
-                background: stationFilter === st ? '#e0f2fe' : '#ffffff',
-                color: stationFilter === st ? '#0369a1' : '#64748b'
+                border: stationFilter === st.id ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                background: stationFilter === st.id ? '#e0f2fe' : '#ffffff',
+                color: stationFilter === st.id ? '#0369a1' : '#64748b'
               }}
             >
-              {st === 'ALL' ? t('allStations') : (isArabic ? (st === 'Assembly' ? 'التجميع' : st === 'Calibration' ? 'المعايرة' : st === 'Multi-Test' ? 'الاختبار' : 'التغليف') : st)}
+              {st.num}. {isArabic ? st.nameAr : st.nameEn}
             </button>
           ))}
         </div>
@@ -726,19 +1025,23 @@ export default function PreProductionChecklist() {
             setExpandedDetails(next);
           }}
           style={{
-            border: 'none',
-            background: 'transparent',
-            color: '#0369a1',
-            fontSize: '0.78rem',
-            fontWeight: 700,
+            border: '1.5px solid #0284c7',
+            background: Object.values(expandedDetails).every(Boolean) ? '#0284c7' : '#f0f9ff',
+            color: Object.values(expandedDetails).every(Boolean) ? '#ffffff' : '#0369a1',
+            fontSize: '0.86rem',
+            fontWeight: 800,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: 4
+            gap: 6,
+            padding: '6px 14px',
+            borderRadius: 8,
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+            transition: 'all 0.15s ease'
           }}
         >
-          {Object.values(expandedDetails).every(Boolean) ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {Object.values(expandedDetails).every(Boolean) ? t('collapseAllDetails') : t('expandAllDetails')}
+          {Object.values(expandedDetails).every(Boolean) ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          <span>{Object.values(expandedDetails).every(Boolean) ? (isArabic ? 'إخفاء كافة معايير الفحص' : 'Collapse All') : (isArabic ? '🔍 عرض كافة معايير الفحص' : 'Expand All Checkpoints')}</span>
         </button>
       </div>
 
@@ -768,22 +1071,41 @@ export default function PreProductionChecklist() {
                 {/* Item Titles & Badges */}
                 <div style={{ flex: 1, minWidth: 280 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
-                    <span style={{
-                      padding: '2px 9px',
-                      borderRadius: 6,
-                      fontSize: '0.76rem',
-                      fontWeight: 900,
-                      background: '#f1f5f9',
-                      color: 'var(--navy)',
-                      border: '1px solid #cbd5e1'
-                    }}>
-                      Cat: {item.cat}
-                    </span>
+                    {/* Category with clarification */}
+                    {(() => {
+                      const catInfo = getCategoryInfo(item.cat, isArabic);
+                      return (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            fontSize: '0.76rem',
+                            fontWeight: 900,
+                            background: '#f1f5f9',
+                            color: 'var(--navy)',
+                            border: '1px solid #cbd5e1'
+                          }}>
+                            {catInfo.code}
+                          </span>
+                          <span style={{
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            color: '#0284c7',
+                            background: '#f0f9ff',
+                            padding: '2px 8px',
+                            borderRadius: 6,
+                            border: '1px solid #bae6fd'
+                          }}>
+                            {catInfo.name}
+                          </span>
+                        </div>
+                      );
+                    })()}
                     
-                    {/* Primary Title (Arabic highlighted and enlarged when in Arabic mode) */}
+                    {/* Primary Title */}
                     <h3 style={{ 
                       margin: 0, 
-                      fontSize: isArabic ? '1.18rem' : '1.02rem', 
+                      fontSize: isArabic ? '1.26rem' : '1.12rem', 
                       fontWeight: 900, 
                       color: 'var(--navy)',
                       lineHeight: 1.4
@@ -793,11 +1115,11 @@ export default function PreProductionChecklist() {
 
                     {item.critical && (
                       <span style={{
-                        fontSize: '0.68rem',
+                        fontSize: '0.74rem',
                         fontWeight: 900,
                         background: '#fee2e2',
                         color: '#b91c1c',
-                        padding: '2px 8px',
+                        padding: '3px 10px',
                         borderRadius: 6,
                         border: '1px solid #fca5a5'
                       }}>
@@ -806,48 +1128,260 @@ export default function PreProductionChecklist() {
                     )}
                   </div>
 
-                  {/* Secondary Title */}
-                  {isArabic ? (
-                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
+                  {/* Secondary Title (only in Arabic mode) */}
+                  {isArabic && (
+                    <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#64748b', marginBottom: 6 }}>
                       {item.title}
                     </div>
-                  ) : (
-                    item.arabicTitle && (
-                      <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0369a1', marginBottom: 6, direction: 'rtl', textAlign: 'right' }}>
-                        {item.arabicTitle}
-                      </div>
-                    )
                   )}
 
-                  <p style={{ margin: '0 0 8px', fontSize: '0.84rem', color: '#475569', lineHeight: 1.5 }}>
+                  <p style={{ margin: '6px 0 10px', fontSize: '0.96rem', color: '#1e293b', lineHeight: 1.6, fontWeight: 600 }}>
                     {isArabic && item.arabicSummary ? item.arabicSummary : item.summary}
                   </p>
 
-                  {/* Stations badges */}
+                  {/* Stations badges (8 Stations Aware) */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                     <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>
                       {isArabic ? 'المحطات المشمولة:' : 'Applicable Stations:'}
                     </span>
-                    {item.stations.map(st => {
-                      const stArabicLabel = st === 'Assembly' ? 'التجميع' : st === 'Calibration' ? 'المعايرة' : st === 'Multi-Test' ? 'الفحص الشامل' : 'التغليف';
-                      return (
-                        <span
-                          key={st}
-                          style={{
-                            fontSize: '0.7rem',
+                    {(() => {
+                      const stInfo = getStationsDisplay(item.stations, isArabic);
+                      if (stInfo.isAll) {
+                        return (
+                          <span style={{
+                            fontSize: '0.74rem',
                             fontWeight: 800,
-                            padding: '2px 8px',
-                            borderRadius: 5,
-                            background: '#f8fafc',
-                            color: '#334155',
-                            border: '1px solid #cbd5e1'
-                          }}
-                        >
-                          {isArabic ? `${stArabicLabel} (${st})` : st}
+                            padding: '3px 10px',
+                            borderRadius: 6,
+                            background: '#f0fdf4',
+                            color: '#166534',
+                            border: '1px solid #bbf7d0'
+                          }}>
+                            {stInfo.label}
+                          </span>
+                        );
+                      }
+                      return (
+                        <span style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          padding: '3px 10px',
+                          borderRadius: 6,
+                          background: '#f0f9ff',
+                          color: '#0369a1',
+                          border: '1px solid #bae6fd'
+                        }}>
+                          {stInfo.label}
                         </span>
                       );
-                    })}
+                    })()}
                   </div>
+
+                  {item.id === 'chk-0' && (
+                    <div style={{
+                      marginTop: 14,
+                      background: '#ffffff',
+                      border: '1.5px solid #cbd5e1',
+                      borderRadius: 10,
+                      padding: 14,
+                      width: '100%',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                    }}>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 10,
+                        paddingBottom: 10,
+                        borderBottom: '1px solid #e2e8f0',
+                        marginBottom: 12
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: '1rem' }}>📋</span>
+                          <span style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--navy)' }}>
+                            {isArabic ? 'كشف حضور اجتماع الوقوف الصباحي والوردية' : 'Morning Standup Meeting Attendance'}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          {/* Summary Badges */}
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 12, background: 'rgba(16, 185, 129, 0.12)', color: '#10b981' }}>
+                            🟢 {isArabic ? 'حاضر:' : 'Present:'} {standupAttendance.filter(a => a.status === 'PRESENT').length}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 12, background: 'rgba(234, 179, 8, 0.12)', color: '#b45309' }}>
+                            🟡 {isArabic ? 'تأخير:' : 'Late:'} {standupAttendance.filter(a => a.status === 'LATE').length}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '2px 8px', borderRadius: 12, background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444' }}>
+                            🔴 {isArabic ? 'غياب:' : 'Absent:'} {standupAttendance.filter(a => a.status === 'ABSENT').length}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={handleMarkAllAttendancePresent}
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              background: '#f8fafc',
+                              color: '#334155',
+                              padding: '3px 8px',
+                              borderRadius: 6,
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            {isArabic ? '✔ تحديد الكل حاضر' : 'Mark All Present'}
+                          </button>
+
+                          <a
+                            href="/crew"
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: 4,
+                              padding: '3px 8px',
+                              borderRadius: 6,
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              background: '#eef2ff',
+                              color: '#4338ca',
+                              border: '1px solid #c7d2fe',
+                              textDecoration: 'none'
+                            }}
+                          >
+                            <span>👥</span>
+                            <span>{isArabic ? 'طاقم العمل' : 'Crew Page'}</span>
+                            <span style={{ fontSize: '0.65rem' }}>↗</span>
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Operator List */}
+                      {standupAttendance.length === 0 ? (
+                        <div style={{ fontSize: '0.8rem', color: '#64748b', fontStyle: 'italic', padding: 8 }}>
+                          {isArabic ? 'لا يوجد مشغلين مسجلين تحت هذا المشرف.' : 'No operators found under this supervisor.'}
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {standupAttendance.map(op => (
+                            <div
+                              key={op.id}
+                              style={{
+                                background: op.status === 'ABSENT' ? '#fef2f2' : op.status === 'LATE' ? '#fffbeb' : '#f8fafc',
+                                border: op.status === 'ABSENT' ? '1px solid #fecaca' : op.status === 'LATE' ? '1px solid #fde68a' : '1px solid #e2e8f0',
+                                borderRadius: 8,
+                                padding: '8px 12px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: 10
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div style={{
+                                  width: 26,
+                                  height: 26,
+                                  borderRadius: '50%',
+                                  background: op.status === 'ABSENT' ? '#ef4444' : op.status === 'LATE' ? '#f59e0b' : 'var(--navy)',
+                                  color: 'white',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700
+                                }}>
+                                  {op.name.charAt(0)}
+                                </div>
+                                <div>
+                                  <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--navy)' }}>
+                                    {op.name}
+                                  </span>
+                                  <span style={{ marginLeft: 6, marginRight: 6, fontSize: '0.72rem', color: '#64748b', fontFamily: 'monospace' }}>
+                                    #{op.company_id}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                                {/* 3 Status Toggle Buttons */}
+                                <div style={{ display: 'inline-flex', borderRadius: 6, overflow: 'hidden', border: '1px solid #cbd5e1' }}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetOperatorAttendance(op.id, 'PRESENT')}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      border: 'none',
+                                      background: op.status === 'PRESENT' ? '#10b981' : '#ffffff',
+                                      color: op.status === 'PRESENT' ? '#ffffff' : '#475569'
+                                    }}
+                                  >
+                                    🟢 {isArabic ? 'حاضر' : 'Present'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetOperatorAttendance(op.id, 'LATE')}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      borderLeft: '1px solid #cbd5e1',
+                                      borderRight: '1px solid #cbd5e1',
+                                      background: op.status === 'LATE' ? '#f59e0b' : '#ffffff',
+                                      color: op.status === 'LATE' ? '#ffffff' : '#475569'
+                                    }}
+                                  >
+                                    🟡 {isArabic ? 'تأخير' : 'Late'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetOperatorAttendance(op.id, 'ABSENT')}
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      border: 'none',
+                                      background: op.status === 'ABSENT' ? '#ef4444' : '#ffffff',
+                                      color: op.status === 'ABSENT' ? '#ffffff' : '#475569'
+                                    }}
+                                  >
+                                    🔴 {isArabic ? 'غياب' : 'Absent'}
+                                  </button>
+                                </div>
+
+                                {/* Reason / Delay Input if Late or Absent */}
+                                {op.status !== 'PRESENT' && (
+                                  <input
+                                    type="text"
+                                    value={op.reason || ''}
+                                    onChange={e => handleSetOperatorReason(op.id, e.target.value)}
+                                    placeholder={
+                                      op.status === 'LATE'
+                                        ? (isArabic ? 'سبب أو مدة التأخير (مثال: تأخر 20 دقيقة)...' : 'Reason / duration of delay...')
+                                        : (isArabic ? 'سبب عدم الحضور (إجازة مرضية / عذر طارئ / بدون إشعار)...' : 'Reason for absence...')
+                                    }
+                                    style={{
+                                      padding: '4px 10px',
+                                      fontSize: '0.75rem',
+                                      borderRadius: 6,
+                                      border: '1px solid #f59e0b',
+                                      minWidth: '220px',
+                                      background: '#ffffff'
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Status Action Buttons: PASS / FAIL */}
@@ -922,80 +1456,84 @@ export default function PreProductionChecklist() {
                     type="button"
                     onClick={() => toggleDetails(item.id)}
                     style={{
-                      border: 'none',
-                      background: 'transparent',
-                      color: '#0369a1',
-                      fontSize: '0.78rem',
+                      border: '1.5px solid #0284c7',
+                      background: isDetailsOpen ? '#0284c7' : '#f0f9ff',
+                      color: isDetailsOpen ? '#ffffff' : '#0369a1',
+                      fontSize: '0.88rem',
                       fontWeight: 800,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 4,
-                      padding: '4px 6px',
-                      borderRadius: 6
+                      gap: 6,
+                      padding: '7px 14px',
+                      borderRadius: 8,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                      transition: 'all 0.15s ease',
+                      marginTop: 6
                     }}
                   >
-                    {isDetailsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                    {isDetailsOpen 
-                      ? (isArabic ? 'إخفاء معايير الفحص' : 'Hide Inspection Details') 
-                      : (isArabic ? `عرض معايير الفحص (${(item.arabicDetails || item.details).length} معايير)` : `Show Details (${item.details.length} checkpoints)`)}
+                    {isDetailsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                    <span>
+                      {isDetailsOpen 
+                        ? (isArabic ? 'إخفاء معايير الفحص والتحقق' : 'Hide Inspection Details') 
+                        : (isArabic ? `🔍 عرض معايير الفحص والتحقق الإلزامية (${(item.arabicDetails || item.details).length})` : `🔍 Show Mandatory Criteria (${item.details.length})`)}
+                    </span>
                   </button>
                 </div>
               </div>
 
               {/* ── Sub-Checkpoints Details List ── */}
               {isDetailsOpen && (
-                <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid #e2e8f0' }}>
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1.5px dashed #cbd5e1' }}>
                   <div style={{ 
                     display: 'flex', 
                     alignItems: 'center', 
                     justifyContent: 'space-between', 
                     flexWrap: 'wrap', 
                     gap: 8, 
-                    marginBottom: 10,
-                    paddingBottom: 6,
-                    borderBottom: '1px dashed #cbd5e1'
+                    marginBottom: 12,
+                    paddingBottom: 6
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.88rem', fontWeight: 900, color: 'var(--navy)' }}>
-                      <ClipboardCheck size={18} color="#0284c7" />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.96rem', fontWeight: 900, color: 'var(--navy)' }}>
+                      <ClipboardCheck size={20} color="#0284c7" />
                       <span>{t('mandatoryCriteria')}</span>
                     </div>
                     <span style={{ 
-                      fontSize: '0.72rem', 
-                      fontWeight: 800, 
+                      fontSize: '0.8rem', 
+                      fontWeight: 900, 
                       background: '#e0f2fe', 
                       color: '#0369a1', 
-                      padding: '2px 10px', 
+                      padding: '3px 12px', 
                       borderRadius: 12 
                     }}>
                       {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).length} {isArabic ? 'معايير فحص إلزامية' : 'Mandatory Criteria'}
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 8 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 10 }}>
                     {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).map((detail, dIdx) => (
                       <div 
                         key={dIdx} 
                         style={{ 
                           display: 'flex', 
                           alignItems: 'flex-start', 
-                          gap: 10, 
+                          gap: 12, 
                           background: isPass ? '#f0fdf4' : (isFail ? '#fef2f2' : '#f8fafc'), 
-                          padding: '9px 12px', 
+                          padding: '12px 14px', 
                           borderRadius: 8, 
-                          border: `1px solid ${isPass ? '#bbf7d0' : (isFail ? '#fecaca' : '#e2e8f0')}`,
+                          border: `1.5px solid ${isPass ? '#86efac' : (isFail ? '#fca5a5' : '#cbd5e1')}`,
                           direction: isArabic ? 'rtl' : 'ltr',
                           textAlign: isArabic ? 'right' : 'left',
-                          boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
                         }}
                       >
                         <div style={{
-                          minWidth: 22,
-                          height: 22,
-                          borderRadius: 6,
+                          minWidth: 26,
+                          height: 26,
+                          borderRadius: 7,
                           background: isPass ? '#16a34a' : (isFail ? '#dc2626' : '#e2e8f0'),
                           color: isPass || isFail ? '#ffffff' : '#475569',
-                          fontSize: '0.72rem',
+                          fontSize: '0.82rem',
                           fontWeight: 900,
                           display: 'flex',
                           alignItems: 'center',
@@ -1003,9 +1541,9 @@ export default function PreProductionChecklist() {
                           flexShrink: 0,
                           marginTop: 1
                         }}>
-                          {isPass ? <Check size={13} strokeWidth={3} /> : (dIdx + 1)}
+                          {isPass ? <Check size={15} strokeWidth={3} /> : (dIdx + 1)}
                         </div>
-                        <span style={{ fontSize: '0.84rem', color: '#1e293b', lineHeight: 1.5, fontWeight: 600 }}>
+                        <span style={{ fontSize: '0.94rem', color: '#0f172a', lineHeight: 1.6, fontWeight: 700 }}>
                           {detail}
                         </span>
                       </div>
@@ -1018,7 +1556,7 @@ export default function PreProductionChecklist() {
               {(isFail || currentNote) && (
                 <div style={{ marginTop: 12, background: isFail ? '#fee2e2' : '#f8fafc', padding: '10px 14px', borderRadius: 8, border: isFail ? '1px solid #fca5a5' : '1px solid #cbd5e1' }}>
                   <label style={{ fontSize: '0.74rem', fontWeight: 800, color: isFail ? '#991b1b' : 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                    {isFail ? t('defectReasonReq') : (isArabic ? 'ملاحظات المشرف:' : 'Supervisor Remark / ملاحظات:')}
+                    {isFail ? t('defectReasonReq') : (isArabic ? 'ملاحظات المشرف:' : 'Supervisor Remark:')}
                   </label>
                   <input 
                     type="text" 
@@ -1123,8 +1661,8 @@ export default function PreProductionChecklist() {
               style={{ width: 'auto', padding: '6px 10px', fontSize: '0.8rem', fontWeight: 700 }}
             >
               <option value="ALL">{isArabic ? 'جميع الورديات' : 'All Shifts'}</option>
-              <option value="Day">{isArabic ? 'نهاري' : 'Day / نهاري'}</option>
-              <option value="Night">{isArabic ? 'ليلي' : 'Night / ليلي'}</option>
+              <option value="Day">{isArabic ? 'نهاري' : 'Day'}</option>
+              <option value="Night">{isArabic ? 'ليلي' : 'Night'}</option>
             </select>
           </div>
         </div>
@@ -1218,11 +1756,11 @@ export default function PreProductionChecklist() {
                           >
                             <Eye size={14} />
                           </button>
-                          {!isViewer && (
+                          {isAdmin && (
                             <button
                               type="button"
                               className="btn-outline"
-                              title="Delete Record"
+                              title={isArabic ? 'حذف السجل (للأدمن فقط)' : 'Delete Record (Admin Only)'}
                               onClick={() => handleDeleteHistory(rec.id)}
                               style={{ padding: '4px 8px', color: '#dc2626', borderColor: '#fecdd3' }}
                             >
@@ -1251,7 +1789,8 @@ export default function PreProductionChecklist() {
           supervisor: supervisorName,
           generalNotes,
           itemStatuses,
-          stats
+          stats,
+          standupAttendance
         }}
         isArabic={isArabic}
         t={t}
@@ -1260,7 +1799,7 @@ export default function PreProductionChecklist() {
   );
 }
 
-// ─── Checklist Report & Official Print Component ─────────────────────────────
+// ─── Checklist Report & Official Print Component (A4 Landscape Single Page) ───
 function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t }) {
   if (!isOpen) return null;
 
@@ -1271,123 +1810,152 @@ function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t
   const overallStatus = record ? (record.status || 'PENDING') : activeData.stats.overallStatus;
   const generalNotes = record ? (record.general_notes || '') : activeData.generalNotes;
   const itemStatuses = record ? (record.item_details || {}) : activeData.itemStatuses;
+  const attendanceData = record?.item_details?.['chk-0']?.attendance || activeData?.standupAttendance || [];
 
   const isCleared = overallStatus === 'LINE_CLEARED_PASS' || overallStatus === 'READY_FOR_START';
   const isBlocked = overallStatus === 'CRITICAL_BLOCKER';
 
+  const presentCount = attendanceData.filter(a => a.status === 'PRESENT').length;
+  const lateCount = attendanceData.filter(a => a.status === 'LATE').length;
+  const absentCount = attendanceData.filter(a => a.status === 'ABSENT').length;
+  const lateOrAbsent = attendanceData.filter(a => a.status === 'LATE' || a.status === 'ABSENT');
+
   const handlePrint = () => {
-    printReportDocument('report-printable-area');
+    printReportDocument('report-printable-area', { orientation: 'landscape' });
   };
 
   return (
     <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal report-modal" style={{ maxWidth: 880, maxHeight: '92vh', overflowY: 'auto' }}>
-        <div className="modal-header">
+      <div className="modal report-modal" style={{ maxWidth: 1080, width: '96vw', maxHeight: '94vh', overflowY: 'auto' }}>
+        <div className="modal-header" style={{ padding: '12px 18px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Printer size={20} color="var(--teal)" />
-            <span className="modal-title">
+            <span className="modal-title" style={{ fontSize: '1rem', fontWeight: 800 }}>
               {isArabic 
-                ? `معاينة طباعة نموذج التحقق (PSM-CHK-06-2026) - وردية ${shift === 'Day' ? 'النهار' : 'الليل'}` 
-                : `Checklist Print Preview (PSM-CHK-06-2026) - ${shift} Shift`}
+                ? `معاينة طباعة نموذج التحقق (PSM-CHK-06-2026) - صفحة أفقية واحدة` 
+                : `Checklist Print Preview (PSM-CHK-06-2026) - Single Landscape Page`}
             </span>
           </div>
           <button type="button" className="modal-close" onClick={onClose}>×</button>
         </div>
 
-        {/* Printable Document Area */}
-        <div id="report-printable-area" className="report-document" style={{ padding: '24px 28px', background: '#ffffff', color: '#0f172a' }}>
+        {/* Printable Document Area (Engineered to fit in EXACTLY ONE Landscape A4 page) */}
+        <div id="report-printable-area" className="report-document" style={{ padding: '8px 12px', background: '#ffffff', color: '#0f172a' }}>
           {/* Official Document Header */}
-          <div className="report-doc-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2.5px solid var(--navy)', paddingBottom: 14, marginBottom: 18 }}>
-            <div className="report-logo-box" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <img src="/ectron-logo.png" alt="ECTRON" className="report-logo-img" style={{ height: 42, objectFit: 'contain' }} />
-                <div>
-                  <div style={{ fontSize: '0.92rem', fontWeight: 900, color: 'var(--navy)', letterSpacing: '0.04em' }}>
-                    ECTRON S.A.E
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>
-                    {isArabic ? 'نظام إلكترون لمتابعة وإدارة الإنتاج' : 'ECTRON PRODUCTION CONTROL SYSTEM'}
-                  </div>
+          <div className="report-doc-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid var(--navy)', paddingBottom: 4, marginBottom: 4 }}>
+            <div className="report-logo-box" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src="/ectron-logo.png" alt="ECTRON" className="report-logo-img" style={{ height: 26, objectFit: 'contain' }} />
+              <div>
+                <div style={{ fontSize: '0.80rem', fontWeight: 900, color: 'var(--navy)', letterSpacing: '0.02em', lineHeight: 1.1 }}>
+                  ECTRON S.A.E — SMART METERS DIVISION
                 </div>
-              </div>
-              <div style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 600, marginTop: 2 }}>
-                Smart Electricity Meters Manufacturing Division
+                <div style={{ fontSize: '0.60rem', color: '#64748b', fontWeight: 600 }}>
+                  {isArabic ? 'نظام إلكترون لمتابعة وإدارة الإنتاج والجودة' : 'ECTRON PRODUCTION & QUALITY CONTROL SYSTEM'}
+                </div>
               </div>
             </div>
 
-            <div className="report-title-box">
-              <div style={{ display: 'flex', gap: 6, justifyContent: isArabic ? 'flex-start' : 'flex-end', marginBottom: 4 }}>
-                <span style={{ fontSize: '0.7rem', background: '#0f172a', color: '#ffffff', fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>
+            <div className="report-title-box" style={{ textAlign: isArabic ? 'left' : 'right' }}>
+              <div style={{ display: 'flex', gap: 4, justifyContent: isArabic ? 'flex-start' : 'flex-end', marginBottom: 1 }}>
+                <span style={{ fontSize: '0.58rem', background: '#0f172a', color: '#ffffff', fontWeight: 800, padding: '1px 5px', borderRadius: 3 }}>
                   FORM NO: PSM-CHK-06-2026
                 </span>
-                <span style={{ fontSize: '0.7rem', background: '#e2e8f0', color: '#334155', fontWeight: 800, padding: '2px 6px', borderRadius: 4 }}>
+                <span style={{ fontSize: '0.58rem', background: '#e2e8f0', color: '#334155', fontWeight: 800, padding: '1px 4px', borderRadius: 3 }}>
                   REV: 00
                 </span>
               </div>
-              <h1 className="report-main-title" style={{ fontSize: '1.2rem', fontWeight: 900, color: 'var(--navy)', margin: '2px 0' }}>
+              <h1 className="report-main-title" style={{ fontSize: '0.94rem', fontWeight: 900, color: 'var(--navy)', margin: 0, lineHeight: 1.15 }}>
                 {isArabic ? 'نموذج التحقق من جاهزية الخط قبل بدء الإنتاج' : 'START OF PRODUCTION CHECKLIST'}
               </h1>
-              <div className="report-subtitle" style={{ fontSize: '0.76rem', color: '#64748b' }}>
-                Pre-Shift Quality, HSE, Traceability & Machine Verification Standard
-              </div>
             </div>
           </div>
 
-          {/* Metadata Grid */}
-          <div className="report-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, background: '#f8fafc', padding: '12px 16px', borderRadius: 8, border: '1px solid #cbd5e1', marginBottom: 16 }}>
+          {/* Compact Metadata Row */}
+          <div className="report-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #cbd5e1', marginBottom: 4 }}>
             <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>{t('date')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--navy)' }}>{date}</span>
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('date')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{date}</span>
             </div>
 
             <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>{t('shift')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.86rem', fontWeight: 800, color: shift === 'Day' ? '#b45309' : '#6d28d9' }}>
-                {shift === 'Day' ? (isArabic ? '☀️ نهاري (Day)' : '☀️ Day Shift') : (isArabic ? '🌙 ليلي (Night)' : '🌙 Night Shift')}
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('shift')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: shift === 'Night' ? '#6d28d9' : '#b45309' }}>
+                {shift === 'Night' ? (isArabic ? '🌙 ليلية (Night)' : '🌙 Night') : (isArabic ? '☀️ صباحية (Morning)' : '☀️ Morning')}
               </span>
             </div>
 
             <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>{t('supervisor')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--navy)' }}>{supervisor}</span>
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('supervisor')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{supervisor}</span>
             </div>
 
             <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>{t('lineReadinessScore')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.92rem', fontWeight: 900, color: isCleared ? '#16a34a' : (isBlocked ? '#dc2626' : '#d97706') }}>
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('lineReadinessScore')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.78rem', fontWeight: 900, color: isCleared ? '#16a34a' : (isBlocked ? '#dc2626' : '#d97706') }}>
                 {readinessPct}%
               </span>
             </div>
 
-            <div className="report-meta-item" style={{ gridColumn: 'span 2' }}>
-              <span className="report-meta-label" style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 800 }}>{t('status')} / Line Decision</span>
-              <span className="report-meta-value">
-                <span className={isCleared ? 'report-badge-pass' : (isBlocked ? 'report-badge-fail' : 'report-badge-pending')}>
-                  {isCleared 
-                    ? (isArabic ? '✅ الخط جاهز ومصرح لبدء الإنتاج (LINE CLEARED)' : '✅ LINE CLEARED - READY FOR START')
-                    : isBlocked 
-                      ? (isArabic ? '🛑 معطل لوجود مانع حرج (CRITICAL BLOCKER)' : '🛑 CRITICAL BLOCKER - DO NOT START')
-                      : (isArabic ? '⚠️ قيد التحقق أو توجد ملاحظات' : '⚠️ IN PROGRESS / ISSUES DETECTED')}
-                </span>
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('status')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.68rem', fontWeight: 800, color: isCleared ? '#16a34a' : (isBlocked ? '#dc2626' : '#d97706') }}>
+                {isCleared 
+                  ? (isArabic ? '✅ مصرح للإنتاج' : '✅ LINE CLEARED')
+                  : isBlocked 
+                    ? (isArabic ? '🛑 مانع حرج' : '🛑 BLOCKER')
+                    : (isArabic ? '⚠️ قيد التحقق' : '⚠️ PENDING')}
               </span>
             </div>
           </div>
 
-          {/* Verification Criteria Table */}
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--navy)', textTransform: 'uppercase', marginBottom: 8, letterSpacing: '0.04em' }}>
-              {isArabic ? 'جدول بنود التحقق المعيارية ومطابقة الجودة (Checklist Criteria):' : 'Standard Checklist Inspection & Quality Verification Criteria:'}
+          {/* 5M Quality Classification & 8 Stations Reference Legend Banner */}
+          <div style={{
+            background: '#f1f5f9',
+            border: '1px solid #cbd5e1',
+            borderRadius: 4,
+            padding: '2px 8px',
+            marginBottom: 4,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 6,
+            fontSize: '0.56rem',
+            lineHeight: 1.2
+          }}>
+            <div>
+              <strong style={{ color: 'var(--navy)' }}>
+                {isArabic ? 'تصنيف معايير الجودة (5M Quality Framework): ' : '5M Quality Categories: '}
+              </strong>
+              <span style={{ color: '#475569' }}>
+                {isArabic 
+                  ? 'A: الأفراد والسلامة | B: طرق العمل WI | C: الآلات والمعايرة | D: القياس ونظام التتبع | E: المواد وبيئة 5S' 
+                  : 'A: Manpower & Safety | B: Methods & WI | C: Machines & Tools | D: Measurement & QA | E: Materials & 5S'}
+              </span>
             </div>
+            <div>
+              <strong style={{ color: '#0369a1' }}>
+                {isArabic ? 'المحطات المعتمدة (8 محطات): ' : '8 Line Stations: '}
+              </strong>
+              <span style={{ color: '#475569' }}>
+                {isArabic 
+                  ? '1.التجميع 2.العزل 3.التردد 4.المعايرة 5.الفحص الشامل 6.التخصيص 7.التغليف 8.الفيرموير' 
+                  : '1.Assembly 2.Insulation 3.RF 4.Calibration 5.Multin test 6.Perso 7.Packaging 8.FW update'}
+              </span>
+            </div>
+          </div>
 
-            <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.76rem', marginBottom: 0 }}>
+          {/* Verification Criteria Compact Single-Page Table */}
+          <div style={{ marginBottom: 4 }}>
+            <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.62rem', marginBottom: 0 }}>
               <thead>
                 <tr style={{ background: '#f1f5f9' }}>
-                  <th style={{ width: 28, textAlign: 'center', padding: '7px 6px', border: '1px solid #cbd5e1' }}>#</th>
-                  <th style={{ width: 110, padding: '7px 8px', border: '1px solid #cbd5e1' }}>{isArabic ? 'التصنيف' : 'Category'}</th>
-                  <th style={{ padding: '7px 10px', border: '1px solid #cbd5e1' }}>{isArabic ? 'بند ومعايير الفحص التفصيلية' : 'Inspection Item & Detailed Checkpoints'}</th>
-                  <th style={{ width: 130, padding: '7px 8px', border: '1px solid #cbd5e1' }}>{isArabic ? 'المحطات المغطاة' : 'Stations'}</th>
-                  <th style={{ width: 85, textAlign: 'center', padding: '7px 6px', border: '1px solid #cbd5e1' }}>{isArabic ? 'النتيجة' : 'Result'}</th>
-                  <th style={{ width: 160, padding: '7px 8px', border: '1px solid #cbd5e1' }}>{isArabic ? 'ملاحظات المشرف / العطل' : 'Supervisor Remarks / Defect'}</th>
+                  <th style={{ width: 22, textAlign: 'center', padding: '2px 3px', border: '1px solid #cbd5e1' }}>#</th>
+                  <th style={{ width: 95, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'التصنيف المعياري' : 'Category'}</th>
+                  <th style={{ padding: '2px 6px', border: '1px solid #cbd5e1' }}>{isArabic ? 'بند الفحص والمعيار القياسي' : 'Inspection Item & Standard'}</th>
+                  <th style={{ width: 135, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'المحطات (من 8)' : 'Stations (of 8)'}</th>
+                  <th style={{ width: 65, textAlign: 'center', padding: '2px 3px', border: '1px solid #cbd5e1' }}>{isArabic ? 'النتيجة' : 'Result'}</th>
+                  <th style={{ width: 115, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الملاحظات' : 'Remarks'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1397,63 +1965,90 @@ function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t
                   const itemNote = typeof rawInfo === 'object' ? (rawInfo?.note || '') : '';
                   const isPass = itemStatus === 'PASS' || itemStatus === 'OK';
                   const isFail = itemStatus === 'FAIL' || itemStatus === 'NG';
+                  const catInfo = getCategoryInfo(item.cat, isArabic);
+                  const stInfo = getStationsDisplay(item.stations, isArabic);
 
                   return (
                     <tr key={item.id} style={{ background: isFail ? '#fff1f2' : (idx % 2 === 1 ? '#f8fafc' : '#ffffff') }}>
-                      <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--navy)', border: '1px solid #cbd5e1', padding: '6px 4px' }}>
+                      <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--navy)', border: '1px solid #cbd5e1', padding: '2px 2px' }}>
                         {idx + 1}
                       </td>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', verticalAlign: 'top' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.72rem' }}>Cat: {item.cat}</div>
-                        <div style={{ fontSize: '0.68rem', color: '#64748b', fontWeight: 600 }}>{item.tag}</div>
+                      <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle' }}>
+                        <div style={{ fontWeight: 900, color: 'var(--navy)', fontSize: '0.62rem', lineHeight: 1.15 }}>
+                          {catInfo.code}
+                        </div>
+                        <div style={{ fontSize: '0.54rem', fontWeight: 700, color: '#0369a1', lineHeight: 1.15, marginTop: 1 }}>
+                          {catInfo.name}
+                        </div>
                       </td>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '6px 10px', verticalAlign: 'top' }}>
-                        {isArabic ? (
-                          <>
-                            <div style={{ fontWeight: 900, color: 'var(--navy)', fontSize: '0.88rem', marginBottom: 2 }}>
-                              {item.arabicTitle || item.title}
-                            </div>
-                            <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: 4 }}>
-                              {item.title}
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.8rem', marginBottom: 2 }}>
-                              {item.title}
-                            </div>
-                            {item.arabicTitle && (
-                              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#0369a1', marginBottom: 4 }}>
-                                {item.arabicTitle}
-                              </div>
+                      <td style={{ border: '1px solid #cbd5e1', padding: '2px 6px', verticalAlign: 'middle' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.70rem', lineHeight: 1.2 }}>
+                          {isArabic ? (item.arabicTitle || item.title) : item.title}
+                        </div>
+                        <div style={{ fontSize: '0.58rem', color: '#475569', lineHeight: 1.18, marginTop: 1 }}>
+                          {isArabic && item.arabicSummary ? item.arabicSummary : item.summary}
+                        </div>
+
+                        {/* For chk-0: Standup Meeting Compact Attendance line */}
+                        {item.id === 'chk-0' && attendanceData && attendanceData.length > 0 && (
+                          <div style={{
+                            marginTop: 2,
+                            padding: '1px 5px',
+                            background: '#f1f5f9',
+                            borderRadius: 3,
+                            fontSize: '0.56rem',
+                            fontWeight: 700,
+                            display: 'flex',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: 5
+                          }}>
+                            <span>📋 {isArabic ? 'حضور الاجتماع:' : 'Attendance:'}</span>
+                            <span style={{ color: '#16a34a' }}>🟢 {presentCount} {isArabic ? 'حاضر' : 'Present'}</span>
+                            <span style={{ color: '#d97706' }}>🟡 {lateCount} {isArabic ? 'تأخير' : 'Late'}</span>
+                            <span style={{ color: '#dc2626' }}>🔴 {absentCount} {isArabic ? 'غياب' : 'Absent'}</span>
+                            {lateOrAbsent.length > 0 && (
+                              <span style={{ color: '#64748b', fontSize: '0.54rem' }}>
+                                ({lateOrAbsent.map(a => `${a.name}: ${a.reason || a.status}`).join(' | ')})
+                              </span>
                             )}
-                          </>
+                          </div>
                         )}
-                        <ul style={{ 
-                          margin: '3px 0 0', 
-                          paddingInlineStart: 18, 
-                          fontSize: '0.72rem', 
-                          color: '#334155', 
-                          lineHeight: 1.45,
-                          direction: isArabic ? 'rtl' : 'ltr',
-                          textAlign: isArabic ? 'right' : 'left'
-                        }}>
-                          {(isArabic && item.arabicDetails ? item.arabicDetails : item.details).map((d, dIdx) => (
-                            <li key={dIdx} style={{ marginBottom: 3 }}>{d}</li>
-                          ))}
-                        </ul>
                       </td>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', verticalAlign: 'top', fontSize: '0.7rem', color: '#334155' }}>
-                        {item.stations.join(', ')}
+                      <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontSize: '0.58rem' }}>
+                        {stInfo.isAll ? (
+                          <span style={{ 
+                            display: 'inline-block',
+                            background: '#f0fdf4', 
+                            color: '#166534', 
+                            fontWeight: 800, 
+                            padding: '1px 4px', 
+                            borderRadius: 3,
+                            border: '1px solid #bbf7d0',
+                            fontSize: '0.56rem',
+                            whiteSpace: 'nowrap'
+                          }}>
+                            {stInfo.label}
+                          </span>
+                        ) : (
+                          <div>
+                            <span style={{ fontWeight: 800, color: '#0369a1', fontSize: '0.60rem' }}>
+                              {stInfo.short}
+                            </span>
+                            <div style={{ fontSize: '0.52rem', color: '#64748b', lineHeight: 1.15, marginTop: 1 }}>
+                              {stInfo.names}
+                            </div>
+                          </div>
+                        )}
                       </td>
-                      <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '6px 4px', verticalAlign: 'top' }}>
-                        {isPass && <span className="report-badge-pass">✓ PASS</span>}
-                        {isFail && <span className="report-badge-fail">✕ FAIL</span>}
-                        {!isPass && !isFail && <span className="report-badge-pending">PENDING</span>}
+                      <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 3px', verticalAlign: 'middle' }}>
+                        {isPass && <span className="report-badge-pass" style={{ padding: '1px 5px', fontSize: '0.60rem' }}>✓ PASS</span>}
+                        {isFail && <span className="report-badge-fail" style={{ padding: '1px 5px', fontSize: '0.60rem' }}>✕ FAIL</span>}
+                        {!isPass && !isFail && <span className="report-badge-pending" style={{ padding: '1px 5px', fontSize: '0.60rem' }}>PENDING</span>}
                       </td>
-                      <td style={{ border: '1px solid #cbd5e1', padding: '6px 8px', verticalAlign: 'top', fontSize: '0.72rem' }}>
+                      <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontSize: '0.58rem' }}>
                         {itemNote ? (
-                          <div style={{ color: isFail ? '#b91c1c' : '#334155', fontWeight: 700 }}>
+                          <div style={{ color: isFail ? '#b91c1c' : '#334155', fontWeight: 700, lineHeight: 1.2 }}>
                             {itemNote}
                           </div>
                         ) : (
@@ -1468,63 +2063,63 @@ function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t
           </div>
 
           {/* Shift Handover Remarks Box */}
-          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 6, padding: '10px 14px', marginBottom: 18 }}>
-            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--navy)', textTransform: 'uppercase', marginBottom: 3 }}>
-              {isArabic ? 'ملاحظات تسليم الوردية وتوجيهات المشرف (Handover Remarks):' : 'Shift Handover Remarks & Special Instructions:'}
-            </div>
-            <div style={{ fontSize: '0.76rem', color: generalNotes ? '#0f172a' : '#94a3b8', fontStyle: generalNotes ? 'normal' : 'italic' }}>
-              {generalNotes || (isArabic ? 'لا توجد ملاحظات إضافية مسجلة.' : 'No additional shift notes recorded.')}
-            </div>
+          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 8px', marginBottom: 4 }}>
+            <span style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)', textTransform: 'uppercase', marginInlineEnd: 6 }}>
+              {isArabic ? 'ملاحظات تسليم الوردية:' : 'Shift Handover Remarks:'}
+            </span>
+            <span style={{ fontSize: '0.62rem', color: generalNotes ? '#0f172a' : '#94a3b8', fontStyle: generalNotes ? 'normal' : 'italic' }}>
+              {generalNotes || (isArabic ? 'لا توجد ملاحظات مسجلة.' : 'No shift remarks recorded.')}
+            </span>
           </div>
 
           {/* Official 3-Party Sign-Off Block */}
-          <div className="report-sign-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 20, paddingTop: 14, borderTop: '1.5px dashed #cbd5e1' }}>
+          <div className="report-sign-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, paddingTop: 4, borderTop: '1px dashed #cbd5e1' }}>
             <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--navy)' }}>
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
                 1. {isArabic ? 'المشرف المسؤول (Prepared By)' : 'PREPARED BY (SUPERVISOR)'}
               </span>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', margin: '3px 0' }}>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
                 {supervisor}
               </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 26 }}>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Sign: ____________________</span>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Sign: ____________________</span>
               </div>
             </div>
 
             <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--navy)' }}>
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
                 2. {isArabic ? 'مراقب الجودة (QA/QC Inspector)' : 'QA/QC INSPECTOR SIGN & STAMP'}
               </span>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', margin: '3px 0' }}>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
                 QA Department
               </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 26 }}>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Stamp / Sign: ____________</span>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Stamp / Sign: ____________</span>
               </div>
             </div>
 
             <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--navy)' }}>
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
                 3. {isArabic ? 'اعتماد إدارة الإنتاج (Production Manager)' : 'PRODUCTION MANAGER APPROVAL'}
               </span>
-              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155', margin: '3px 0' }}>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
                 Operation Head
               </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 26 }}>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>Approval: _________________</span>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Approval: _________________</span>
               </div>
             </div>
           </div>
 
           {/* Form Footer Stamp */}
-          <div style={{ marginTop: 14, paddingTop: 6, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.65rem', color: '#94a3b8' }}>
-            <span>ECTRON MANUFACTURING OPERATIONS — FORM PSM-CHK-06-2026 (REV 00)</span>
+          <div style={{ marginTop: 3, paddingTop: 2, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.52rem', color: '#94a3b8' }}>
+            <span>ECTRON MANUFACTURING OPERATIONS — FORM PSM-CHK-06-2026 (REV 00) — A4 LANDSCAPE SINGLE PAGE REPORT</span>
             <span>Printed: {new Date().toLocaleString()}</span>
           </div>
         </div>
 
         {/* Modal Footer Controls (Screen only, hidden on print) */}
-        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 20px', borderTop: '1px solid #e2e8f0' }}>
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
           <button type="button" className="btn-secondary" onClick={onClose}>
             {t('close')}
           </button>
@@ -1532,10 +2127,10 @@ function ChecklistReportModal({ isOpen, onClose, record, activeData, isArabic, t
             type="button" 
             className="btn-primary" 
             onClick={handlePrint}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 20px', fontWeight: 800 }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontWeight: 800 }}
           >
             <Printer size={16} />
-            <span>{t('printOrPdf')}</span>
+            <span>{isArabic ? '🖨️ طباعة التقرير (A4 أفقي - صفحة واحدة)' : '🖨️ Print Single Page (A4 Landscape)'}</span>
           </button>
         </div>
       </div>

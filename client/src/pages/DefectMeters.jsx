@@ -49,7 +49,8 @@ const STAGES = [
   { id: 'Calibration', name: 'Calibration', arabic: 'المعايرة (Calibration)', color: '#059669', bg: '#d1fae5', border: '#34d399', icon: '⚖️' },
   { id: 'Multi-Test', name: 'Multi-Test', arabic: 'الفحص الشامل (Multi-Test)', color: '#d97706', bg: '#fef3c7', border: '#fbbf24', icon: '🔬' },
   { id: 'Perso', name: 'Perso', arabic: 'التخصيص والبرمجة (Perso)', color: '#e11d48', bg: '#ffe4e6', border: '#fb7185', icon: '💻' },
-  { id: 'Packaging', name: 'Packaging', arabic: 'التغليف النهائي', color: '#475569', bg: '#f1f5f9', border: '#94a3b8', icon: '📦' }
+  { id: 'Packaging', name: 'Packaging', arabic: 'التغليف النهائي', color: '#475569', bg: '#f1f5f9', border: '#94a3b8', icon: '📦' },
+  { id: 'Firmware update', name: 'Firmware update', arabic: 'تحديث الفيرموير (FW)', color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', icon: '💾' }
 ];
 
 const STAGE_IDS = STAGES.map(s => s.id);
