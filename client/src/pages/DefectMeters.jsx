@@ -31,29 +31,41 @@ import {
   Tag,
   UserCheck,
   Clock,
-  Printer
+  Printer,
+  FileText
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { printReportDocument } from '../utils/printReport';
 
 const DEFAULT_ACTUAL_DEFECTS = 4250;
 const STORAGE_ACTUAL_KEY = 'ectron_defect_actual_count';
 const LOCAL_DEFECTIVE_METERS_KEY = 'ectron_defective_meters_cache';
 
-// ── Complete Stages List with Distinct Vibrant Colors & Icons ─────────────────
+// ── Standard 8 Production Stations Sequence ──────────────────────────────────
 const STAGES = [
-  { id: 'Assembly', name: 'Assembly', arabic: 'التجميع', color: '#0284c7', bg: '#e0f2fe', border: '#38bdf8', icon: '🔧' },
-  { id: 'Insulation', name: 'Insulation', arabic: 'العزل (Insulation)', color: '#7c3aed', bg: '#f3e8ff', border: '#c084fc', icon: '⚡' },
-  { id: 'RF', name: 'RF', arabic: 'التردد (RF Test)', color: '#0891b2', bg: '#cffafe', border: '#22d3ee', icon: '📡' },
-  { id: 'Calibration', name: 'Calibration', arabic: 'المعايرة (Calibration)', color: '#059669', bg: '#d1fae5', border: '#34d399', icon: '⚖️' },
-  { id: 'Multi-Test', name: 'Multi-Test', arabic: 'الفحص الشامل (Multi-Test)', color: '#d97706', bg: '#fef3c7', border: '#fbbf24', icon: '🔬' },
-  { id: 'Perso', name: 'Perso', arabic: 'التخصيص والبرمجة (Perso)', color: '#e11d48', bg: '#ffe4e6', border: '#fb7185', icon: '💻' },
-  { id: 'Packaging', name: 'Packaging', arabic: 'التغليف النهائي', color: '#475569', bg: '#f1f5f9', border: '#94a3b8', icon: '📦' },
-  { id: 'Firmware update', name: 'Firmware update', arabic: 'تحديث الفيرموير (FW)', color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc', icon: '💾' }
+  { id: 'Assembly', name: 'Assembly', arabic: 'التجميع', color: '#0284c7', bg: '#e0f2fe', border: '#38bdf8', icon: '🔧', num: 1 },
+  { id: 'Insulation', name: 'Insulation', arabic: 'العزل', color: '#7c3aed', bg: '#f3e8ff', border: '#c084fc', icon: '⚡', num: 2 },
+  { id: 'RF', name: 'RF', arabic: 'التردد اللاسلكي', color: '#0891b2', bg: '#cffafe', border: '#22d3ee', icon: '📡', num: 3 },
+  { id: 'Calibration', name: 'Calibration', arabic: 'المعايرة', color: '#059669', bg: '#d1fae5', border: '#34d399', icon: '⚖️', num: 4 },
+  { id: 'Multin test', name: 'Multin test', arabic: 'الفحص الشامل', color: '#d97706', bg: '#fef3c7', border: '#fbbf24', icon: '🔬', num: 5 },
+  { id: 'Perso', name: 'Perso', arabic: 'التخصيص', color: '#e11d48', bg: '#ffe4e6', border: '#fb7185', icon: '🏷️', num: 6 },
+  { id: 'Packaging', name: 'Packaging', arabic: 'التغليف', color: '#475569', bg: '#f1f5f9', border: '#94a3b8', icon: '📦', num: 7 },
+  { id: 'Firmware update', name: 'Firmware update', arabic: 'تحديث الفيرموير', color: '#06b6d4', bg: '#ecfeff', border: '#a5f3fc', icon: '💾', num: 8 }
 ];
 
 const STAGE_IDS = STAGES.map(s => s.id);
+
+// Seamlessly resolve both 'Multin test' and 'Multi-Test'
+export function findStage(stageId) {
+  if (!stageId) return STAGES[0];
+  const s = STAGES.find(st => 
+    st.id.toLowerCase() === stageId.toLowerCase() || 
+    (stageId.toLowerCase().includes('multi') && st.id === 'Multin test')
+  );
+  return s || { id: stageId, name: stageId, arabic: stageId, color: '#334155', bg: '#f1f5f9', border: '#cbd5e1', icon: '•', num: '-' };
+}
 
 const COMMON_DEFECT_CODES = [
   '0',
@@ -139,6 +151,7 @@ export default function DefectMeters() {
   const [selectedTeam, setSelectedTeam] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedShiftForModal, setSelectedShiftForModal] = useState(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Auto-focus inputs according to active wizard step
   useEffect(() => {
@@ -649,19 +662,25 @@ export default function DefectMeters() {
       totalAchievedAll += parseInt(r.achieved, 10) || 0;
     });
 
-    const calibrationRatio = totalReportedKOAll > 0 ? (actualTarget / totalReportedKOAll) : 0;
-    const totalRepairedFromKOAll = Math.max(0, totalReportedKOAll - actualTarget);
+    const liveDefectsLogged = defectiveMeters.length;
+    const totalActualDefects = actualTarget + liveDefectsLogged;
+
+    const calibrationRatio = totalReportedKOAll > 0 ? (totalActualDefects / totalReportedKOAll) : 0;
+    const totalRepairedFromKOAll = Math.max(0, totalReportedKOAll - totalActualDefects);
     const repairRateOverallPct = totalReportedKOAll > 0 ? ((totalRepairedFromKOAll / totalReportedKOAll) * 100) : 0;
 
     return {
       totalReportedKOAll,
       totalBoardsAll,
       totalAchievedAll,
+      baseActualDefects: actualTarget,
+      liveDefectsLogged,
+      totalActualDefects,
       calibrationRatio,
       totalRepairedFromKOAll,
       repairRateOverallPct
     };
-  }, [records, actualTarget]);
+  }, [records, actualTarget, defectiveMeters]);
 
   const availableMonths = useMemo(() => {
     const set = new Set();
@@ -752,6 +771,66 @@ export default function DefectMeters() {
           {trackerSuccessMsg}
         </div>
       )}
+
+      {/* ── Official Page Header & Report Action ── */}
+      <div className="card-white" style={{ padding: '16px 22px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <img src="/ectron-logo.png" alt="ECTRON" style={{ height: 36, objectFit: 'contain' }} />
+            <div style={{ borderLeft: isArabic ? 'none' : '2px solid #cbd5e1', borderRight: isArabic ? '2px solid #cbd5e1' : 'none', paddingLeft: isArabic ? 0 : 12, paddingRight: isArabic ? 12 : 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <h2 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 900, color: 'var(--navy)' }}>
+                  {isArabic ? 'إدارة وتتبع العدادات المعطلة وحلقات الإصلاح' : 'Defective Meters Tracking & Rework Hub'}
+                </h2>
+                <span style={{ fontSize: '0.72rem', background: '#e0f2fe', color: '#0369a1', fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>
+                  FORM NO: PSM-DEF-08-2026
+                </span>
+                <span style={{ fontSize: '0.72rem', background: '#f1f5f9', color: '#475569', fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
+                  Rev: 01
+                </span>
+              </div>
+              <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: '#64748b' }}>
+                {isArabic 
+                  ? 'رصد العدادات المعطوبة، منع تكرار الأعطال، وتوثيق دورات الإصلاح والهالك عبر المحطات الـ 8' 
+                  : 'Track defective meters, prevent loop recurrences, and record repairs & scrap across 8 stations'}
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setShowReportModal(true)}
+              className="btn-outline"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                padding: '8px 16px',
+                fontWeight: 800,
+                fontSize: '0.84rem',
+                color: '#0369a1',
+                borderColor: '#0284c7',
+                background: '#f0f9ff'
+              }}
+            >
+              <Printer size={16} />
+              <span>{isArabic ? '🖨️ تقرير العدادات المعطلة' : '🖨️ Defective Meters Report'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={fetchDefectiveMeters}
+              disabled={loadingDefects}
+              className="btn-outline"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', padding: '8px 14px' }}
+            >
+              <RefreshCw size={14} className={loadingDefects ? 'spin' : ''} />
+              <span>{isArabic ? 'تحديث' : 'Refresh'}</span>
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* ── Primary Navigation Tabs: TRACKER (Hub) vs ANALYTICS ── */}
       <div style={{
@@ -1431,6 +1510,29 @@ export default function DefectMeters() {
                   <AlertTriangle size={13} />
                   {isArabic ? 'المتكررة فقط (2+)' : 'Recurring Only'}
                 </button>
+
+                {/* Print Report Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowReportModal(true)}
+                  className="btn-outline"
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 8,
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    border: '1.5px solid #0284c7',
+                    background: '#f0f9ff',
+                    color: '#0369a1'
+                  }}
+                >
+                  <Printer size={13} />
+                  {isArabic ? 'معاينة وطباعة التقرير' : 'Print Report'}
+                </button>
               </div>
             </div>
 
@@ -1468,7 +1570,7 @@ export default function DefectMeters() {
                       const isReturned = meter.status === 'RETURNED_TO_LINE';
                       const isScrapped = meter.status === 'SCRAPPED_KO';
                       const isRepeated = meter.entry_count > 1;
-                      const stageObj = STAGES.find(s => s.id === meter.stage) || { name: meter.stage, color: '#334155', bg: '#f1f5f9', border: '#cbd5e1', icon: '•' };
+                      const stageObj = findStage(meter.stage);
 
                       return (
                         <tr key={meter.id} style={{ background: isRepeated ? '#fffbfb' : 'transparent' }}>
@@ -2214,14 +2316,20 @@ export default function DefectMeters() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
             {/* Net Defective Meters */}
             <div style={{ background: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>
-                {isArabic ? 'صافي العدادات المعيبة الفعلي' : 'Actual Net Defective Meters'}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>
+                  {isArabic ? 'صافي العدادات المعيبة الفعلي' : 'Actual Net Defective Meters'}
+                </span>
+                <span className="badge badge-red" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
+                  {isArabic ? 'لايف' : 'Live'}
+                </span>
               </div>
               <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#b91c1c', margin: '4px 0' }}>
-                {actualTarget.toLocaleString()}
+                {overallMetrics.totalActualDefects.toLocaleString()}
               </div>
-              <div style={{ fontSize: '0.72rem', color: '#7f1d1d' }}>
-                {isArabic ? 'العدد الفعلي مستبعداً منه دورات إعادة الفحص المكررة' : 'Physical shop floor count excluding re-test loops'}
+              <div style={{ fontSize: '0.72rem', color: '#7f1d1d', display: 'flex', justifyContent: 'space-between', marginTop: 4, flexWrap: 'wrap', gap: 4 }}>
+                <span>{isArabic ? `أساس: ${overallMetrics.baseActualDefects.toLocaleString()}` : `Base: ${overallMetrics.baseActualDefects.toLocaleString()}`}</span>
+                <span style={{ fontWeight: 700, color: '#991b1b' }}>+{overallMetrics.liveDefectsLogged.toLocaleString()} {isArabic ? 'مسجل' : 'Logged'}</span>
               </div>
             </div>
 
@@ -2345,6 +2453,531 @@ export default function DefectMeters() {
           </div>
         </div>
       )}
+
+      {/* ── Modal: Shift Defect & Rework Breakdown Details ── */}
+      {selectedShiftForModal && (
+        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setSelectedShiftForModal(null)}>
+          <div className="modal" style={{ maxWidth: 580, maxHeight: '90vh', overflowY: 'auto' }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Activity size={20} color="var(--teal)" />
+                <span className="modal-title">
+                  {isArabic 
+                    ? `تفاصيل فحص وعيوب الوردية: ${selectedShiftForModal.date}` 
+                    : `Shift Defect Details: ${selectedShiftForModal.date}`}
+                </span>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setSelectedShiftForModal(null)}>×</button>
+            </div>
+
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: 10, border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{isArabic ? 'الفريق / الوردية' : 'Team / Shift'}</span>
+                  <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--navy)' }}>
+                    {selectedShiftForModal.team_name || (isArabic ? 'الوردية القياسية' : 'Standard Shift')}
+                  </div>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{isArabic ? 'تاريخ التشغيل' : 'Production Date'}</span>
+                  <div style={{ fontSize: '0.94rem', fontWeight: 800, color: '#0369a1' }}>
+                    {selectedShiftForModal.date}
+                  </div>
+                </div>
+              </div>
+
+              {/* Metric Cards Grid */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>{isArabic ? 'إجمالي المفحوص' : 'Total Tested'}</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--navy)' }}>{selectedShiftForModal.tb.toLocaleString()}</div>
+                </div>
+                <div style={{ background: '#f0fdf4', padding: 12, borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 700 }}>{isArabic ? 'مطابق من أول مرة (OK)' : 'Passed OK'}</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#16a34a' }}>{selectedShiftForModal.ach.toLocaleString()}</div>
+                </div>
+                <div style={{ background: '#fffbeb', padding: 12, borderRadius: 8, border: '1px solid #fde68a' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 700 }}>{isArabic ? 'حالات الفشل المسجلة (KO)' : 'Reported KO Failures'}</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#b45309' }}>{selectedShiftForModal.reportedKO.toLocaleString()}</div>
+                </div>
+                <div style={{ background: '#fef2f2', padding: 12, borderRadius: 8, border: '1px solid #fca5a5' }}>
+                  <div style={{ fontSize: '0.74rem', color: '#991b1b', fontWeight: 700 }}>{isArabic ? 'الصافي المعاير الفعلي' : 'Calibrated Net Defects'}</div>
+                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#dc2626' }}>{selectedShiftForModal.estimatedActual.toLocaleString()}</div>
+                </div>
+              </div>
+
+              {/* Recovery info box */}
+              <div style={{ background: '#eef2ff', padding: '12px 14px', borderRadius: 8, border: '1px solid #c7d2fe' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#3730a3' }}>
+                    {isArabic ? 'العدادات المُستعادة والمُصلحة (Rework):' : 'Repaired & Recovered Units:'}
+                  </span>
+                  <span style={{ fontSize: '1.1rem', fontWeight: 900, color: '#4338ca' }}>
+                    {selectedShiftForModal.repairedMeters.toLocaleString()} {isArabic ? 'عداد' : 'units'}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#4338ca', marginTop: 4 }}>
+                  {isArabic 
+                    ? `نسبة الاستعادة المحسوبة لهذه الوردية: ${selectedShiftForModal.shiftRepairPct.toFixed(1)}%` 
+                    : `Calculated recovery rate for this shift: ${selectedShiftForModal.shiftRepairPct.toFixed(1)}%`}
+                </div>
+              </div>
+
+              {selectedShiftForModal.notes && (
+                <div style={{ background: '#fffbeb', padding: '10px 14px', borderRadius: 8, border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f' }}>
+                  <strong>{isArabic ? 'ملاحظات المشرف:' : 'Supervisor Notes:'} </strong>
+                  {selectedShiftForModal.notes}
+                </div>
+              )}
+            </div>
+
+            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button type="button" className="btn-secondary" onClick={() => setSelectedShiftForModal(null)}>
+                {t('close')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Official Printable Defective Meters Report Modal ── */}
+      {showReportModal && (
+        <DefectiveMetersReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          defectiveMeters={defectiveMeters}
+          trackerKPIs={trackerKPIs}
+          overallMetrics={overallMetrics}
+          actualTarget={actualTarget}
+          isArabic={isArabic}
+          t={t}
+          currentUser={user}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Official Defective Meters Report & Print Component ───────────────────────
+function DefectiveMetersReportModal({
+  isOpen,
+  onClose,
+  defectiveMeters,
+  trackerKPIs,
+  overallMetrics,
+  actualTarget,
+  isArabic,
+  t,
+  currentUser
+}) {
+  const [reportStageFilter, setReportStageFilter] = useState('ALL');
+  const [reportStatusFilter, setReportStatusFilter] = useState('ALL');
+
+  if (!isOpen) return null;
+
+  // Filtered list for print report
+  const filteredList = defectiveMeters.filter(m => {
+    if (reportStageFilter !== 'ALL' && m.stage !== reportStageFilter) return false;
+    if (reportStatusFilter === 'UNDER_INSPECTION' && !(m.status === 'UNDER_INSPECTION' || m.status === 'IN_REPAIR')) return false;
+    if (reportStatusFilter === 'RETURNED_TO_LINE' && m.status !== 'RETURNED_TO_LINE') return false;
+    if (reportStatusFilter === 'SCRAPPED_KO' && m.status !== 'SCRAPPED_KO') return false;
+    if (reportStatusFilter === 'RECURRING' && !(m.entry_count > 1)) return false;
+    return true;
+  });
+
+  // Calculate 8-station counts
+  const stationCounts = {};
+  STAGES.forEach(s => { stationCounts[s.id] = 0; });
+  defectiveMeters.forEach(m => {
+    const matched = findStage(m.stage);
+    if (matched && stationCounts[matched.id] !== undefined) {
+      stationCounts[matched.id]++;
+    }
+  });
+
+  const handlePrint = () => {
+    printReportDocument('defect-report-printable-area', { orientation: 'landscape' });
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  return (
+    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal report-modal" style={{ maxWidth: 1100, width: '96vw', maxHeight: '94vh', overflowY: 'auto' }}>
+        {/* Modal Header */}
+        <div className="modal-header" style={{ padding: '12px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Printer size={20} color="var(--teal)" />
+            <span className="modal-title" style={{ fontSize: '1rem', fontWeight: 800 }}>
+              {isArabic 
+                ? 'معاينة طباعة تقرير العدادات المعطلة وحلقات الإصلاح (PSM-DEF-08-2026)' 
+                : 'Defective Meters Report Print Preview (PSM-DEF-08-2026)'}
+            </span>
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>×</button>
+        </div>
+
+        {/* Modal Toolbar (Filters & Print trigger on screen) */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 10,
+          padding: '10px 18px',
+          background: '#f8fafc',
+          borderBottom: '1px solid #e2e8f0'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--navy)' }}>
+              {isArabic ? 'فلترة نطاق التقرير:' : 'Report Filters:'}
+            </span>
+
+            {/* Filter by Stage */}
+            <select
+              value={reportStageFilter}
+              onChange={e => setReportStageFilter(e.target.value)}
+              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
+            >
+              <option value="ALL">{isArabic ? 'جميع المحطات (الـ 8)' : 'All 8 Stations'}</option>
+              {STAGES.map(st => (
+                <option key={st.id} value={st.id}>{st.num}. {isArabic ? st.arabic : st.name}</option>
+              ))}
+            </select>
+
+            {/* Filter by Status */}
+            <select
+              value={reportStatusFilter}
+              onChange={e => setReportStatusFilter(e.target.value)}
+              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
+            >
+              <option value="ALL">{isArabic ? 'جميع الحالات' : 'All Statuses'}</option>
+              <option value="UNDER_INSPECTION">{isArabic ? 'قيد المعاينة والإصلاح' : 'Under Inspection'}</option>
+              <option value="RETURNED_TO_LINE">{isArabic ? 'تم الإصلاح وعاد للخط' : 'Returned to Line'}</option>
+              <option value="SCRAPPED_KO">{isArabic ? 'تالف نهائي (Scrapped)' : 'Scrapped KO'}</option>
+              <option value="RECURRING">{isArabic ? 'المتكررة فقط (2+)' : 'Recurring Only'}</option>
+            </select>
+          </div>
+
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handlePrint}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 16px', fontWeight: 800, fontSize: '0.84rem' }}
+          >
+            <Printer size={15} />
+            <span>{isArabic ? '🖨️ طباعة التقرير (A4 أفقي)' : '🖨️ Print Report (A4)'}</span>
+          </button>
+        </div>
+
+        {/* ════════════════════════════════════════════════════════════════════ */}
+        {/* Printable Document Area (A4 Landscape Single-Page Optimized)       */}
+        {/* ════════════════════════════════════════════════════════════════════ */}
+        <div id="defect-report-printable-area" className="report-document" style={{ padding: '8px 12px', background: '#ffffff', color: '#0f172a' }}>
+          {/* Official Document Header */}
+          <div className="report-doc-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid var(--navy)', paddingBottom: 4, marginBottom: 4 }}>
+            <div className="report-logo-box" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <img src="/ectron-logo.png" alt="ECTRON" className="report-logo-img" style={{ height: 26, objectFit: 'contain' }} />
+              <div>
+                <div style={{ fontSize: '0.80rem', fontWeight: 900, color: 'var(--navy)', letterSpacing: '0.02em', lineHeight: 1.1 }}>
+                  ECTRON S.A.E — SMART METERS DIVISION
+                </div>
+                <div style={{ fontSize: '0.60rem', color: '#64748b', fontWeight: 600 }}>
+                  {isArabic ? 'نظام إلكترون لمتابعة وإدارة الإنتاج والجودة' : 'ECTRON PRODUCTION & QUALITY CONTROL SYSTEM'}
+                </div>
+              </div>
+            </div>
+
+            <div className="report-title-box" style={{ textAlign: isArabic ? 'left' : 'right' }}>
+              <div style={{ display: 'flex', gap: 4, justifyContent: isArabic ? 'flex-start' : 'flex-end', marginBottom: 1 }}>
+                <span style={{ fontSize: '0.58rem', background: '#0f172a', color: '#ffffff', fontWeight: 800, padding: '1px 5px', borderRadius: 3 }}>
+                  FORM NO: PSM-DEF-08-2026
+                </span>
+                <span style={{ fontSize: '0.58rem', background: '#e2e8f0', color: '#334155', fontWeight: 800, padding: '1px 4px', borderRadius: 3 }}>
+                  REV: 01
+                </span>
+              </div>
+              <h1 className="report-main-title" style={{ fontSize: '0.94rem', fontWeight: 900, color: 'var(--navy)', margin: 0, lineHeight: 1.15 }}>
+                {isArabic ? 'تقرير حصر وتتبع العدادات المعطلة وحلقات الإصلاح والهالك' : 'DEFECTIVE METERS & REWORK MANAGEMENT REPORT'}
+              </h1>
+            </div>
+          </div>
+
+          {/* Compact Metadata Row */}
+          <div className="report-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #cbd5e1', marginBottom: 4 }}>
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('date')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{todayStr}</span>
+            </div>
+
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('supervisor')}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{currentUser?.name || 'Supervisor'}</span>
+            </div>
+
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
+                {isArabic ? 'إجمالي حالات KO' : 'Reported KO'}
+              </span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: '#b45309' }}>
+                {overallMetrics.totalReportedKOAll.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
+                {isArabic ? 'الصافي الفعلي المعاير' : 'Calibrated Net'}
+              </span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 900, color: '#dc2626' }}>
+                {actualTarget.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="report-meta-item">
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
+                {isArabic ? 'معدل الإصلاح والاستعادة' : 'Recovery Rate'}
+              </span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 900, color: '#16a34a' }}>
+                {overallMetrics.repairRateOverallPct.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+
+          {/* 6 Compact KPI Badges */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5, marginBottom: 4 }}>
+            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#475569' }}>{isArabic ? 'إجمالي المسجل' : 'Total Logged'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: 'var(--navy)' }}>{trackerKPIs.total}</div>
+            </div>
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#92400e' }}>{isArabic ? 'قيد المعاينة' : 'Under Repair'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#b45309' }}>{trackerKPIs.underInspection}</div>
+            </div>
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#166534' }}>{isArabic ? 'تم الإصلاح وعاد' : 'Returned'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#16a34a' }}>{trackerKPIs.returnedToLine}</div>
+            </div>
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#991b1b' }}>{isArabic ? 'تالف نهائي' : 'Scrapped'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#dc2626' }}>{trackerKPIs.scrapped}</div>
+            </div>
+            <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#9f1239' }}>{isArabic ? 'متكرر (2+)' : 'Recurring'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#be123c' }}>{trackerKPIs.recurringCount}</div>
+            </div>
+            <div style={{ background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
+              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#0369a1' }}>{isArabic ? 'نسبة الاستعادة' : 'Recovery %'}</div>
+              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#0284c7' }}>{trackerKPIs.repairRate}%</div>
+            </div>
+          </div>
+
+          {/* 8-Station Defect Distribution Strip */}
+          <div style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 6px', marginBottom: 4 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+              <span style={{ fontSize: '0.58rem', fontWeight: 900, color: 'var(--navy)' }}>
+                {isArabic ? '📊 توزيع العيوب حسب تسلسل المحطات الـ 8 المعتمد:' : '📊 Defect Distribution by 8 Line Stations:'}
+              </span>
+              <span style={{ fontSize: '0.54rem', color: '#64748b' }}>
+                {isArabic ? '1.التجميع 2.العزل 3.التردد 4.المعايرة 5.الفحص الشامل 6.التخصيص 7.التغليف 8.الفيرموير' : '1.Assembly 2.Insulation 3.RF 4.Calibration 5.Multin 6.Perso 7.Packaging 8.FW'}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 4 }}>
+              {STAGES.map(st => (
+                <div key={st.id} style={{
+                  background: '#ffffff',
+                  border: '1px solid #cbd5e1',
+                  borderRadius: 3,
+                  padding: '2px 4px',
+                  textAlign: 'center',
+                  fontSize: '0.56rem'
+                }}>
+                  <div style={{ fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {st.num}. {isArabic ? st.arabic : st.name}
+                  </div>
+                  <div style={{ fontWeight: 900, color: (stationCounts[st.id] || 0) > 0 ? '#b91c1c' : '#16a34a', fontSize: '0.70rem', marginTop: 1 }}>
+                    {stationCounts[st.id] || 0}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Defective Meters Data Table */}
+          <div style={{ marginBottom: 4 }}>
+            <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.62rem', marginBottom: 0 }}>
+              <thead>
+                <tr style={{ background: '#f1f5f9' }}>
+                  <th style={{ width: 22, textAlign: 'center', padding: '2px 3px', border: '1px solid #cbd5e1' }}>#</th>
+                  <th style={{ width: 100, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'سيريال العداد' : 'Serial Number'}</th>
+                  <th style={{ width: 85, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'المحطة (من 8)' : 'Station (of 8)'}</th>
+                  <th style={{ width: 65, textAlign: 'center', padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'كود العطل' : 'Defect Code'}</th>
+                  <th style={{ width: 45, textAlign: 'center', padding: '2px 2px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الدخول' : 'Cycles'}</th>
+                  <th style={{ width: 45, textAlign: 'center', padding: '2px 2px', border: '1px solid #cbd5e1' }}>{isArabic ? 'العودة' : 'Returns'}</th>
+                  <th style={{ width: 95, textAlign: 'center', padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الحالة الحالية' : 'Status'}</th>
+                  <th style={{ width: 105, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'تاريخ والرصد' : 'Logged Date & By'}</th>
+                  <th style={{ padding: '2px 6px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الإجراء المتخذ / ملاحظات الإصلاح' : 'Resolution / Notes'}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredList.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} style={{ textAlign: 'center', padding: 12, color: '#94a3b8' }}>
+                      {isArabic ? 'لا توجد عدادات معطلة مطابقة للفلاتر.' : 'No defective meters matching selected filters.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredList.slice(0, 18).map((m, idx) => {
+                    const stObj = findStage(m.stage);
+                    const isReturned = m.status === 'RETURNED_TO_LINE';
+                    const isScrapped = m.status === 'SCRAPPED_KO';
+                    const isRepeated = m.entry_count > 1;
+
+                    return (
+                      <tr key={m.id} style={{ background: isRepeated ? '#fffbfb' : (idx % 2 === 1 ? '#f8fafc' : '#ffffff') }}>
+                        <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--navy)', border: '1px solid #cbd5e1', padding: '2px 2px' }}>
+                          {idx + 1}
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontWeight: 900, color: 'var(--navy)', fontFamily: 'monospace' }}>
+                          {m.serial_number}
+                          {isRepeated && (
+                            <span style={{ fontSize: '0.52rem', fontWeight: 800, color: '#dc2626', marginInlineStart: 3 }}>
+                              ({m.entry_count}x)
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle' }}>
+                          <span style={{ fontWeight: 800, color: '#0369a1', fontSize: '0.60rem' }}>
+                            {stObj.num}. {isArabic ? stObj.arabic : stObj.name}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontWeight: 800, color: '#b91c1c' }}>
+                          {m.defect_code || '—'}
+                        </td>
+                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 2px', verticalAlign: 'middle', fontWeight: 800, color: isRepeated ? '#dc2626' : '#334155' }}>
+                          {m.entry_count || 1}
+                        </td>
+                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 2px', verticalAlign: 'middle', fontWeight: 800, color: m.return_count > 0 ? '#16a34a' : '#64748b' }}>
+                          {m.return_count || 0}
+                        </td>
+                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle' }}>
+                          <span style={{
+                            fontSize: '0.56rem',
+                            fontWeight: 800,
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            display: 'inline-block',
+                            background: isReturned ? '#dcfce7' : (isScrapped ? '#fee2e2' : '#fef3c7'),
+                            color: isReturned ? '#166534' : (isScrapped ? '#991b1b' : '#92400e')
+                          }}>
+                            {isReturned 
+                              ? (isArabic ? '✅ عاد للخط' : 'Returned') 
+                              : (isScrapped 
+                                  ? (isArabic ? '🛑 تالف نهائي' : 'Scrapped') 
+                                  : (isArabic ? '⏳ قيد الإصلاح' : 'In Repair'))}
+                          </span>
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontSize: '0.58rem', color: '#475569' }}>
+                          <div>{m.logged_at ? new Date(m.logged_at).toLocaleDateString() : '—'}</div>
+                          <div style={{ color: '#0f172a', fontWeight: 700 }}>{m.logged_by || 'Supervisor'}</div>
+                        </td>
+                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 6px', verticalAlign: 'middle', fontSize: '0.58rem' }}>
+                          {m.repair_notes || m.notes ? (
+                            <span style={{ color: '#334155', fontWeight: 600 }}>
+                              {m.repair_notes || m.notes}
+                            </span>
+                          ) : (
+                            <span style={{ color: '#94a3b8' }}>—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+            {filteredList.length > 18 && (
+              <div style={{ textAlign: 'center', fontSize: '0.54rem', color: '#64748b', marginTop: 2 }}>
+                {isArabic 
+                  ? `* تم عرض أول 18 عداداً في الصفحة الأولى من إجمالي ${filteredList.length} عداداً مسجلاً.` 
+                  : `* Showing first 18 of ${filteredList.length} total logged meters in summary printout.`}
+              </div>
+            )}
+          </div>
+
+          {/* Quality Engineering Remarks Box */}
+          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 8px', marginBottom: 4 }}>
+            <span style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)', textTransform: 'uppercase', marginInlineEnd: 6 }}>
+              {isArabic ? 'توجيهات الجودة الهندسية:' : 'Quality & Engineering Directives:'}
+            </span>
+            <span style={{ fontSize: '0.62rem', color: '#334155' }}>
+              {isArabic 
+                ? 'الالتزام بحصر العدادات فورياً عند كل محطة من الـ 8 محطات، وفحص العدادات المتكررة (2+ دورات) تحليلياً لاستبعاد العطل الجذري وتفريغ حاويات الهالك.'
+                : 'Enforce immediate defective logging across all 8 line stations; analyze 2+ cycle recurring meters for root causes and clear scrap bins.'}
+            </span>
+          </div>
+
+          {/* Official 3-Party Sign-Off Block */}
+          <div className="report-sign-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, paddingTop: 4, borderTop: '1px dashed #cbd5e1' }}>
+            <div className="sign-line">
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
+                1. {isArabic ? 'مراقب الجودة (QA/QC Inspector)' : 'QA/QC INSPECTOR SIGN & STAMP'}
+              </span>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
+                QA Department
+              </div>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Stamp / Sign: ____________</span>
+              </div>
+            </div>
+
+            <div className="sign-line">
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
+                2. {isArabic ? 'فني الإصلاح والتشغيل (Rework Tech)' : 'REWORK TECHNICIAN SIGN'}
+              </span>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
+                Maintenance & Rework Team
+              </div>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Sign: ____________________</span>
+              </div>
+            </div>
+
+            <div className="sign-line">
+              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
+                3. {isArabic ? 'مشرف خط الإنتاج (Production Supervisor)' : 'PRODUCTION SUPERVISOR APPROVAL'}
+              </span>
+              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
+                {currentUser?.name || 'Production Supervisor'}
+              </div>
+              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
+                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Approval: _________________</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Form Footer Stamp */}
+          <div style={{ marginTop: 3, paddingTop: 2, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.52rem', color: '#94a3b8' }}>
+            <span>ECTRON MANUFACTURING OPERATIONS — FORM PSM-DEF-08-2026 (REV 01) — A4 LANDSCAPE REPORT</span>
+            <span>Printed: {new Date().toLocaleString()}</span>
+          </div>
+        </div>
+
+        {/* Modal Footer Controls */}
+        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            {t('close')}
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={handlePrint}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontWeight: 800 }}
+          >
+            <Printer size={16} />
+            <span>{isArabic ? '🖨️ طباعة التقرير (A4 أفقي - صفحة واحدة)' : '🖨️ Print Single Page (A4 Landscape)'}</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

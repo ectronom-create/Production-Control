@@ -18,7 +18,8 @@ import {
   AlertCircle,
   AlertTriangle,
   Package,
-  ArrowUpRight
+  ArrowUpRight,
+  Radio
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -33,6 +34,18 @@ export default function ManagementDashboard() {
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedRecoveryMonth, setSelectedRecoveryMonth] = useState('2026-10');
   const [recoveryHorizonDays, setRecoveryHorizonDays] = useState('month_end');
+
+  // Defective Meters count logged live from the Defect Meters tracking system
+  const [defectiveMetersCount, setDefectiveMetersCount] = useState(() => {
+    try {
+      const cached = localStorage.getItem('ectron_defective_meters_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed.length;
+      }
+    } catch (_) {}
+    return 0;
+  });
 
   // Available Recovery Months
   const availableRecoveryMonths = useMemo(() => {
@@ -58,13 +71,14 @@ export default function ManagementDashboard() {
     shiftFw: 600,
   });
 
-  // Fetch production records & kit meters records
+  // Fetch production records, kit records & defective meters count
   const fetchRecords = async () => {
     setLoading(true);
     try {
-      const [prodRes, kitRes] = await Promise.allSettled([
+      const [prodRes, kitRes, defectMetersRes] = await Promise.allSettled([
         supabase.from('production_records').select('*').order('date', { ascending: false }),
-        supabase.from('kit_meters').select('*').order('date', { ascending: false })
+        supabase.from('kit_meters').select('*').order('date', { ascending: false }),
+        supabase.from('defective_meters').select('id', { count: 'exact' })
       ]);
 
       if (prodRes.status === 'fulfilled' && prodRes.value.data) {
@@ -85,6 +99,22 @@ export default function ManagementDashboard() {
           if (cached) setKitRecords(JSON.parse(cached));
         } catch (_) {}
       }
+
+      // Update Defect Meters Count from live database
+      if (defectMetersRes.status === 'fulfilled') {
+        const count = typeof defectMetersRes.value.count === 'number'
+          ? defectMetersRes.value.count
+          : (defectMetersRes.value.data ? defectMetersRes.value.data.length : 0);
+        setDefectiveMetersCount(count);
+      } else {
+        try {
+          const cached = localStorage.getItem('ectron_defective_meters_cache');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            if (Array.isArray(parsed)) setDefectiveMetersCount(parsed.length);
+          }
+        } catch (_) {}
+      }
     } catch (e) {
       console.warn('Error fetching management dashboard records:', e);
       try {
@@ -98,6 +128,57 @@ export default function ManagementDashboard() {
 
   useEffect(() => {
     fetchRecords();
+  }, []);
+
+  // ── Realtime Live Defect Meters Subscription & Polling ──
+  useEffect(() => {
+    // 1. Supabase Realtime Channel
+    const channel = supabase
+      .channel('mgmt_live_defect_meters_sync')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'defective_meters' },
+        async () => {
+          try {
+            const { count, data } = await supabase
+              .from('defective_meters')
+              .select('id', { count: 'exact' });
+            const liveCount = typeof count === 'number' ? count : (data ? data.length : 0);
+            setDefectiveMetersCount(liveCount);
+          } catch (e) {
+            console.warn('Live defect meters update failed:', e);
+          }
+        }
+      )
+      .subscribe();
+
+    // 2. Storage event listener (cross-tab sync if user adds defect meter in DefectMeters tab)
+    const handleStorageChange = (e) => {
+      if (e.key === 'ectron_defective_meters_cache' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) setDefectiveMetersCount(parsed.length);
+        } catch (_) {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    // 3. Fallback Polling every 10 seconds for seamless live updates
+    const pollInterval = setInterval(async () => {
+      try {
+        const { count, data } = await supabase
+          .from('defective_meters')
+          .select('id', { count: 'exact' });
+        const liveCount = typeof count === 'number' ? count : (data ? data.length : 0);
+        setDefectiveMetersCount(prev => (prev !== liveCount ? liveCount : prev));
+      } catch (_) {}
+    }, 10000);
+
+    return () => {
+      supabase.removeChannel(channel);
+      window.removeEventListener('storage', handleStorageChange);
+      clearInterval(pollInterval);
+    };
   }, []);
 
   // Dates for Daily and Weekly calculations
@@ -401,11 +482,12 @@ export default function ManagementDashboard() {
     };
   }, [kitRecords]);
 
-  // ─── 7. Defect Calibration Metrics ──────────────────────────────────────────
+  // ─── 7. Defect Calibration Metrics (4,250 Base Previous + Live Defect Meters) ──
   const defectMetrics = useMemo(() => {
-    const DEFAULT_ACTUAL = 4250;
-    const saved = localStorage.getItem('ectron_defect_actual_count');
-    const actualPhysicalDefects = saved ? (parseInt(saved, 10) || DEFAULT_ACTUAL) : DEFAULT_ACTUAL;
+    const BASE_PREVIOUS_ACTUAL = 4250;
+    // Base previous actual defect count (4,250) + live registered meters in Defect Meters page
+    const liveLogged = defectiveMetersCount || 0;
+    const actualPhysicalDefects = BASE_PREVIOUS_ACTUAL + liveLogged;
 
     let totalReportedKO = 0;
     records.forEach(r => {
@@ -427,11 +509,145 @@ export default function ManagementDashboard() {
     const repairRatePct = totalReportedKO > 0 ? ((totalRepairedMeters / totalReportedKO) * 100) : 0;
 
     return {
+      baseActualDefects: BASE_PREVIOUS_ACTUAL,
+      liveLoggedDefects: liveLogged,
       actualPhysicalDefects,
       totalReportedKO,
       calibrationRatio,
       totalRepairedMeters,
       repairRatePct
+    };
+  }, [records, defectiveMetersCount]);
+
+  // ─── 8. Top 4 Recurring Defect Codes from Production Reports ────────────────
+  const topDefectCodes = useMemo(() => {
+    const codeMap = {};
+    const codeStationCounts = {};
+    let totalOccurrences = 0;
+
+    // Helper to format station info clearly in English
+    const getStationDetails = (code, rawStation) => {
+      const cleanCode = String(code || '').replace(/^-/, '').trim();
+      const st = String(rawStation || '').toLowerCase();
+
+      if (st.includes('rf') || st.includes('rayonne') || ['910', '640', '920'].includes(cleanCode)) {
+        return {
+          en: 'RF Test Station (Test Rayonné RF)',
+          badge: 'RF Test'
+        };
+      }
+      if (st.includes('multi') || ['312', '335', '344', '214', '329', '361'].includes(cleanCode)) {
+        return {
+          en: 'Multi-Test Workstation',
+          badge: 'Multi-Test'
+        };
+      }
+      if (st.includes('assembly') || ['576', '577', '001', '00', '002'].includes(cleanCode)) {
+        return {
+          en: 'Assembly Line Station',
+          badge: 'Assembly'
+        };
+      }
+      if (st.includes('cal') || ['171', '172', '173', '911'].includes(cleanCode)) {
+        return {
+          en: 'Calibration Workstation (CAL2)',
+          badge: 'Calibration'
+        };
+      }
+      if (st.includes('insul') || cleanCode === '656') {
+        return {
+          en: 'Insulation Test Station',
+          badge: 'Insulation'
+        };
+      }
+      if (st.includes('perso') || cleanCode === '613') {
+        return {
+          en: 'Personalization Station (Perso)',
+          badge: 'Perso'
+        };
+      }
+      return {
+        en: rawStation || 'Production Line Station',
+        badge: rawStation || 'Production'
+      };
+    };
+
+    records.forEach(r => {
+      // 1. Map stations to codes from stations array
+      if (Array.isArray(r.stations)) {
+        r.stations.forEach(st => {
+          const stName = st.stationName || st.bench || '';
+          ['top1', 'top2', 'top3'].forEach((k, idx) => {
+            const qtyKey = ['qty1', 'qty2', 'qty3'][idx];
+            const code = String(st[k] || '').trim();
+            const qty = parseInt(st[qtyKey], 10) || 0;
+            if (code && qty > 0 && stName) {
+              if (!codeStationCounts[code]) codeStationCounts[code] = {};
+              codeStationCounts[code][stName] = (codeStationCounts[code][stName] || 0) + qty;
+            }
+          });
+        });
+      }
+
+      // 2. Aggregate occurrences from defects array
+      if (Array.isArray(r.defects)) {
+        r.defects.forEach(d => {
+          const code = String(d?.code || '').trim();
+          const qty = parseInt(d?.qty, 10) || 0;
+          if (code && qty > 0) {
+            codeMap[code] = (codeMap[code] || 0) + qty;
+            totalOccurrences += qty;
+          }
+        });
+      }
+
+      // 3. Fallback to stations defects if record has no defects array
+      if ((!r.defects || r.defects.length === 0) && Array.isArray(r.stations)) {
+        r.stations.forEach(st => {
+          ['top1', 'top2', 'top3'].forEach((k, idx) => {
+            const qtyKey = ['qty1', 'qty2', 'qty3'][idx];
+            const code = String(st[k] || '').trim();
+            const qty = parseInt(st[qtyKey], 10) || 0;
+            if (code && qty > 0) {
+              codeMap[code] = (codeMap[code] || 0) + qty;
+              totalOccurrences += qty;
+            }
+          });
+        });
+      }
+    });
+
+    const sorted = Object.entries(codeMap)
+      .map(([code, qty]) => ({ code, qty }))
+      .sort((a, b) => b.qty - a.qty);
+
+    const top4 = sorted.slice(0, 4).map((item, idx) => {
+      const pct = totalOccurrences > 0 ? ((item.qty / totalOccurrences) * 100) : 0;
+      
+      // Determine primary station
+      const stMap = codeStationCounts[item.code] || {};
+      const sortedSt = Object.entries(stMap).sort((a, b) => b[1] - a[1]);
+      const primaryRawStation = sortedSt[0] ? sortedSt[0][0] : '';
+      const stationInfo = getStationDetails(item.code, primaryRawStation);
+
+      return {
+        rank: idx + 1,
+        code: item.code,
+        qty: item.qty,
+        pct,
+        stationName: stationInfo.en,
+        stationBadge: stationInfo.badge
+      };
+    });
+
+    const top4Sum = top4.reduce((s, it) => s + it.qty, 0);
+    const top4SharePct = totalOccurrences > 0 ? ((top4Sum / totalOccurrences) * 100) : 0;
+
+    return {
+      top4,
+      totalOccurrences,
+      top4Sum,
+      top4SharePct
     };
   }, [records]);
 
@@ -1431,16 +1647,20 @@ export default function ManagementDashboard() {
               <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 🔴 Actual Net Defective Meters
               </span>
-              <span className="badge badge-red" style={{ fontSize: '0.72rem' }}>
-                Actual Physical
+              <span className="badge badge-red" style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+                Live Dynamic
               </span>
             </div>
             <div style={{ fontSize: '1.8rem', fontWeight: 900, color: '#b91c1c', lineHeight: 1.1 }}>
               {defectMetrics.actualPhysicalDefects.toLocaleString()}
               <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#991b1b', marginLeft: 6 }}>Net Meters</span>
             </div>
-            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #fecaca', fontSize: '0.8rem', color: '#7f1d1d' }}>
-              Physical shop floor count excluding duplicate re-test cycles
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #fecaca', fontSize: '0.78rem', color: '#7f1d1d', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
+              <span>Previous Base: <strong>{defectMetrics.baseActualDefects.toLocaleString()}</strong></span>
+              <span style={{ background: '#fee2e2', padding: '2px 7px', borderRadius: 4, fontWeight: 700, color: '#991b1b', border: '1px solid #fca5a5' }}>
+                + {defectMetrics.liveLoggedDefects.toLocaleString()} Live Logged
+              </span>
             </div>
           </div>
 
@@ -1517,6 +1737,164 @@ export default function ManagementDashboard() {
             <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #c7d2fe', fontSize: '0.8rem', color: '#312e81' }}>
               Failed in stations, repaired successfully and returned to line
             </div>
+          </div>
+        </div>
+
+        {/* ── Top 4 Recurring Defect Codes from Production Reports ── */}
+        <div style={{
+          marginTop: 24,
+          paddingTop: 20,
+          borderTop: '1.5px dashed #fecdd3'
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 8, background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <BarChart3 size={18} color="#dc2626" />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#881337' }}>
+                  Top 4 Recurring Failure Codes (Production Shift Reports)
+                </h4>
+                <p style={{ margin: '2px 0 0', fontSize: '0.78rem', color: '#9f1239' }}>
+                  Pareto failure distribution calculated directly from all shift production reports
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span className="badge badge-red" style={{ fontSize: '0.75rem', padding: '4px 10px', fontWeight: 700 }}>
+                Top 4 = {topDefectCodes.top4SharePct.toFixed(1)}% of All Reported Defects
+              </span>
+            </div>
+          </div>
+
+          {/* 4 Defect Cards Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: 14
+          }}>
+            {topDefectCodes.top4.map((item, idx) => {
+              const rankStyles = [
+                { border: '#fca5a5', bg: '#fff1f2', badgeBg: '#fee2e2', badgeColor: '#991b1b', barColor: '#dc2626', label: '#1 Highest Failure', sub: 'Critical Bottleneck' },
+                { border: '#fdba74', bg: '#fff7ed', badgeBg: '#ffedd5', badgeColor: '#c2410c', barColor: '#ea580c', label: '#2 High Frequency', sub: 'Significant Defect' },
+                { border: '#fcd34d', bg: '#fffbeb', badgeBg: '#fef3c7', badgeColor: '#92400e', barColor: '#d97706', label: '#3 Moderate Rate', sub: 'Quality Action Needed' },
+                { border: '#93c5fd', bg: '#eff6ff', badgeBg: '#dbeafe', badgeColor: '#1e40af', barColor: '#2563eb', label: '#4 Notable Rate', sub: 'Recurring Pattern' }
+              ];
+              const style = rankStyles[idx] || rankStyles[3];
+
+              return (
+                <div
+                  key={item.code}
+                  style={{
+                    background: style.bg,
+                    border: `1.5px solid ${style.border}`,
+                    borderRadius: 12,
+                    padding: '16px 18px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      background: style.badgeBg,
+                      color: style.badgeColor,
+                      padding: '3px 8px',
+                      borderRadius: 6,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.3px'
+                    }}>
+                      {style.label}
+                    </span>
+                    <span style={{ fontSize: '0.78rem', fontWeight: 800, color: style.badgeColor }}>
+                      {item.pct.toFixed(1)}% Share
+                    </span>
+                  </div>
+
+                  <div style={{ margin: '8px 0 10px' }}>
+                    <div style={{
+                      fontSize: '1.5rem',
+                      fontWeight: 900,
+                      fontFamily: 'monospace',
+                      color: style.badgeColor,
+                      letterSpacing: '0.5px'
+                    }}>
+                      Code {item.code}
+                    </div>
+                    <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#334155', marginTop: 3 }}>
+                      {item.qty.toLocaleString()}{' '}
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#64748b' }}>
+                        Failure Cases
+                      </span>
+                    </div>
+
+                    {/* Originating Workstation Information */}
+                    <div style={{
+                      marginTop: 10,
+                      padding: '6px 9px',
+                      background: '#ffffff',
+                      borderRadius: 8,
+                      border: `1.5px solid ${style.border}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7
+                    }}>
+                      <span style={{ fontSize: '0.85rem' }}>🏭</span>
+                      <div style={{ fontSize: '0.74rem', lineHeight: 1.25 }}>
+                        <div style={{ fontWeight: 800, color: style.badgeColor }}>
+                          {item.stationName}
+                        </div>
+                        <div style={{ fontSize: '0.67rem', fontWeight: 600, color: '#64748b' }}>
+                          Originating Workstation
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div>
+                    <div style={{ width: '100%', height: 7, background: 'rgba(0,0,0,0.08)', borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min(100, Math.max(8, item.pct))}%`,
+                        height: '100%',
+                        background: style.barColor,
+                        borderRadius: 4
+                      }} />
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 5, textAlign: 'right' }}>
+                      {style.sub}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Pareto Insight Footer */}
+          <div style={{
+            marginTop: 14,
+            background: '#ffffff',
+            border: '1.5px solid #fecdd3',
+            borderRadius: 10,
+            padding: '10px 16px',
+            fontSize: '0.82rem',
+            color: '#881337',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 10
+          }}>
+            <span>
+              💡 <strong>Pareto Distribution & Workstation Concentration:</strong> The top 4 failure codes account for <strong>{topDefectCodes.top4Sum.toLocaleString()}</strong> cases ({topDefectCodes.top4SharePct.toFixed(1)}% of all reported defects). Line failures are heavily concentrated in the <strong>RF Test Station</strong> (Codes -910, -640, -920) and <strong>Multi-Test Workstation</strong> (Code -312).
+            </span>
+            <span style={{ fontSize: '0.75rem', color: '#9f1239', fontWeight: 700, background: '#fee2e2', padding: '3px 8px', borderRadius: 6 }}>
+              Direct Live Shift Reports
+            </span>
           </div>
         </div>
       </div>
