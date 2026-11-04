@@ -32,7 +32,8 @@ import {
   UserCheck,
   Clock,
   Printer,
-  FileText
+  FileText,
+  Calendar
 } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -79,6 +80,49 @@ const COMMON_DEFECT_CODES = [
   'HIGH_CURRENT'
 ];
 
+export const getTodayDateStr = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+export const getDaysAgoDateStr = (daysAgo) => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysAgo);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+export const getMeterDateStr = (m) => {
+  if (!m) return '';
+  const raw = m.logged_at || m.created_at || (Array.isArray(m.history) && m.history[0]?.logged_at) || m.date;
+  if (!raw) return '';
+  
+  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
+    return raw.trim();
+  }
+  
+  try {
+    const d = new Date(raw);
+    if (isNaN(d.getTime())) {
+      if (typeof raw === 'string' && raw.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        return raw.slice(0, 10);
+      }
+      return '';
+    }
+    const y = d.getFullYear();
+    const mth = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${mth}-${day}`;
+  } catch {
+    return '';
+  }
+};
+
 export default function DefectMeters() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
@@ -110,6 +154,10 @@ export default function DefectMeters() {
   const [trackerStageFilter, setTrackerStageFilter] = useState('ALL');
   const [trackerStatusFilter, setTrackerStatusFilter] = useState('ALL');
   const [onlyRecurringFilter, setOnlyRecurringFilter] = useState(false);
+  const [trackerDateMode, setTrackerDateMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'WEEK' | 'CUSTOM_DATE' | 'RANGE'
+  const [trackerCustomDate, setTrackerCustomDate] = useState(() => getTodayDateStr());
+  const [trackerStartDate, setTrackerStartDate] = useState(() => getDaysAgoDateStr(6));
+  const [trackerEndDate, setTrackerEndDate] = useState(() => getTodayDateStr());
 
   // Modals for Tracker
   const [repairModalMeter, setRepairModalMeter] = useState(null);
@@ -150,6 +198,10 @@ export default function DefectMeters() {
   const [selectedMonth, setSelectedMonth] = useState('ALL');
   const [selectedTeam, setSelectedTeam] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [analyticsDateMode, setAnalyticsDateMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'WEEK' | 'CUSTOM_DATE' | 'RANGE'
+  const [analyticsCustomDate, setAnalyticsCustomDate] = useState(() => getTodayDateStr());
+  const [analyticsStartDate, setAnalyticsStartDate] = useState(() => getDaysAgoDateStr(6));
+  const [analyticsEndDate, setAnalyticsEndDate] = useState(() => getTodayDateStr());
   const [selectedShiftForModal, setSelectedShiftForModal] = useState(null);
   const [showReportModal, setShowReportModal] = useState(false);
 
@@ -602,6 +654,9 @@ export default function DefectMeters() {
 
   // ── Filtered Defective Meters List ────────────────────────────────────────
   const filteredDefectiveMeters = useMemo(() => {
+    const todayStr = getTodayDateStr();
+    const weekStartStr = getDaysAgoDateStr(6);
+
     return defectiveMeters.filter(m => {
       const q = trackerSearch.trim().toLowerCase();
       const matchSearch = q === '' ||
@@ -614,19 +669,51 @@ export default function DefectMeters() {
       const matchStatus = trackerStatusFilter === 'ALL' || m.status === trackerStatusFilter;
       const matchRecurring = !onlyRecurringFilter || (m.entry_count > 1);
 
-      return matchSearch && matchStage && matchStatus && matchRecurring;
-    });
-  }, [defectiveMeters, trackerSearch, trackerStageFilter, trackerStatusFilter, onlyRecurringFilter]);
+      // Date Filtering (Day, Week, Specific Date, Date Range)
+      const meterDateStr = getMeterDateStr(m);
+      let matchDate = true;
+      if (trackerDateMode === 'TODAY') {
+        matchDate = meterDateStr === todayStr;
+      } else if (trackerDateMode === 'WEEK') {
+        matchDate = meterDateStr >= weekStartStr && meterDateStr <= todayStr;
+      } else if (trackerDateMode === 'CUSTOM_DATE') {
+        matchDate = !trackerCustomDate || meterDateStr === trackerCustomDate;
+      } else if (trackerDateMode === 'RANGE') {
+        if (trackerStartDate && trackerEndDate) {
+          matchDate = meterDateStr >= trackerStartDate && meterDateStr <= trackerEndDate;
+        } else if (trackerStartDate) {
+          matchDate = meterDateStr >= trackerStartDate;
+        } else if (trackerEndDate) {
+          matchDate = meterDateStr <= trackerEndDate;
+        }
+      }
 
-  // ── Tracker KPI Totals ────────────────────────────────────────────────────
+      return matchSearch && matchStage && matchStatus && matchRecurring && matchDate;
+    });
+  }, [
+    defectiveMeters, 
+    trackerSearch, 
+    trackerStageFilter, 
+    trackerStatusFilter, 
+    onlyRecurringFilter,
+    trackerDateMode,
+    trackerCustomDate,
+    trackerStartDate,
+    trackerEndDate
+  ]);
+
+  // ── Tracker KPI Totals (Dynamically calculated from filtered view) ─────────
   const trackerKPIs = useMemo(() => {
-    const total = defectiveMeters.length;
+    const isFiltered = trackerDateMode !== 'ALL' || trackerStageFilter !== 'ALL' || trackerStatusFilter !== 'ALL' || onlyRecurringFilter || trackerSearch.trim() !== '';
+    const targetList = filteredDefectiveMeters;
+
+    const total = targetList.length;
     let underInspection = 0;
     let returnedToLine = 0;
     let scrapped = 0;
     let recurringCount = 0;
 
-    defectiveMeters.forEach(m => {
+    targetList.forEach(m => {
       if (m.status === 'UNDER_INSPECTION' || m.status === 'IN_REPAIR') underInspection++;
       else if (m.status === 'RETURNED_TO_LINE') returnedToLine++;
       else if (m.status === 'SCRAPPED_KO') scrapped++;
@@ -634,8 +721,24 @@ export default function DefectMeters() {
       if (m.entry_count > 1) recurringCount++;
     });
 
-    return { total, underInspection, returnedToLine, scrapped, recurringCount };
-  }, [defectiveMeters]);
+    return { 
+      total, 
+      allLifetimeTotal: defectiveMeters.length,
+      isFiltered,
+      underInspection, 
+      returnedToLine, 
+      scrapped, 
+      recurringCount 
+    };
+  }, [
+    filteredDefectiveMeters, 
+    defectiveMeters.length, 
+    trackerDateMode, 
+    trackerStageFilter, 
+    trackerStatusFilter, 
+    onlyRecurringFilter, 
+    trackerSearch
+  ]);
 
   // ── Tab 2 Analytics Calculations ──────────────────────────────────────────
   const getRecordReportedKO = (rec) => {
@@ -720,6 +823,9 @@ export default function DefectMeters() {
   }, [records, overallMetrics.calibrationRatio]);
 
   const filteredRecords = useMemo(() => {
+    const todayStr = getTodayDateStr();
+    const weekStartStr = getDaysAgoDateStr(6);
+
     return calibratedRecords.filter(r => {
       const matchMonth = selectedMonth === 'ALL' || (r.date && r.date.startsWith(selectedMonth));
       const matchTeam = selectedTeam === 'ALL' || r.team_name === selectedTeam;
@@ -728,9 +834,35 @@ export default function DefectMeters() {
         (r.date && r.date.includes(searchQuery.trim())) ||
         (r.notes && r.notes.toLowerCase().includes(searchQuery.toLowerCase()));
 
-      return matchMonth && matchTeam && matchSearch;
+      let matchDate = true;
+      if (analyticsDateMode === 'TODAY') {
+        matchDate = r.date === todayStr;
+      } else if (analyticsDateMode === 'WEEK') {
+        matchDate = r.date >= weekStartStr && r.date <= todayStr;
+      } else if (analyticsDateMode === 'CUSTOM_DATE') {
+        matchDate = !analyticsCustomDate || r.date === analyticsCustomDate;
+      } else if (analyticsDateMode === 'RANGE') {
+        if (analyticsStartDate && analyticsEndDate) {
+          matchDate = r.date >= analyticsStartDate && r.date <= analyticsEndDate;
+        } else if (analyticsStartDate) {
+          matchDate = r.date >= analyticsStartDate;
+        } else if (analyticsEndDate) {
+          matchDate = r.date <= analyticsEndDate;
+        }
+      }
+
+      return matchMonth && matchTeam && matchSearch && matchDate;
     });
-  }, [calibratedRecords, selectedMonth, selectedTeam, searchQuery]);
+  }, [
+    calibratedRecords, 
+    selectedMonth, 
+    selectedTeam, 
+    searchQuery,
+    analyticsDateMode,
+    analyticsCustomDate,
+    analyticsStartDate,
+    analyticsEndDate
+  ]);
 
   const handleSaveTarget = () => {
     const parsed = parseInt(targetInput, 10);
@@ -868,7 +1000,7 @@ export default function DefectMeters() {
             padding: '2px 8px',
             borderRadius: 999
           }}>
-            {trackerKPIs.total}
+            {trackerKPIs.allLifetimeTotal ?? trackerKPIs.total}
           </span>
         </button>
 
@@ -1390,51 +1522,349 @@ export default function DefectMeters() {
           </div>
 
           {/* ── Top 4 KPI Cards for Defective Meters ── */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-            gap: 14
-          }}>
-            {/* KPI 1: Total Logged */}
-            <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #0284c7', borderRight: isArabic ? '5px solid #0284c7' : 'none' }}>
-              <div className="card-kpi-label">{isArabic ? 'إجمالي العدادات المعطلة' : 'Total Defective Meters'}</div>
-              <div className="card-kpi-val" style={{ color: '#0369a1' }}>{trackerKPIs.total}</div>
-              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 4 }}>
-                {isArabic ? 'جميع الحالات المسجلة بالباركود' : 'All barcode-scanned intakes'}
-              </div>
-            </div>
+          {(() => {
+            const recoveryPct = trackerKPIs.total > 0 ? Math.round((trackerKPIs.returnedToLine / trackerKPIs.total) * 100) : 0;
 
-            {/* KPI 2: Under Inspection / Repair */}
-            <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #d97706', borderRight: isArabic ? '5px solid #d97706' : 'none' }}>
-              <div className="card-kpi-label">{isArabic ? 'قيد المعاينة والإصلاح حالياً' : 'Active Under Repair'}</div>
-              <div className="card-kpi-val" style={{ color: '#b45309' }}>{trackerKPIs.underInspection}</div>
-              <div style={{ fontSize: '0.72rem', color: '#b45309', fontWeight: 700, marginTop: 4 }}>
-                {isArabic ? 'بانتظار الصيانة أو إعادة الاختبار' : 'Awaiting rework / test'}
-              </div>
-            </div>
+            return (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                gap: 16
+              }}>
+                {/* KPI 1: Total Defective Meters */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)',
+                  borderRadius: 14,
+                  border: '1.5px solid #bae6fd',
+                  borderTop: '4px solid #0284c7',
+                  padding: '18px 20px',
+                  boxShadow: '0 4px 16px rgba(2, 132, 199, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 10,
+                        background: '#e0f2fe',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#0284c7'
+                      }}>
+                        <Scan size={22} />
+                      </div>
+                      <span style={{
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        background: '#e0f2fe',
+                        color: '#0369a1'
+                      }}>
+                        {isArabic ? 'سجل الرصد' : 'Total Intake'}
+                      </span>
+                    </div>
 
-            {/* KPI 3: Repaired & Returned */}
-            <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #10b981', borderRight: isArabic ? '5px solid #10b981' : 'none' }}>
-              <div className="card-kpi-label">{isArabic ? 'تم الإصلاح وعاد للإنتاج' : 'Repaired & Returned'}</div>
-              <div className="card-kpi-val" style={{ color: '#16a34a' }}>{trackerKPIs.returnedToLine}</div>
-              <div style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 700, marginTop: 4 }}>
-                {trackerKPIs.total > 0 ? `${Math.round((trackerKPIs.returnedToLine / trackerKPIs.total) * 100)}% ${isArabic ? 'نسبة الاستعادة' : 'Recovery Rate'}` : '0%'}
-              </div>
-            </div>
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                      {isArabic ? 'إجمالي العدادات المعطلة' : 'Total Defective Meters'}
+                    </div>
 
-            {/* KPI 4: Recurring Failures */}
-            <div className="card-kpi" style={{ borderLeft: isArabic ? 'none' : '5px solid #dc2626', borderRight: isArabic ? '5px solid #dc2626' : 'none' }}>
-              <div className="card-kpi-label">{isArabic ? 'عدادات متكررة العطل (2+)' : 'Recurring Failures (2+)'}</div>
-              <div className="card-kpi-val" style={{ color: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#16a34a' }}>
-                {trackerKPIs.recurringCount}
+                    <div style={{
+                      fontSize: '2.2rem',
+                      fontWeight: 900,
+                      color: '#0369a1',
+                      lineHeight: 1.15,
+                      marginTop: 4,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6
+                    }}>
+                      {trackerKPIs.total}
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#64748b' }}>
+                        {isArabic ? 'عداد' : 'units'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    fontSize: '0.74rem',
+                    color: '#64748b',
+                    marginTop: 12,
+                    paddingTop: 10,
+                    borderTop: '1px solid #e0f2fe',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#0284c7', display: 'inline-block' }} />
+                    <span>
+                      {trackerKPIs.isFiltered 
+                        ? (isArabic ? `مفلترة (${trackerKPIs.total} من أصل ${trackerKPIs.allLifetimeTotal})` : `Filtered (${trackerKPIs.total} of ${trackerKPIs.allLifetimeTotal})`)
+                        : (isArabic ? 'جميع الحالات المسجلة بالباركود' : 'All barcode-scanned intakes')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* KPI 2: Active Under Repair */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #fffbeb 100%)',
+                  borderRadius: 14,
+                  border: '1.5px solid #fde68a',
+                  borderTop: '4px solid #f59e0b',
+                  padding: '18px 20px',
+                  boxShadow: '0 4px 16px rgba(217, 119, 6, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 10,
+                        background: '#fef3c7',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#d97706'
+                      }}>
+                        <Wrench size={22} />
+                      </div>
+                      <span style={{
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        background: '#fef3c7',
+                        color: '#92400e'
+                      }}>
+                        {isArabic ? '⏳ جاري الإصلاح' : 'In Rework'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                      {isArabic ? 'قيد المعاينة والإصلاح حالياً' : 'Active Under Repair'}
+                    </div>
+
+                    <div style={{
+                      fontSize: '2.2rem',
+                      fontWeight: 900,
+                      color: '#b45309',
+                      lineHeight: 1.15,
+                      marginTop: 4,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6
+                    }}>
+                      {trackerKPIs.underInspection}
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#92400e' }}>
+                        {isArabic ? 'قيد الفحص' : 'in shop'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    fontSize: '0.74rem',
+                    color: '#b45309',
+                    fontWeight: 700,
+                    marginTop: 12,
+                    paddingTop: 10,
+                    borderTop: '1px solid #fef3c7',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', display: 'inline-block' }} />
+                    <span>
+                      {isArabic ? 'بانتظار الصيانة أو إعادة الاختبار' : 'Awaiting rework / re-test'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* KPI 3: Repaired & Returned */}
+                <div style={{
+                  background: 'linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%)',
+                  borderRadius: 14,
+                  border: '1.5px solid #bbf7d0',
+                  borderTop: '4px solid #10b981',
+                  padding: '18px 20px',
+                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 10,
+                        background: '#dcfce7',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#059669'
+                      }}>
+                        <CheckCircle2 size={22} />
+                      </div>
+                      <span style={{
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        background: '#dcfce7',
+                        color: '#166534'
+                      }}>
+                        {recoveryPct}% {isArabic ? 'استعادة' : 'Recovery'}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                      {isArabic ? 'تم الإصلاح وعاد للإنتاج' : 'Repaired & Returned'}
+                    </div>
+
+                    <div style={{
+                      fontSize: '2.2rem',
+                      fontWeight: 900,
+                      color: '#15803d',
+                      lineHeight: 1.15,
+                      marginTop: 4,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6
+                    }}>
+                      {trackerKPIs.returnedToLine}
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#166534' }}>
+                        {isArabic ? 'مستعاد للخط' : 'recovered'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 4, marginTop: 10, overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min(100, recoveryPct)}%`,
+                        height: '100%',
+                        background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
+                        borderRadius: 4,
+                        transition: 'width 0.5s ease'
+                      }} />
+                    </div>
+                    <div style={{
+                      fontSize: '0.74rem',
+                      color: '#15803d',
+                      fontWeight: 700,
+                      marginTop: 6,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span>{isArabic ? 'نسبة الاستعادة:' : 'Recovery Rate:'}</span>
+                      <span style={{ fontWeight: 900 }}>{recoveryPct}%</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* KPI 4: Recurring Failures */}
+                <div style={{
+                  background: trackerKPIs.recurringCount > 0 
+                    ? 'linear-gradient(135deg, #ffffff 0%, #fef2f2 100%)' 
+                    : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+                  borderRadius: 14,
+                  border: `1.5px solid ${trackerKPIs.recurringCount > 0 ? '#fca5a5' : '#cbd5e1'}`,
+                  borderTop: `4px solid ${trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981'}`,
+                  padding: '18px 20px',
+                  boxShadow: trackerKPIs.recurringCount > 0 
+                    ? '0 4px 16px rgba(220, 38, 38, 0.08)' 
+                    : '0 4px 16px rgba(0,0,0,0.04)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  position: 'relative',
+                  overflow: 'hidden'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{
+                        width: 42,
+                        height: 42,
+                        borderRadius: 10,
+                        background: trackerKPIs.recurringCount > 0 ? '#fee2e2' : '#f1f5f9',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981'
+                      }}>
+                        <AlertTriangle size={22} />
+                      </div>
+                      <span style={{
+                        fontSize: '0.70rem',
+                        fontWeight: 800,
+                        padding: '3px 9px',
+                        borderRadius: 999,
+                        background: trackerKPIs.recurringCount > 0 ? '#fee2e2' : '#dcfce7',
+                        color: trackerKPIs.recurringCount > 0 ? '#991b1b' : '#166534'
+                      }}>
+                        {trackerKPIs.recurringCount > 0 
+                          ? (isArabic ? '⚠️ تكرار عطل' : 'Repeated') 
+                          : (isArabic ? '✅ صفر مكرر' : 'Zero Repeat')}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+                      {isArabic ? 'عدادات متكررة العطل (2+)' : 'Recurring Failures (2+)'}
+                    </div>
+
+                    <div style={{
+                      fontSize: '2.2rem',
+                      fontWeight: 900,
+                      color: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#16a34a',
+                      lineHeight: 1.15,
+                      marginTop: 4,
+                      display: 'flex',
+                      alignItems: 'baseline',
+                      gap: 6
+                    }}>
+                      {trackerKPIs.recurringCount}
+                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: trackerKPIs.recurringCount > 0 ? '#991b1b' : '#15803d' }}>
+                        {isArabic ? 'حالة مكررة' : 'repeats'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{
+                    fontSize: '0.74rem',
+                    color: trackerKPIs.recurringCount > 0 ? '#b91c1c' : '#15803d',
+                    fontWeight: 700,
+                    marginTop: 12,
+                    paddingTop: 10,
+                    borderTop: trackerKPIs.recurringCount > 0 ? '1px solid #fee2e2' : '1px solid #e2e8f0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981', display: 'inline-block' }} />
+                    <span>
+                      {trackerKPIs.recurringCount > 0 
+                        ? (isArabic ? 'تتطلب تدخلاً هندسياً حاسماً (دورتان فأكثر)' : 'Requires engineering root cause') 
+                        : (isArabic ? 'لا توجد عدادات مكررة (أداء ممتاز)' : 'Zero repeated defectives')}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div style={{ fontSize: '0.72rem', color: trackerKPIs.recurringCount > 0 ? '#b91c1c' : '#15803d', fontWeight: 700, marginTop: 4 }}>
-                {trackerKPIs.recurringCount > 0 
-                  ? (isArabic ? 'تتطلب تدخلاً هندسياً حاسماً' : 'Requires engineering root cause') 
-                  : (isArabic ? 'لا توجد عدادات مكررة' : 'Zero repeated defectives')}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* ── Defective Meters Live Table ── */}
           <div className="card-white" style={{ padding: 20, border: '1px solid #cbd5e1' }}>
@@ -1533,6 +1963,183 @@ export default function DefectMeters() {
                   <Printer size={13} />
                   {isArabic ? 'معاينة وطباعة التقرير' : 'Print Report'}
                 </button>
+              </div>
+            </div>
+
+            {/* Date / Time Filtering Toolbar */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 10,
+              padding: '10px 14px',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: 10,
+              marginBottom: 14
+            }}>
+              {/* Left: Mode Buttons & Date Pickers */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginInlineEnd: 4, color: 'var(--navy)', fontWeight: 800, fontSize: '0.78rem' }}>
+                  <Calendar size={15} color="#0284c7" />
+                  <span>{isArabic ? 'فلترة بالوقت والتاريخ:' : 'Time & Date Filter:'}</span>
+                </div>
+
+                {[
+                  { id: 'ALL', label: isArabic ? 'الكل' : 'All Time' },
+                  { id: 'TODAY', label: isArabic ? 'اليوم' : 'Today' },
+                  { id: 'WEEK', label: isArabic ? 'هذا الأسبوع' : 'This Week' },
+                  { id: 'CUSTOM_DATE', label: isArabic ? 'تحديد تاريخ' : 'Specific Date' },
+                  { id: 'RANGE', label: isArabic ? 'نطاق زمني' : 'Date Range' }
+                ].map(tab => {
+                  const isActive = trackerDateMode === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setTrackerDateMode(tab.id)}
+                      style={{
+                        padding: '5px 12px',
+                        borderRadius: 6,
+                        fontSize: '0.76rem',
+                        fontWeight: isActive ? 800 : 600,
+                        cursor: 'pointer',
+                        border: isActive ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                        background: isActive ? '#e0f2fe' : '#ffffff',
+                        color: isActive ? '#0369a1' : '#475569',
+                        transition: 'all 0.15s ease',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
+
+                {/* Specific Date Picker */}
+                {trackerDateMode === 'CUSTOM_DATE' && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#ffffff', padding: '3px 8px', borderRadius: 6, border: '1.5px solid #0284c7' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
+                      {isArabic ? 'التاريخ:' : 'Date:'}
+                    </span>
+                    <input
+                      type="date"
+                      value={trackerCustomDate}
+                      onChange={e => setTrackerCustomDate(e.target.value)}
+                      style={{
+                        border: 'none',
+                        outline: 'none',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        color: 'var(--navy)',
+                        background: 'transparent',
+                        cursor: 'pointer'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Date Range Pickers */}
+                {trackerDateMode === 'RANGE' && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#ffffff', padding: '3px 10px', borderRadius: 6, border: '1.5px solid #0284c7' }}>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
+                        {isArabic ? 'من:' : 'From:'}
+                      </span>
+                      <input
+                        type="date"
+                        value={trackerStartDate}
+                        onChange={e => setTrackerStartDate(e.target.value)}
+                        style={{
+                          border: 'none',
+                          outline: 'none',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          color: 'var(--navy)',
+                          background: 'transparent',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
+                    <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>—</span>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
+                        {isArabic ? 'إلى:' : 'To:'}
+                      </span>
+                      <input
+                        type="date"
+                        value={trackerEndDate}
+                        onChange={e => setTrackerEndDate(e.target.value)}
+                        style={{
+                          border: 'none',
+                          outline: 'none',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          color: 'var(--navy)',
+                          background: 'transparent',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Reset button if date filter is active */}
+                {trackerDateMode !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setTrackerDateMode('ALL')}
+                    title={isArabic ? 'إلغاء فلترة التاريخ' : 'Clear date filter'}
+                    style={{
+                      padding: '4px 8px',
+                      borderRadius: 6,
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: '1px solid #fca5a5',
+                      background: '#fef2f2',
+                      color: '#b91c1c',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4
+                    }}
+                  >
+                    <RotateCcw size={11} />
+                    {isArabic ? 'إلغاء الفلترة' : 'Clear'}
+                  </button>
+                )}
+              </div>
+
+              {/* Right: Summary badges */}
+              <div style={{ fontSize: '0.74rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                {trackerDateMode === 'TODAY' && (
+                  <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
+                    {isArabic ? `📅 اليوم (${getTodayDateStr()})` : `📅 Today (${getTodayDateStr()})`}
+                  </span>
+                )}
+                {trackerDateMode === 'WEEK' && (
+                  <span style={{ background: '#ecfeff', color: '#0e7490', border: '1px solid #a5f3fc', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
+                    {isArabic ? `📆 آخر 7 أيام (${getDaysAgoDateStr(6)} إلى ${getTodayDateStr()})` : `📆 Last 7 Days (${getDaysAgoDateStr(6)} to ${getTodayDateStr()})`}
+                  </span>
+                )}
+                {trackerDateMode === 'CUSTOM_DATE' && trackerCustomDate && (
+                  <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
+                    {isArabic ? `🗓️ تاريخ: ${trackerCustomDate}` : `🗓️ Date: ${trackerCustomDate}`}
+                  </span>
+                )}
+                {trackerDateMode === 'RANGE' && (
+                  <span style={{ background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
+                    {isArabic ? `⏳ الفترة: ${trackerStartDate || '...'} إلى ${trackerEndDate || '...'}` : `⏳ Period: ${trackerStartDate || '...'} to ${trackerEndDate || '...'}`}
+                  </span>
+                )}
+                <span style={{ fontWeight: 800, color: 'var(--navy)', background: '#ffffff', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: 6 }}>
+                  {isArabic 
+                    ? `المعروض: ${filteredDefectiveMeters.length} من أصل ${defectiveMeters.length}` 
+                    : `Showing: ${filteredDefectiveMeters.length} of ${defectiveMeters.length}`}
+                </span>
               </div>
             </div>
 
@@ -2400,6 +3007,45 @@ export default function DefectMeters() {
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
+
+                <select
+                  value={analyticsDateMode}
+                  onChange={e => setAnalyticsDateMode(e.target.value)}
+                  style={{ padding: '5px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
+                >
+                  <option value="ALL">{isArabic ? 'جميع التواريخ' : 'All Dates'}</option>
+                  <option value="TODAY">{isArabic ? 'اليوم' : 'Today'}</option>
+                  <option value="WEEK">{isArabic ? 'هذا الأسبوع' : 'This Week'}</option>
+                  <option value="CUSTOM_DATE">{isArabic ? 'تحديد تاريخ' : 'Specific Date'}</option>
+                  <option value="RANGE">{isArabic ? 'نطاق زمني' : 'Date Range'}</option>
+                </select>
+
+                {analyticsDateMode === 'CUSTOM_DATE' && (
+                  <input
+                    type="date"
+                    value={analyticsCustomDate}
+                    onChange={e => setAnalyticsCustomDate(e.target.value)}
+                    style={{ padding: '4px 8px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+                  />
+                )}
+
+                {analyticsDateMode === 'RANGE' && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      type="date"
+                      value={analyticsStartDate}
+                      onChange={e => setAnalyticsStartDate(e.target.value)}
+                      style={{ padding: '4px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+                    />
+                    <span style={{ fontSize: '0.72rem', color: '#64748b' }}>-</span>
+                    <input
+                      type="date"
+                      value={analyticsEndDate}
+                      onChange={e => setAnalyticsEndDate(e.target.value)}
+                      style={{ padding: '4px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2546,6 +3192,10 @@ export default function DefectMeters() {
           isOpen={showReportModal}
           onClose={() => setShowReportModal(false)}
           defectiveMeters={defectiveMeters}
+          initialDateMode={trackerDateMode}
+          initialCustomDate={trackerCustomDate}
+          initialStartDate={trackerStartDate}
+          initialEndDate={trackerEndDate}
           trackerKPIs={trackerKPIs}
           overallMetrics={overallMetrics}
           actualTarget={actualTarget}
@@ -2563,6 +3213,10 @@ function DefectiveMetersReportModal({
   isOpen,
   onClose,
   defectiveMeters,
+  initialDateMode = 'ALL',
+  initialCustomDate = '',
+  initialStartDate = '',
+  initialEndDate = '',
   trackerKPIs,
   overallMetrics,
   actualTarget,
@@ -2572,6 +3226,10 @@ function DefectiveMetersReportModal({
 }) {
   const [reportStageFilter, setReportStageFilter] = useState('ALL');
   const [reportStatusFilter, setReportStatusFilter] = useState('ALL');
+  const [reportDateMode, setReportDateMode] = useState(initialDateMode);
+  const [reportCustomDate, setReportCustomDate] = useState(initialCustomDate || getTodayDateStr());
+  const [reportStartDate, setReportStartDate] = useState(initialStartDate || getDaysAgoDateStr(6));
+  const [reportEndDate, setReportEndDate] = useState(initialEndDate || getTodayDateStr());
 
   if (!isOpen) return null;
 
@@ -2582,13 +3240,26 @@ function DefectiveMetersReportModal({
     if (reportStatusFilter === 'RETURNED_TO_LINE' && m.status !== 'RETURNED_TO_LINE') return false;
     if (reportStatusFilter === 'SCRAPPED_KO' && m.status !== 'SCRAPPED_KO') return false;
     if (reportStatusFilter === 'RECURRING' && !(m.entry_count > 1)) return false;
+
+    const meterDateStr = getMeterDateStr(m);
+    if (reportDateMode === 'TODAY' && meterDateStr !== getTodayDateStr()) return false;
+    if (reportDateMode === 'WEEK') {
+      const today = getTodayDateStr();
+      const weekStart = getDaysAgoDateStr(6);
+      if (meterDateStr < weekStart || meterDateStr > today) return false;
+    }
+    if (reportDateMode === 'CUSTOM_DATE' && reportCustomDate && meterDateStr !== reportCustomDate) return false;
+    if (reportDateMode === 'RANGE') {
+      if (reportStartDate && meterDateStr < reportStartDate) return false;
+      if (reportEndDate && meterDateStr > reportEndDate) return false;
+    }
     return true;
   });
 
-  // Calculate 8-station counts
+  // Calculate 8-station counts from filtered view
   const stationCounts = {};
   STAGES.forEach(s => { stationCounts[s.id] = 0; });
-  defectiveMeters.forEach(m => {
+  filteredList.forEach(m => {
     const matched = findStage(m.stage);
     if (matched && stationCounts[matched.id] !== undefined) {
       stationCounts[matched.id]++;
@@ -2657,6 +3328,46 @@ function DefectiveMetersReportModal({
               <option value="SCRAPPED_KO">{isArabic ? 'تالف نهائي (Scrapped)' : 'Scrapped KO'}</option>
               <option value="RECURRING">{isArabic ? 'المتكررة فقط (2+)' : 'Recurring Only'}</option>
             </select>
+
+            {/* Filter by Date Mode */}
+            <select
+              value={reportDateMode}
+              onChange={e => setReportDateMode(e.target.value)}
+              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700, color: '#0369a1', background: '#f0f9ff' }}
+            >
+              <option value="ALL">{isArabic ? 'جميع التواريخ' : 'All Time'}</option>
+              <option value="TODAY">{isArabic ? 'اليوم' : 'Today'}</option>
+              <option value="WEEK">{isArabic ? 'هذا الأسبوع (آخر 7 أيام)' : 'This Week (7 Days)'}</option>
+              <option value="CUSTOM_DATE">{isArabic ? 'تحديد تاريخ' : 'Specific Date'}</option>
+              <option value="RANGE">{isArabic ? 'نطاق زمني' : 'Date Range'}</option>
+            </select>
+
+            {reportDateMode === 'CUSTOM_DATE' && (
+              <input
+                type="date"
+                value={reportCustomDate}
+                onChange={e => setReportCustomDate(e.target.value)}
+                style={{ padding: '3px 8px', fontSize: '0.76rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+              />
+            )}
+
+            {reportDateMode === 'RANGE' && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  type="date"
+                  value={reportStartDate}
+                  onChange={e => setReportStartDate(e.target.value)}
+                  style={{ padding: '3px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+                />
+                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>-</span>
+                <input
+                  type="date"
+                  value={reportEndDate}
+                  onChange={e => setReportEndDate(e.target.value)}
+                  style={{ padding: '3px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
+                />
+              </div>
+            )}
           </div>
 
           <button
@@ -2706,8 +3417,18 @@ function DefectiveMetersReportModal({
           {/* Compact Metadata Row */}
           <div className="report-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #cbd5e1', marginBottom: 4 }}>
             <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('date')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{todayStr}</span>
+              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{isArabic ? 'نطاق / تاريخ التقرير' : 'Report Date / Range'}</span>
+              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>
+                {reportDateMode === 'TODAY' 
+                  ? (isArabic ? `اليوم (${getTodayDateStr()})` : `Today (${getTodayDateStr()})`)
+                  : reportDateMode === 'WEEK'
+                    ? (isArabic ? `آخر 7 أيام (${getDaysAgoDateStr(6)} إلى ${getTodayDateStr()})` : `Past 7 Days`)
+                    : reportDateMode === 'CUSTOM_DATE'
+                      ? reportCustomDate
+                      : reportDateMode === 'RANGE'
+                        ? `${reportStartDate} - ${reportEndDate}`
+                        : (isArabic ? `شامل (${todayStr})` : `All Records (${todayStr})`)}
+              </span>
             </div>
 
             <div className="report-meta-item">
