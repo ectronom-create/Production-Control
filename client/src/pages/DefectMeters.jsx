@@ -1,3704 +1,462 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { 
-  AlertTriangle, 
-  CheckCircle2, 
-  RefreshCw, 
-  Layers, 
-  TrendingUp, 
-  Filter, 
-  Sliders, 
-  Edit3, 
-  Save, 
-  RotateCcw, 
-  Search, 
-  Eye, 
-  X, 
-  HelpCircle,
-  Hash,
-  Activity,
-  ArrowRight,
-  ArrowLeft,
-  QrCode,
-  Scan,
-  Wrench,
-  RotateCw,
-  ShieldAlert,
-  ArrowUpRight,
-  History,
-  Check,
-  Plus,
-  Trash2,
-  Tag,
-  UserCheck,
-  Clock,
-  Printer,
-  FileText,
-  Calendar
-} from 'lucide-react';
-import { supabase } from '../supabaseClient';
-import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
-import { printReportDocument } from '../utils/printReport';
+import React from "react";
+import { CheckCircle2, Printer, RefreshCw, Scan, Sliders } from "lucide-react";
+import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 
-const DEFAULT_ACTUAL_DEFECTS = 4250;
-const STORAGE_ACTUAL_KEY = 'ectron_defect_actual_count';
-const LOCAL_DEFECTIVE_METERS_KEY = 'ectron_defective_meters_cache';
+// Extracted Domain Constants & Helpers (re-exported for backward compatibility)
+import {
+  STAGES,
+  STAGE_IDS,
+  findStage,
+  DEFAULT_ACTUAL_DEFECTS,
+  STORAGE_ACTUAL_KEY,
+  LOCAL_DEFECTIVE_METERS_KEY,
+  COMMON_DEFECT_CODES,
+} from "../constants/defectStages";
+import {
+  getTodayDateStr,
+  getDaysAgoDateStr,
+  getMeterDateStr,
+} from "../utils/defectDateUtils";
 
-// ── Standard 8 Production Stations Sequence ──────────────────────────────────
-const STAGES = [
-  { id: 'Assembly', name: 'Assembly', arabic: 'التجميع', color: '#0284c7', bg: '#e0f2fe', border: '#38bdf8', icon: '🔧', num: 1 },
-  { id: 'Insulation', name: 'Insulation', arabic: 'العزل', color: '#7c3aed', bg: '#f3e8ff', border: '#c084fc', icon: '⚡', num: 2 },
-  { id: 'RF', name: 'RF', arabic: 'التردد اللاسلكي', color: '#0891b2', bg: '#cffafe', border: '#22d3ee', icon: '📡', num: 3 },
-  { id: 'Calibration', name: 'Calibration', arabic: 'المعايرة', color: '#059669', bg: '#d1fae5', border: '#34d399', icon: '⚖️', num: 4 },
-  { id: 'Multin test', name: 'Multin test', arabic: 'الفحص الشامل', color: '#d97706', bg: '#fef3c7', border: '#fbbf24', icon: '🔬', num: 5 },
-  { id: 'Perso', name: 'Perso', arabic: 'التخصيص', color: '#e11d48', bg: '#ffe4e6', border: '#fb7185', icon: '🏷️', num: 6 },
-  { id: 'Packaging', name: 'Packaging', arabic: 'التغليف', color: '#475569', bg: '#f1f5f9', border: '#94a3b8', icon: '📦', num: 7 },
-  { id: 'Firmware update', name: 'Firmware update', arabic: 'تحديث الفيرموير', color: '#06b6d4', bg: '#ecfeff', border: '#a5f3fc', icon: '💾', num: 8 }
-];
+// Extracted Sub-Components
+import TrackerIntakeStepper from "../components/defect-meters/TrackerIntakeStepper";
+import TrackerKPICards from "../components/defect-meters/TrackerKPICards";
+import TrackerTableView from "../components/defect-meters/TrackerTableView";
+import RepairModal from "../components/defect-meters/RepairModal";
+import LifecycleModal from "../components/defect-meters/LifecycleModal";
+import AdminEditModal from "../components/defect-meters/AdminEditModal";
+import DefectAnalyticsTab from "../components/defect-meters/DefectAnalyticsTab";
+import DefectiveMetersReportModal from "../components/defect-meters/DefectiveMetersReportModal";
 
-const STAGE_IDS = STAGES.map(s => s.id);
+// Extracted Data & Workflow Custom Hook
+import { useDefectMetersData } from "../hooks/useDefectMetersData";
 
-// Seamlessly resolve both 'Multin test' and 'Multi-Test'
-export function findStage(stageId) {
-  if (!stageId) return STAGES[0];
-  const s = STAGES.find(st => 
-    st.id.toLowerCase() === stageId.toLowerCase() || 
-    (stageId.toLowerCase().includes('multi') && st.id === 'Multin test')
-  );
-  return s || { id: stageId, name: stageId, arabic: stageId, color: '#334155', bg: '#f1f5f9', border: '#cbd5e1', icon: '•', num: '-' };
-}
-
-const COMMON_DEFECT_CODES = [
-  '0',
-  '-640',
-  'E-101',
-  'KO_COMM',
-  'RF_NO_SIG',
-  'CALIB_OFFSET',
-  'DISP_ERR',
-  'FLASH_ERR',
-  'HIGH_CURRENT'
-];
-
-export const getTodayDateStr = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-export const getDaysAgoDateStr = (daysAgo) => {
-  const d = new Date();
-  d.setDate(d.getDate() - daysAgo);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-};
-
-export const getMeterDateStr = (m) => {
-  if (!m) return '';
-  const raw = m.logged_at || m.created_at || (Array.isArray(m.history) && m.history[0]?.logged_at) || m.date;
-  if (!raw) return '';
-  
-  if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) {
-    return raw.trim();
-  }
-  
-  try {
-    const d = new Date(raw);
-    if (isNaN(d.getTime())) {
-      if (typeof raw === 'string' && raw.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
-        return raw.slice(0, 10);
-      }
-      return '';
-    }
-    const y = d.getFullYear();
-    const mth = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${mth}-${day}`;
-  } catch {
-    return '';
-  }
+export {
+  STAGES,
+  STAGE_IDS,
+  findStage,
+  DEFAULT_ACTUAL_DEFECTS,
+  STORAGE_ACTUAL_KEY,
+  LOCAL_DEFECTIVE_METERS_KEY,
+  COMMON_DEFECT_CODES,
+  getTodayDateStr,
+  getDaysAgoDateStr,
+  getMeterDateStr,
 };
 
 export default function DefectMeters() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
-  const isAdmin = user?.access === 'admin';
-  const isViewer = user?.access === 'viewer';
 
-  // ── Tab Navigation: TRACKER vs ANALYTICS ───────────────────────────────────
-  const [activeTab, setActiveTab] = useState('TRACKER');
-
-  // ── Tab 1: Defective Meters Tracker State ─────────────────────────────────
-  const [defectiveMeters, setDefectiveMeters] = useState([]);
-  const [loadingDefects, setLoadingDefects] = useState(true);
-  const [isSubmittingDefect, setIsSubmittingDefect] = useState(false);
-  const [trackerSuccessMsg, setTrackerSuccessMsg] = useState('');
-
-  // ── Interactive Guided Intake Stepper (1 = Scan, 2 = Select Stage, 3 = Code)
-  const [wizardStep, setWizardStep] = useState(1);
-  const [scanSerial, setScanSerial] = useState('');
-  const [selectedStage, setSelectedStage] = useState('Assembly');
-  const [defectCode, setDefectCode] = useState('');
-  const [loggedBy, setLoggedBy] = useState(user?.name || 'Supervisor');
-  const [defectNotes, setDefectNotes] = useState('');
-
-  const serialInputRef = useRef(null);
-  const codeInputRef = useRef(null);
-
-  // Filters for Tracker Table
-  const [trackerSearch, setTrackerSearch] = useState('');
-  const [trackerStageFilter, setTrackerStageFilter] = useState('ALL');
-  const [trackerStatusFilter, setTrackerStatusFilter] = useState('ALL');
-  const [onlyRecurringFilter, setOnlyRecurringFilter] = useState(false);
-  const [trackerDateMode, setTrackerDateMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'WEEK' | 'CUSTOM_DATE' | 'RANGE'
-  const [trackerCustomDate, setTrackerCustomDate] = useState(() => getTodayDateStr());
-  const [trackerStartDate, setTrackerStartDate] = useState(() => getDaysAgoDateStr(6));
-  const [trackerEndDate, setTrackerEndDate] = useState(() => getTodayDateStr());
-
-  // Modals for Tracker
-  const [repairModalMeter, setRepairModalMeter] = useState(null);
-  const [repairTechName, setRepairTechName] = useState(user?.name || '');
-  const [repairActionTaken, setRepairActionTaken] = useState('');
-  const [repairDestination, setRepairDestination] = useState('Assembly');
-  const [isSubmittingRepair, setIsSubmittingRepair] = useState(false);
-
-  const [lifecycleModalMeter, setLifecycleModalMeter] = useState(null);
-
-  // ── Admin Edit Defect Meter State ──────────────────────────────────────────
-  const [adminEditModalMeter, setAdminEditModalMeter] = useState(null);
-  const [editFormData, setEditFormData] = useState({
-    serial_number: '',
-    stage: 'Assembly',
-    defect_code: '',
-    status: 'UNDER_INSPECTION',
-    entry_count: 1,
-    return_count: 0,
-    logged_by: '',
-    notes: '',
-    repaired_by: '',
-    repair_notes: '',
-    return_destination: ''
-  });
-  const [isSavingAdminEdit, setIsSavingAdminEdit] = useState(false);
-
-  // ── Tab 2: Calibration & Statistical Analytics State ──────────────────────
-  const [records, setRecords] = useState([]);
-  const [loadingRecords, setLoadingRecords] = useState(true);
-  const [actualTarget, setActualTarget] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_ACTUAL_KEY);
-    return saved ? parseInt(saved, 10) || DEFAULT_ACTUAL_DEFECTS : DEFAULT_ACTUAL_DEFECTS;
-  });
-  const [isEditingTarget, setIsEditingTarget] = useState(false);
-  const [targetInput, setTargetInput] = useState(String(actualTarget));
-
-  const [selectedMonth, setSelectedMonth] = useState('ALL');
-  const [selectedTeam, setSelectedTeam] = useState('ALL');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [analyticsDateMode, setAnalyticsDateMode] = useState('ALL'); // 'ALL' | 'TODAY' | 'WEEK' | 'CUSTOM_DATE' | 'RANGE'
-  const [analyticsCustomDate, setAnalyticsCustomDate] = useState(() => getTodayDateStr());
-  const [analyticsStartDate, setAnalyticsStartDate] = useState(() => getDaysAgoDateStr(6));
-  const [analyticsEndDate, setAnalyticsEndDate] = useState(() => getTodayDateStr());
-  const [selectedShiftForModal, setSelectedShiftForModal] = useState(null);
-  const [showReportModal, setShowReportModal] = useState(false);
-
-  // Auto-focus inputs according to active wizard step
-  useEffect(() => {
-    if (wizardStep === 1) {
-      setTimeout(() => serialInputRef.current?.focus(), 80);
-    } else if (wizardStep === 3) {
-      setTimeout(() => {
-        codeInputRef.current?.focus();
-        codeInputRef.current?.select();
-      }, 80);
-    }
-  }, [wizardStep]);
-
-  // Update logged by default when user is available
-  useEffect(() => {
-    if (user?.name && loggedBy === 'Supervisor') {
-      setLoggedBy(user.name);
-    }
-  }, [user, loggedBy]);
-
-  // ── Load Defective Meters from Supabase / LocalStorage ───────────────────
-  const fetchDefectiveMeters = useCallback(async () => {
-    setLoadingDefects(true);
-    try {
-      const { data, error } = await supabase
-        .from('defective_meters')
-        .select('*')
-        .order('id', { ascending: false });
-
-      if (error) {
-        const local = JSON.parse(localStorage.getItem(LOCAL_DEFECTIVE_METERS_KEY) || '[]');
-        setDefectiveMeters(local);
-      } else {
-        setDefectiveMeters(data || []);
-        localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(data || []));
-      }
-    } catch {
-      const local = JSON.parse(localStorage.getItem(LOCAL_DEFECTIVE_METERS_KEY) || '[]');
-      setDefectiveMeters(local);
-    } finally {
-      setLoadingDefects(false);
-    }
-  }, []);
-
-  // ── Load Production Records for Analytics ───────────────────────────────
-  const fetchProductionRecords = useCallback(async () => {
-    setLoadingRecords(true);
-    try {
-      const { data, error } = await supabase
-        .from('production_records')
-        .select('*')
-        .order('date', { ascending: false })
-        .order('id', { ascending: false });
-
-      if (!error && data) {
-        setRecords(data);
-      }
-    } catch (e) {
-      console.warn('Could not fetch production records:', e);
-    } finally {
-      setLoadingRecords(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchDefectiveMeters();
-    fetchProductionRecords();
-  }, [fetchDefectiveMeters, fetchProductionRecords]);
-
-  // ── Real-Time Serial Check (Has this meter entered previously?) ───────────
-  const detectedPreviousMeter = useMemo(() => {
-    const trimmed = scanSerial.trim();
-    if (!trimmed) return null;
-    return defectiveMeters.find(m => m.serial_number && m.serial_number.toLowerCase() === trimmed.toLowerCase()) || null;
-  }, [scanSerial, defectiveMeters]);
-
-  // ── Strict Cycle Validation: (Defect Entry -> Repair & Return -> Next Defect Entry) ──
-  // A meter CANNOT be registered twice in a row without being repaired first!
-  const meterBlockReason = useMemo(() => {
-    if (!detectedPreviousMeter) return null;
-
-    // 1. Permanently scrapped / KO meter cannot be re-registered
-    if (detectedPreviousMeter.status === 'SCRAPPED_KO') {
-      return {
-        type: 'SCRAPPED',
-        title: isArabic ? '🛑 عداد مستبعد نهائياً (Scrap / KO)' : '🛑 Permanently Scrapped Meter',
-        message: isArabic 
-          ? `هذا العداد مستبعد نهائياً وتالف دائم ولا يمكن إعادة تسجيله أو إدخاله للإنتاج مجدداً.`
-          : `This meter was marked as permanently SCRAPPED/KO and cannot be re-registered in production.`,
-        rule: isArabic
-          ? 'حالة العداد: تالف دائم (Scrapped)'
-          : 'Status: Permanently Scrapped'
-      };
-    }
-
-    // 2. If status is NOT RETURNED_TO_LINE, or return_count < entry_count: meter is still pending repair!
-    const isRepairedAndReturned = detectedPreviousMeter.status === 'RETURNED_TO_LINE' ||
-      ((detectedPreviousMeter.return_count || 0) >= (detectedPreviousMeter.entry_count || 1));
-
-    if (!isRepairedAndReturned) {
-      return {
-        type: 'PENDING_REPAIR',
-        title: isArabic ? '🛑 غير مسموح بالتسجيل: العداد بانتظار الصيانة والإصلاح!' : '🛑 Registration Blocked: Meter Pending Repair!',
-        message: isArabic
-          ? `العداد مسجل مسبقاً في محطة (${detectedPreviousMeter.stage}) بكود (${detectedPreviousMeter.defect_code}) ولم تتم صيانته بعد.`
-          : `Meter is already logged at (${detectedPreviousMeter.stage}) with code (${detectedPreviousMeter.defect_code}) and has not been repaired yet.`,
-        rule: isArabic
-          ? 'التسلسل الإلزامي هو: (تسجيل عطل ← صيانة وإصلاح ← تسجيل عطل). يجب إتمام الصيانة والإعادة لخط الإنتاج أولاً قبل تسجيل أي عطل جديد.'
-          : 'Strict sequence rule: (Defect Entry -> Repair & Return -> Next Defect Entry). You must complete repair and return before logging another defect.'
-      };
-    }
-
-    return null;
-  }, [detectedPreviousMeter, isArabic]);
-
-  // ── Handle Registering a Defective Meter ──────────────────────────────────
-  const handleRegisterDefective = async (e) => {
-    if (e) e.preventDefault();
-    if (isViewer) {
-      alert('Viewers have read-only access.');
-      return;
-    }
-
-    const cleanSerial = scanSerial.trim();
-    if (!cleanSerial) {
-      alert(isArabic ? 'يرجى إدخال أو مسح سيريال العداد أولاً.' : 'Please enter or scan meter serial number.');
-      setWizardStep(1);
-      return;
-    }
-
-    // ── STRICT SEQUENCING VALIDATION CHECK ──
-    if (meterBlockReason) {
-      alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
-      setWizardStep(1);
-      return;
-    }
-
-    if (!defectCode.trim()) {
-      alert(isArabic ? 'يرجى إدخال أو اختيار كود العطل (أو 0 للأسمبلي خارج نظام التتبع).' : 'Please enter or select a defect code (or 0 for Assembly without Traceability).');
-      setWizardStep(3);
-      return;
-    }
-
-    setIsSubmittingDefect(true);
-    setTrackerSuccessMsg('');
-
-    const nowIso = new Date().toISOString();
-    let updatedMeterRecord = null;
-    let isRecurring = false;
-
-    if (detectedPreviousMeter) {
-      // Meter has entered before: increment entry count and append new cycle to history
-      isRecurring = true;
-      const nextEntryCount = (detectedPreviousMeter.entry_count || 1) + 1;
-      const historyList = Array.isArray(detectedPreviousMeter.history) ? [...detectedPreviousMeter.history] : [];
-      
-      historyList.push({
-        cycle: nextEntryCount,
-        type: 'ENTRY',
-        stage: selectedStage,
-        defect_code: defectCode.trim(),
-        logged_by: loggedBy.trim() || 'Supervisor',
-        logged_at: nowIso,
-        notes: defectNotes.trim()
-      });
-
-      updatedMeterRecord = {
-        ...detectedPreviousMeter,
-        stage: selectedStage,
-        defect_code: defectCode.trim(),
-        logged_by: loggedBy.trim() || 'Supervisor',
-        logged_at: nowIso,
-        status: 'UNDER_INSPECTION',
-        entry_count: nextEntryCount,
-        notes: defectNotes.trim() || detectedPreviousMeter.notes,
-        history: historyList,
-        updated_at: nowIso
-      };
-    } else {
-      // New meter entering for the first time
-      updatedMeterRecord = {
-        serial_number: cleanSerial,
-        stage: selectedStage,
-        defect_code: defectCode.trim(),
-        logged_by: loggedBy.trim() || 'Supervisor',
-        logged_at: nowIso,
-        status: 'UNDER_INSPECTION',
-        entry_count: 1,
-        return_count: 0,
-        repair_notes: '',
-        repaired_by: '',
-        repaired_at: null,
-        return_destination: '',
-        notes: defectNotes.trim(),
-        history: [{
-          cycle: 1,
-          type: 'ENTRY',
-          stage: selectedStage,
-          defect_code: defectCode.trim(),
-          logged_by: loggedBy.trim() || 'Supervisor',
-          logged_at: nowIso,
-          notes: defectNotes.trim()
-        }],
-        created_at: nowIso,
-        updated_at: nowIso
-      };
-    }
-
-    try {
-      if (detectedPreviousMeter?.id) {
-        // Update existing record in Supabase
-        const { error } = await supabase
-          .from('defective_meters')
-          .update(updatedMeterRecord)
-          .eq('id', detectedPreviousMeter.id);
-
-        if (error) throw error;
-        setDefectiveMeters(prev => prev.map(m => m.id === detectedPreviousMeter.id ? updatedMeterRecord : m));
-      } else {
-        // Insert new record in Supabase
-        const { data, error } = await supabase
-          .from('defective_meters')
-          .insert([updatedMeterRecord])
-          .select();
-
-        if (error) throw error;
-        const saved = data && data[0] ? data[0] : { ...updatedMeterRecord, id: Date.now() };
-        setDefectiveMeters(prev => [saved, ...prev]);
-      }
-    } catch {
-      // Fallback local storage
-      const fallbackId = detectedPreviousMeter?.id || Date.now();
-      const finalLocalRecord = { ...updatedMeterRecord, id: fallbackId };
-      const nextList = detectedPreviousMeter
-        ? defectiveMeters.map(m => m.id === detectedPreviousMeter.id ? finalLocalRecord : m)
-        : [finalLocalRecord, ...defectiveMeters];
-
-      setDefectiveMeters(nextList);
-      localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
-    } finally {
-      setIsSubmittingDefect(false);
-      setScanSerial('');
-      setDefectNotes('');
-      setDefectCode('');
-      setWizardStep(1); // Reset immediately to Step 1 for next scan
-      setTrackerSuccessMsg(
-        isRecurring
-          ? (isArabic ? `⚠️ تم تسجيل دخول مكرر للعداد (${cleanSerial}) للمرة (${updatedMeterRecord.entry_count}) كود (${defectCode}) في محطة (${selectedStage})!` : `⚠️ Recurring defect entry recorded for (${cleanSerial}) - Cycle #${updatedMeterRecord.entry_count} at (${selectedStage})!`)
-          : (isArabic ? `✅ تم تسجيل العداد (${cleanSerial}) بنجاح في مرحلة (${selectedStage}) بكود (${defectCode}).` : `✅ Meter (${cleanSerial}) logged successfully at (${selectedStage}) with code (${defectCode}).`)
-      );
-      setTimeout(() => setTrackerSuccessMsg(''), 6000);
-    }
-  };
-
-  // ── Open Repair Modal ─────────────────────────────────────────────────────
-  const openRepairModal = (meter) => {
-    setRepairModalMeter(meter);
-    setRepairTechName(user?.name || '');
-    setRepairActionTaken('');
-    setRepairDestination(meter.stage || 'Assembly');
-  };
-
-  // ── Confirm Repair & Return to Production Line ────────────────────────────
-  const handleConfirmRepair = async () => {
-    if (!repairModalMeter) return;
-    if (!repairActionTaken.trim()) {
-      alert(isArabic ? 'يرجى توضيح الإجراء التصحيحي أو القطع المستبدلة.' : 'Please enter repair action or replaced components.');
-      return;
-    }
-
-    setIsSubmittingRepair(true);
-    const nowIso = new Date().toISOString();
-    const nextReturnCount = (repairModalMeter.return_count || 0) + 1;
-    const historyList = Array.isArray(repairModalMeter.history) ? [...repairModalMeter.history] : [];
-
-    historyList.push({
-      cycle: repairModalMeter.entry_count || 1,
-      type: 'RETURN_TO_LINE',
-      technician: repairTechName.trim() || 'Technician',
-      action_taken: repairActionTaken.trim(),
-      destination: repairDestination,
-      returned_at: nowIso
-    });
-
-    const updated = {
-      ...repairModalMeter,
-      status: 'RETURNED_TO_LINE',
-      return_count: nextReturnCount,
-      repaired_by: repairTechName.trim() || 'Technician',
-      repair_notes: repairActionTaken.trim(),
-      repaired_at: nowIso,
-      return_destination: repairDestination,
-      history: historyList,
-      updated_at: nowIso
-    };
-
-    try {
-      const { error } = await supabase
-        .from('defective_meters')
-        .update(updated)
-        .eq('id', repairModalMeter.id);
-
-      if (error) throw error;
-
-      setDefectiveMeters(prev => prev.map(m => m.id === repairModalMeter.id ? updated : m));
-    } catch {
-      const nextList = defectiveMeters.map(m => m.id === repairModalMeter.id ? updated : m);
-      setDefectiveMeters(nextList);
-      localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
-    } finally {
-      setIsSubmittingRepair(false);
-      setRepairModalMeter(null);
-      setTrackerSuccessMsg(
-        isArabic 
-          ? `✅ تم توثيق إصلاح العداد (${repairModalMeter.serial_number}) وإعادته لخط الإنتاج بنجاح (خروج رقم ${nextReturnCount}).`
-          : `✅ Meter (${repairModalMeter.serial_number}) marked as repaired & returned to line (Return #${nextReturnCount}).`
-      );
-      setTimeout(() => setTrackerSuccessMsg(''), 6000);
-    }
-  };
-
-  // ── Scrap / KO Permanent Action ───────────────────────────────────────────
-  const handleScrapMeter = async (meter) => {
-    const confirmMsg = isArabic
-      ? `هل أنت متأكد من استبعاد العداد (${meter.serial_number}) نهائياً كـ (Scrap / تالف دائم غير قابل للإصلاح)؟`
-      : `Are you sure you want to mark meter (${meter.serial_number}) as permanently Scrapped / KO?`;
-
-    if (!window.confirm(confirmMsg)) return;
-
-    const nowIso = new Date().toISOString();
-    const historyList = Array.isArray(meter.history) ? [...meter.history] : [];
-    historyList.push({
-      cycle: meter.entry_count || 1,
-      type: 'SCRAP_KO',
-      reason: 'Permanently unrepairable / scrapped after inspection',
-      by: user?.name || 'Supervisor',
-      at: nowIso
-    });
-
-    const updated = {
-      ...meter,
-      status: 'SCRAPPED_KO',
-      history: historyList,
-      updated_at: nowIso
-    };
-
-    try {
-      await supabase.from('defective_meters').update(updated).eq('id', meter.id);
-    } catch (e) {
-      console.warn('Scrap update error:', e);
-    }
-
-    const nextList = defectiveMeters.map(m => m.id === meter.id ? updated : m);
-    setDefectiveMeters(nextList);
-    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
-  };
-
-  // ── Delete Defect Record ──────────────────────────────────────────────────
-  const handleDeleteMeter = async (id) => {
-    if (!isAdmin) return;
-    if (!window.confirm('Delete this defective meter record completely?')) return;
-
-    try {
-      await supabase.from('defective_meters').delete().eq('id', id);
-    } catch (e) {
-      console.warn('Delete error:', e);
-    }
-
-    const nextList = defectiveMeters.filter(m => m.id !== id);
-    setDefectiveMeters(nextList);
-    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
-  };
-
-  // ── Admin Edit Functions ──────────────────────────────────────────────────
-  const openAdminEditModal = (meter) => {
-    if (!isAdmin) return;
-    setAdminEditModalMeter(meter);
-    setEditFormData({
-      serial_number: meter.serial_number || '',
-      stage: meter.stage || 'Assembly',
-      defect_code: meter.defect_code || '',
-      status: meter.status || 'UNDER_INSPECTION',
-      entry_count: meter.entry_count || 1,
-      return_count: meter.return_count || 0,
-      logged_by: meter.logged_by || '',
-      notes: meter.notes || '',
-      repaired_by: meter.repaired_by || '',
-      repair_notes: meter.repair_notes || '',
-      return_destination: meter.return_destination || ''
-    });
-  };
-
-  const handleSaveAdminEdit = async () => {
-    if (!adminEditModalMeter || !isAdmin) return;
-    const cleanSerial = editFormData.serial_number.trim();
-    if (!cleanSerial) {
-      alert(isArabic ? 'يرجى إدخال سيريال العداد.' : 'Please enter meter serial number.');
-      return;
-    }
-    if (!editFormData.defect_code.trim()) {
-      alert(isArabic ? 'يرجى إدخال كود العطل.' : 'Please enter defect code.');
-      return;
-    }
-
-    setIsSavingAdminEdit(true);
-    const nowIso = new Date().toISOString();
-
-    const updatedRecord = {
-      ...adminEditModalMeter,
-      serial_number: cleanSerial,
-      stage: editFormData.stage,
-      defect_code: editFormData.defect_code.trim(),
-      status: editFormData.status,
-      entry_count: parseInt(editFormData.entry_count, 10) || 1,
-      return_count: parseInt(editFormData.return_count, 10) || 0,
-      logged_by: editFormData.logged_by.trim() || 'Supervisor',
-      notes: editFormData.notes.trim(),
-      repaired_by: editFormData.repaired_by.trim(),
-      repair_notes: editFormData.repair_notes.trim(),
-      return_destination: editFormData.return_destination,
-      updated_at: nowIso
-    };
-
-    try {
-      const { error } = await supabase
-        .from('defective_meters')
-        .update(updatedRecord)
-        .eq('id', adminEditModalMeter.id);
-
-      if (error) throw error;
-
-      setDefectiveMeters(prev => prev.map(m => m.id === adminEditModalMeter.id ? updatedRecord : m));
-    } catch {
-      const nextList = defectiveMeters.map(m => m.id === adminEditModalMeter.id ? updatedRecord : m);
-      setDefectiveMeters(nextList);
-      localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
-    } finally {
-      setIsSavingAdminEdit(false);
-      setAdminEditModalMeter(null);
-      setTrackerSuccessMsg(
-        isArabic
-          ? `✅ تم تعديل بيانات العداد (${cleanSerial}) بنجاح بواسطة الأدمن.`
-          : `✅ Defective meter (${cleanSerial}) updated successfully by Admin.`
-      );
-      setTimeout(() => setTrackerSuccessMsg(''), 5000);
-    }
-  };
-
-  // ── Filtered Defective Meters List ────────────────────────────────────────
-  const filteredDefectiveMeters = useMemo(() => {
-    const todayStr = getTodayDateStr();
-    const weekStartStr = getDaysAgoDateStr(6);
-
-    return defectiveMeters.filter(m => {
-      const q = trackerSearch.trim().toLowerCase();
-      const matchSearch = q === '' ||
-        (m.serial_number && m.serial_number.toLowerCase().includes(q)) ||
-        (m.defect_code && m.defect_code.toLowerCase().includes(q)) ||
-        (m.logged_by && m.logged_by.toLowerCase().includes(q)) ||
-        (m.repaired_by && m.repaired_by.toLowerCase().includes(q));
-
-      const matchStage = trackerStageFilter === 'ALL' || m.stage === trackerStageFilter;
-      const matchStatus = trackerStatusFilter === 'ALL' || m.status === trackerStatusFilter;
-      const matchRecurring = !onlyRecurringFilter || (m.entry_count > 1);
-
-      // Date Filtering (Day, Week, Specific Date, Date Range)
-      const meterDateStr = getMeterDateStr(m);
-      let matchDate = true;
-      if (trackerDateMode === 'TODAY') {
-        matchDate = meterDateStr === todayStr;
-      } else if (trackerDateMode === 'WEEK') {
-        matchDate = meterDateStr >= weekStartStr && meterDateStr <= todayStr;
-      } else if (trackerDateMode === 'CUSTOM_DATE') {
-        matchDate = !trackerCustomDate || meterDateStr === trackerCustomDate;
-      } else if (trackerDateMode === 'RANGE') {
-        if (trackerStartDate && trackerEndDate) {
-          matchDate = meterDateStr >= trackerStartDate && meterDateStr <= trackerEndDate;
-        } else if (trackerStartDate) {
-          matchDate = meterDateStr >= trackerStartDate;
-        } else if (trackerEndDate) {
-          matchDate = meterDateStr <= trackerEndDate;
-        }
-      }
-
-      return matchSearch && matchStage && matchStatus && matchRecurring && matchDate;
-    });
-  }, [
-    defectiveMeters, 
-    trackerSearch, 
-    trackerStageFilter, 
-    trackerStatusFilter, 
-    onlyRecurringFilter,
-    trackerDateMode,
-    trackerCustomDate,
-    trackerStartDate,
-    trackerEndDate
-  ]);
-
-  // ── Tracker KPI Totals (Dynamically calculated from filtered view) ─────────
-  const trackerKPIs = useMemo(() => {
-    const isFiltered = trackerDateMode !== 'ALL' || trackerStageFilter !== 'ALL' || trackerStatusFilter !== 'ALL' || onlyRecurringFilter || trackerSearch.trim() !== '';
-    const targetList = filteredDefectiveMeters;
-
-    const total = targetList.length;
-    let underInspection = 0;
-    let returnedToLine = 0;
-    let scrapped = 0;
-    let recurringCount = 0;
-
-    targetList.forEach(m => {
-      if (m.status === 'UNDER_INSPECTION' || m.status === 'IN_REPAIR') underInspection++;
-      else if (m.status === 'RETURNED_TO_LINE') returnedToLine++;
-      else if (m.status === 'SCRAPPED_KO') scrapped++;
-
-      if (m.entry_count > 1) recurringCount++;
-    });
-
-    return { 
-      total, 
-      allLifetimeTotal: defectiveMeters.length,
-      isFiltered,
-      underInspection, 
-      returnedToLine, 
-      scrapped, 
-      recurringCount 
-    };
-  }, [
-    filteredDefectiveMeters, 
-    defectiveMeters.length, 
-    trackerDateMode, 
-    trackerStageFilter, 
-    trackerStatusFilter, 
-    onlyRecurringFilter, 
-    trackerSearch
-  ]);
-
-  // ── Tab 2 Analytics Calculations ──────────────────────────────────────────
-  const getRecordReportedKO = (rec) => {
-    if (!Array.isArray(rec.stations) || rec.stations.length === 0) {
-      const tb = parseInt(rec.total_boards, 10) || 0;
-      const ach = parseInt(rec.achieved, 10) || 0;
-      return Math.max(0, tb - ach);
-    }
-    return rec.stations.reduce((sum, st) => {
-      const nbB = parseInt(st.nbBoards, 10) || 0;
-      const nbOk = parseInt(st.nbBoardsOK, 10) || 0;
-      return sum + Math.max(0, nbB - nbOk);
-    }, 0);
-  };
-
-  const overallMetrics = useMemo(() => {
-    let totalReportedKOAll = 0;
-    let totalBoardsAll = 0;
-    let totalAchievedAll = 0;
-
-    records.forEach(r => {
-      totalReportedKOAll += getRecordReportedKO(r);
-      totalBoardsAll += parseInt(r.total_boards, 10) || 0;
-      totalAchievedAll += parseInt(r.achieved, 10) || 0;
-    });
-
-    const liveDefectsLogged = defectiveMeters.length;
-    const totalActualDefects = actualTarget + liveDefectsLogged;
-
-    const calibrationRatio = totalReportedKOAll > 0 ? (totalActualDefects / totalReportedKOAll) : 0;
-    const totalRepairedFromKOAll = Math.max(0, totalReportedKOAll - totalActualDefects);
-    const repairRateOverallPct = totalReportedKOAll > 0 ? ((totalRepairedFromKOAll / totalReportedKOAll) * 100) : 0;
-
-    return {
-      totalReportedKOAll,
-      totalBoardsAll,
-      totalAchievedAll,
-      baseActualDefects: actualTarget,
-      liveDefectsLogged,
-      totalActualDefects,
-      calibrationRatio,
-      totalRepairedFromKOAll,
-      repairRateOverallPct
-    };
-  }, [records, actualTarget, defectiveMeters]);
-
-  const availableMonths = useMemo(() => {
-    const set = new Set();
-    records.forEach(r => {
-      if (r.date && r.date.length >= 7) set.add(r.date.substring(0, 7));
-    });
-    return Array.from(set).sort().reverse();
-  }, [records]);
-
-  const availableTeams = useMemo(() => {
-    const set = new Set();
-    records.forEach(r => {
-      if (r.team_name) set.add(r.team_name);
-    });
-    return Array.from(set).sort();
-  }, [records]);
-
-  const calibratedRecords = useMemo(() => {
-    return records.map(r => {
-      const tb = parseInt(r.total_boards, 10) || 0;
-      const ach = parseInt(r.achieved, 10) || 0;
-      const reportedKO = getRecordReportedKO(r);
-      const estimatedActual = Math.round(reportedKO * overallMetrics.calibrationRatio);
-      const repairedMeters = Math.max(0, reportedKO - estimatedActual);
-      const shiftRepairPct = reportedKO > 0 ? ((repairedMeters / reportedKO) * 100) : 0;
-
-      return {
-        ...r,
-        tb,
-        ach,
-        reportedKO,
-        estimatedActual,
-        repairedMeters,
-        shiftRepairPct
-      };
-    });
-  }, [records, overallMetrics.calibrationRatio]);
-
-  const filteredRecords = useMemo(() => {
-    const todayStr = getTodayDateStr();
-    const weekStartStr = getDaysAgoDateStr(6);
-
-    return calibratedRecords.filter(r => {
-      const matchMonth = selectedMonth === 'ALL' || (r.date && r.date.startsWith(selectedMonth));
-      const matchTeam = selectedTeam === 'ALL' || r.team_name === selectedTeam;
-      const matchSearch = searchQuery.trim() === '' || 
-        (r.team_name && r.team_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (r.date && r.date.includes(searchQuery.trim())) ||
-        (r.notes && r.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-
-      let matchDate = true;
-      if (analyticsDateMode === 'TODAY') {
-        matchDate = r.date === todayStr;
-      } else if (analyticsDateMode === 'WEEK') {
-        matchDate = r.date >= weekStartStr && r.date <= todayStr;
-      } else if (analyticsDateMode === 'CUSTOM_DATE') {
-        matchDate = !analyticsCustomDate || r.date === analyticsCustomDate;
-      } else if (analyticsDateMode === 'RANGE') {
-        if (analyticsStartDate && analyticsEndDate) {
-          matchDate = r.date >= analyticsStartDate && r.date <= analyticsEndDate;
-        } else if (analyticsStartDate) {
-          matchDate = r.date >= analyticsStartDate;
-        } else if (analyticsEndDate) {
-          matchDate = r.date <= analyticsEndDate;
-        }
-      }
-
-      return matchMonth && matchTeam && matchSearch && matchDate;
-    });
-  }, [
-    calibratedRecords, 
-    selectedMonth, 
-    selectedTeam, 
-    searchQuery,
-    analyticsDateMode,
-    analyticsCustomDate,
-    analyticsStartDate,
-    analyticsEndDate
-  ]);
-
-  const handleSaveTarget = () => {
-    const parsed = parseInt(targetInput, 10);
-    if (!isNaN(parsed) && parsed > 0) {
-      setActualTarget(parsed);
-      localStorage.setItem(STORAGE_ACTUAL_KEY, String(parsed));
-      setIsEditingTarget(false);
-    } else {
-      alert('Please enter a valid positive number for actual defective meters.');
-    }
-  };
-
-  const handleResetTarget = () => {
-    setActualTarget(DEFAULT_ACTUAL_DEFECTS);
-    setTargetInput(String(DEFAULT_ACTUAL_DEFECTS));
-    localStorage.removeItem(STORAGE_ACTUAL_KEY);
-    setIsEditingTarget(false);
-  };
+  const data = useDefectMetersData(user, isArabic);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20, paddingBottom: 60 }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 20,
+        paddingBottom: 60,
+      }}
+    >
       {/* ── Status Message Banner ── */}
-      {trackerSuccessMsg && (
-        <div style={{
-          background: '#dcfce7',
-          color: '#15803d',
-          border: '1.5px solid #86efac',
-          padding: '14px 20px',
-          borderRadius: 12,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          fontWeight: 800,
-          fontSize: '0.94rem',
-          boxShadow: '0 4px 12px rgba(21, 128, 61, 0.12)'
-        }}>
+      {data.trackerSuccessMsg && (
+        <div
+          style={{
+            background: "#dcfce7",
+            color: "#15803d",
+            border: "1.5px solid #86efac",
+            padding: "14px 20px",
+            borderRadius: 12,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            fontWeight: 800,
+            fontSize: "0.94rem",
+            boxShadow: "0 4px 12px rgba(21, 128, 61, 0.12)",
+          }}
+        >
           <CheckCircle2 size={22} />
-          {trackerSuccessMsg}
+          {data.trackerSuccessMsg}
         </div>
       )}
 
       {/* ── Official Page Header & Report Action ── */}
-      <div className="card-white" style={{ padding: '16px 22px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <img src="/ectron-logo.png" alt="ECTRON" style={{ height: 36, objectFit: 'contain' }} />
-            <div style={{ borderLeft: isArabic ? 'none' : '2px solid #cbd5e1', borderRight: isArabic ? '2px solid #cbd5e1' : 'none', paddingLeft: isArabic ? 0 : 12, paddingRight: isArabic ? 12 : 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <h2 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 900, color: 'var(--navy)' }}>
-                  {isArabic ? 'إدارة وتتبع العدادات المعطلة وحلقات الإصلاح' : 'Defective Meters Tracking & Rework Hub'}
+      <div
+        className="card-white"
+        style={{
+          padding: "16px 22px",
+          border: "1px solid #cbd5e1",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.03)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 14,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <img
+              src="/ectron-logo.png"
+              alt="ECTRON"
+              style={{ height: 36, objectFit: "contain" }}
+            />
+            <div
+              style={{
+                borderLeft: isArabic ? "none" : "2px solid #cbd5e1",
+                borderRight: isArabic ? "2px solid #cbd5e1" : "none",
+                paddingLeft: isArabic ? 0 : 12,
+                paddingRight: isArabic ? 12 : 0,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
+                }}
+              >
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: "1.18rem",
+                    fontWeight: 900,
+                    color: "var(--navy)",
+                  }}
+                >
+                  {isArabic
+                    ? "إدارة وتتبع العدادات المعطلة وحلقات الإصلاح"
+                    : "Defective Meters Tracking & Rework Hub"}
                 </h2>
-                <span style={{ fontSize: '0.72rem', background: '#e0f2fe', color: '#0369a1', fontWeight: 800, padding: '2px 8px', borderRadius: 4 }}>
+                <span
+                  style={{
+                    fontSize: "0.72rem",
+                    background: "#e0f2fe",
+                    color: "#0369a1",
+                    fontWeight: 800,
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                  }}
+                >
                   FORM NO: PSM-DEF-08-2026
                 </span>
-                <span style={{ fontSize: '0.72rem', background: '#f1f5f9', color: '#475569', fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
+                <span
+                  style={{
+                    fontSize: "0.72rem",
+                    background: "#f1f5f9",
+                    color: "#475569",
+                    fontWeight: 700,
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                  }}
+                >
                   Rev: 01
                 </span>
               </div>
-              <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: '#64748b' }}>
-                {isArabic 
-                  ? 'رصد العدادات المعطوبة، منع تكرار الأعطال، وتوثيق دورات الإصلاح والهالك عبر المحطات الـ 8' 
-                  : 'Track defective meters, prevent loop recurrences, and record repairs & scrap across 8 stations'}
+              <p
+                style={{
+                  margin: "3px 0 0",
+                  fontSize: "0.78rem",
+                  color: "#64748b",
+                }}
+              >
+                {isArabic
+                  ? "رصد العدادات المعطوبة، منع تكرار الأعطال، وتوثيق دورات الإصلاح والهالك عبر المحطات الـ 8"
+                  : "Track defective meters, prevent loop recurrences, and record repairs & scrap across 8 stations"}
               </p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <button
               type="button"
-              onClick={() => setShowReportModal(true)}
+              onClick={() => data.setShowReportModal(true)}
               className="btn-outline"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
+                display: "inline-flex",
+                alignItems: "center",
                 gap: 7,
-                padding: '8px 16px',
+                padding: "8px 16px",
                 fontWeight: 800,
-                fontSize: '0.84rem',
-                color: '#0369a1',
-                borderColor: '#0284c7',
-                background: '#f0f9ff'
+                fontSize: "0.84rem",
+                color: "#0369a1",
+                borderColor: "#0284c7",
+                background: "#f0f9ff",
               }}
             >
               <Printer size={16} />
-              <span>{isArabic ? '🖨️ تقرير العدادات المعطلة' : '🖨️ Defective Meters Report'}</span>
+              <span>
+                {isArabic
+                  ? "🖨️ تقرير العدادات المعطلة"
+                  : "🖨️ Defective Meters Report"}
+              </span>
             </button>
 
             <button
               type="button"
-              onClick={fetchDefectiveMeters}
-              disabled={loadingDefects}
+              onClick={data.fetchDefectiveMeters}
+              disabled={data.loadingDefects}
               className="btn-outline"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', padding: '8px 14px' }}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: "0.82rem",
+                padding: "8px 14px",
+              }}
             >
-              <RefreshCw size={14} className={loadingDefects ? 'spin' : ''} />
-              <span>{isArabic ? 'تحديث' : 'Refresh'}</span>
+              <RefreshCw
+                size={14}
+                className={data.loadingDefects ? "spin" : ""}
+              />
+              <span>{isArabic ? "تحديث" : "Refresh"}</span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── Primary Navigation Tabs: TRACKER (Hub) vs ANALYTICS ── */}
-      <div style={{
-        display: 'flex',
-        gap: 8,
-        borderBottom: '2px solid #e2e8f0',
-        paddingBottom: 2
-      }}>
+      {/* ── Primary Navigation Tabs: TRACKER vs ANALYTICS ── */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          borderBottom: "2px solid #e2e8f0",
+          paddingBottom: 2,
+        }}
+      >
         <button
           type="button"
-          onClick={() => setActiveTab('TRACKER')}
+          onClick={() => data.setActiveTab("TRACKER")}
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
+            display: "inline-flex",
+            alignItems: "center",
             gap: 8,
-            padding: '12px 22px',
-            borderRadius: '10px 10px 0 0',
+            padding: "12px 22px",
+            borderRadius: "10px 10px 0 0",
             fontWeight: 800,
-            fontSize: '0.94rem',
-            cursor: 'pointer',
-            border: 'none',
-            background: activeTab === 'TRACKER' ? '#ffffff' : 'transparent',
-            color: activeTab === 'TRACKER' ? '#0284c7' : '#64748b',
-            borderBottom: activeTab === 'TRACKER' ? '3px solid #0284c7' : '3px solid transparent',
-            boxShadow: activeTab === 'TRACKER' ? '0 -2px 8px rgba(0,0,0,0.04)' : 'none'
+            fontSize: "0.94rem",
+            cursor: "pointer",
+            border: "none",
+            background:
+              data.activeTab === "TRACKER" ? "#ffffff" : "transparent",
+            color: data.activeTab === "TRACKER" ? "#0284c7" : "#64748b",
+            borderBottom:
+              data.activeTab === "TRACKER"
+                ? "3px solid #0284c7"
+                : "3px solid transparent",
+            boxShadow:
+              data.activeTab === "TRACKER"
+                ? "0 -2px 8px rgba(0,0,0,0.04)"
+                : "none",
           }}
         >
           <Scan size={18} />
-          {t('defectiveTrackerTab')}
-          <span style={{
-            fontSize: '0.72rem',
-            fontWeight: 900,
-            background: activeTab === 'TRACKER' ? '#e0f2fe' : '#f1f5f9',
-            color: activeTab === 'TRACKER' ? '#0369a1' : '#64748b',
-            padding: '2px 8px',
-            borderRadius: 999
-          }}>
-            {trackerKPIs.allLifetimeTotal ?? trackerKPIs.total}
+          {t("defectiveTrackerTab")}
+          <span
+            style={{
+              fontSize: "0.72rem",
+              fontWeight: 900,
+              background: data.activeTab === "TRACKER" ? "#e0f2fe" : "#f1f5f9",
+              color: data.activeTab === "TRACKER" ? "#0369a1" : "#64748b",
+              padding: "2px 8px",
+              borderRadius: 999,
+            }}
+          >
+            {data.trackerKPIs.allLifetimeTotal ?? data.trackerKPIs.total}
           </span>
         </button>
 
         <button
           type="button"
-          onClick={() => setActiveTab('ANALYTICS')}
+          onClick={() => data.setActiveTab("ANALYTICS")}
           style={{
-            display: 'inline-flex',
-            alignItems: 'center',
+            display: "inline-flex",
+            alignItems: "center",
             gap: 8,
-            padding: '12px 22px',
-            borderRadius: '10px 10px 0 0',
+            padding: "12px 22px",
+            borderRadius: "10px 10px 0 0",
             fontWeight: 800,
-            fontSize: '0.94rem',
-            cursor: 'pointer',
-            border: 'none',
-            background: activeTab === 'ANALYTICS' ? '#ffffff' : 'transparent',
-            color: activeTab === 'ANALYTICS' ? '#0284c7' : '#64748b',
-            borderBottom: activeTab === 'ANALYTICS' ? '3px solid #0284c7' : '3px solid transparent',
-            boxShadow: activeTab === 'ANALYTICS' ? '0 -2px 8px rgba(0,0,0,0.04)' : 'none'
+            fontSize: "0.94rem",
+            cursor: "pointer",
+            border: "none",
+            background:
+              data.activeTab === "ANALYTICS" ? "#ffffff" : "transparent",
+            color: data.activeTab === "ANALYTICS" ? "#0284c7" : "#64748b",
+            borderBottom:
+              data.activeTab === "ANALYTICS"
+                ? "3px solid #0284c7"
+                : "3px solid transparent",
+            boxShadow:
+              data.activeTab === "ANALYTICS"
+                ? "0 -2px 8px rgba(0,0,0,0.04)"
+                : "none",
           }}
         >
           <Sliders size={18} />
-          {t('analyticsCalibrationTab')}
+          {t("analyticsCalibrationTab")}
         </button>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* ── TAB 1: DEFECTIVE METERS TRACKER & REWORK HUB ───────────────────── */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'TRACKER' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          
-          {/* ── 🌟 DYNAMIC INTERACTIVE REGISTRATION HUB (Top-Center Hero Card) ── */}
-          <div className="card-white" style={{
-            padding: '28px 32px',
-            border: '2px solid #cbd5e1',
-            borderRadius: 16,
-            boxShadow: '0 8px 24px rgba(15, 23, 42, 0.05)',
-            position: 'relative',
-            overflow: 'hidden'
-          }}>
-            {/* Step Progress Pills Header */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: 12,
-              marginBottom: 20
-            }}>
-              {[
-                { step: 1, label: isArabic ? '1. مسح السيريال' : '1. Scan Serial', icon: <Scan size={14} /> },
-                { step: 2, label: isArabic ? '2. اختيار المرحلة' : '2. Select Stage', icon: <Layers size={14} /> },
-                { step: 3, label: isArabic ? '3. كود العطل' : '3. Defect Code', icon: <Tag size={14} /> }
-              ].map(s => {
-                const isActive = wizardStep === s.step;
-                const isPassed = wizardStep > s.step;
-                return (
-                  <div
-                    key={s.step}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '5px 14px',
-                      borderRadius: 20,
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
-                      background: isActive ? '#0284c7' : (isPassed ? '#dcfce7' : '#f1f5f9'),
-                      color: isActive ? '#ffffff' : (isPassed ? '#15803d' : '#64748b'),
-                      border: isActive ? '1.5px solid #0284c7' : (isPassed ? '1px solid #86efac' : '1px solid #cbd5e1'),
-                      boxShadow: isActive ? '0 2px 8px rgba(2, 132, 199, 0.25)' : 'none',
-                      transition: 'all 0.2s ease'
-                    }}
-                  >
-                    {isPassed ? <Check size={13} strokeWidth={3} /> : s.icon}
-                    <span>{s.label}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {/* ── STEP 1: SCAN OR ENTER SERIAL NUMBER ───────────────────────── */}
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {wizardStep === 1 && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 14 }}>
-                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#e0f2fe', color: '#0284c7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <Scan size={30} />
-                </div>
-
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 900, color: 'var(--navy)' }}>
-                    {isArabic ? 'امسح باركود العداد المعطل أو اكتب السيريال' : 'Scan Defective Meter Barcode or Enter Serial'}
-                  </h2>
-                  <p style={{ margin: '6px 0 0', fontSize: '0.86rem', color: '#64748b' }}>
-                    {isArabic 
-                      ? 'وجّه قارئ الباركود (Scanner) أو اكتب السيريال واضغط Enter للمتابعة لاختيار المرحلة' 
-                      : 'Point barcode scanner or type serial number and press Enter to select stage'}
-                  </p>
-                </div>
-
-                {/* Big Centered Input */}
-                <div style={{ width: '100%', maxWidth: 520, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <input
-                    ref={serialInputRef}
-                    type="text"
-                    className="search-input"
-                    value={scanSerial}
-                    onChange={e => setScanSerial(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        if (!scanSerial.trim()) return;
-                        if (meterBlockReason) {
-                          alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
-                          return;
-                        }
-                        setWizardStep(2);
-                      }
-                    }}
-                    placeholder={isArabic ? 'مثال: 2601004523 (Enter)' : 'e.g. 2601004523 (Enter)'}
-                    style={{
-                      height: 54,
-                      fontSize: '1.35rem',
-                      fontWeight: 900,
-                      textAlign: 'center',
-                      letterSpacing: '0.06em',
-                      border: meterBlockReason 
-                        ? '2.5px solid #ef4444' 
-                        : (detectedPreviousMeter ? '2.5px solid #f59e0b' : '2px solid #0284c7'),
-                      boxShadow: meterBlockReason
-                        ? '0 4px 14px rgba(239, 68, 68, 0.2)'
-                        : '0 4px 14px rgba(2, 132, 199, 0.14)',
-                      borderRadius: 12
-                    }}
-                    autoFocus
-                  />
-
-                  {/* 🛑 Strict Block Banner (Cannot register twice without repair) */}
-                  {meterBlockReason && detectedPreviousMeter && (
-                    <div style={{
-                      background: '#fef2f2',
-                      color: '#991b1b',
-                      border: '2px solid #ef4444',
-                      borderRadius: 12,
-                      padding: '14px 18px',
-                      textAlign: isArabic ? 'right' : 'left',
-                      direction: isArabic ? 'rtl' : 'ltr',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                      boxShadow: '0 4px 12px rgba(239, 68, 68, 0.08)'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.94rem', fontWeight: 900 }}>
-                        <ShieldAlert size={20} color="#dc2626" />
-                        <span>{meterBlockReason.title}</span>
-                      </div>
-                      
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: '#7f1d1d', lineHeight: 1.45, fontWeight: 700 }}>
-                        {meterBlockReason.message}
-                      </p>
-
-                      <div style={{
-                        background: '#fee2e2',
-                        padding: '6px 12px',
-                        borderRadius: 6,
-                        fontSize: '0.78rem',
-                        fontWeight: 800,
-                        color: '#991b1b',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 6
-                      }}>
-                        <span>🔄</span>
-                        <span>{meterBlockReason.rule}</span>
-                      </div>
-
-                      {meterBlockReason.type === 'PENDING_REPAIR' && (
-                        <button
-                          type="button"
-                          onClick={() => openRepairModal(detectedPreviousMeter)}
-                          style={{
-                            marginTop: 4,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            gap: 8,
-                            padding: '10px 16px',
-                            borderRadius: 8,
-                            background: '#16a34a',
-                            color: '#ffffff',
-                            border: 'none',
-                            fontWeight: 900,
-                            fontSize: '0.86rem',
-                            cursor: 'pointer',
-                            boxShadow: '0 2px 8px rgba(22, 163, 74, 0.3)'
-                          }}
-                        >
-                          <Wrench size={16} />
-                          <span>{isArabic ? 'فتح نافذة الصيانة والإصلاح لهذا العداد الآن' : 'Open Repair Modal for this Meter Now'}</span>
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {/* ⚠️ Recurring Meter Notice (Repaired previously, now registering next defect cycle) */}
-                  {!meterBlockReason && detectedPreviousMeter && (
-                    <div style={{
-                      background: detectedPreviousMeter.entry_count >= 2 ? '#fef3c7' : '#f0fdf4',
-                      color: detectedPreviousMeter.entry_count >= 2 ? '#92400e' : '#166534',
-                      border: detectedPreviousMeter.entry_count >= 2 ? '1.5px solid #f59e0b' : '1.5px solid #86efac',
-                      borderRadius: 10,
-                      padding: '10px 14px',
-                      fontSize: '0.84rem',
-                      fontWeight: 800,
-                      textAlign: 'center',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8
-                    }}>
-                      <CheckCircle2 size={18} />
-                      <span>
-                        {isArabic 
-                          ? `⚠️ عداد عائد من صيانة سابقة (أعيد للخط سابقاً). سيتم تسجيل خروج جديد كـ دورة رقم #${(detectedPreviousMeter.entry_count || 1) + 1}.` 
-                          : `⚠️ Meter returned from previous repair. Ready to log as Defect Cycle #${(detectedPreviousMeter.entry_count || 1) + 1}.`}
-                      </span>
-                    </div>
-                  )}
-
-                  <button
-                    type="button"
-                    disabled={!scanSerial.trim() || !!meterBlockReason}
-                    onClick={() => {
-                      if (!scanSerial.trim()) return;
-                      if (meterBlockReason) {
-                        alert(`${meterBlockReason.title}\n\n${meterBlockReason.message}\n\n${meterBlockReason.rule || ''}`);
-                        return;
-                      }
-                      setWizardStep(2);
-                    }}
-                    className={meterBlockReason ? 'btn-secondary' : 'btn-primary'}
-                    style={{
-                      height: 48,
-                      fontSize: '0.98rem',
-                      fontWeight: 900,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: 8,
-                      borderRadius: 10,
-                      opacity: (!scanSerial.trim() || meterBlockReason) ? 0.6 : 1,
-                      cursor: meterBlockReason ? 'not-allowed' : 'pointer',
-                      background: meterBlockReason ? '#e2e8f0' : undefined,
-                      color: meterBlockReason ? '#64748b' : undefined,
-                      border: meterBlockReason ? '1px solid #cbd5e1' : undefined
-                    }}
-                  >
-                    <span>
-                      {meterBlockReason 
-                        ? (isArabic ? '🛑 التسجيل محظور (العداد بانتظار الصيانة أولاً)' : '🛑 Blocked (Pending Repair)') 
-                        : (isArabic ? 'المتابعة لاختيار المرحلة' : 'Continue to Stage Selection')}
-                    </span>
-                    {!meterBlockReason && <ArrowRight size={18} />}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {/* ── STEP 2: INTERACTIVE COLORED STAGE BUTTONS ─────────────────── */}
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {wizardStep === 2 && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 16 }}>
-                {/* Active Meter Pill */}
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: '#0f172a', color: '#ffffff', padding: '6px 16px', borderRadius: 999 }}>
-                  <QrCode size={15} color="#38bdf8" />
-                  <span style={{ fontSize: '0.92rem', fontWeight: 900, letterSpacing: '0.04em' }}>
-                    {scanSerial}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setWizardStep(1)}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#94a3b8',
-                      cursor: 'pointer',
-                      fontSize: '0.74rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      marginLeft: 6
-                    }}
-                  >
-                    <RotateCcw size={12} /> {isArabic ? 'تعديل السيريال' : 'Change'}
-                  </button>
-                </div>
-
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 900, color: 'var(--navy)' }}>
-                    {isArabic ? 'اختر مرحلة خروج العداد المعطل' : 'Select Failure Stage'}
-                  </h2>
-                  <p style={{ margin: '6px 0 0', fontSize: '0.86rem', color: '#64748b' }}>
-                    {isArabic 
-                      ? 'اضغط على المحطة التي تم رصد العطل فيها للمتابعة الفورية لكتابة الكود' 
-                      : 'Click the station where this defect was detected'}
-                  </p>
-                </div>
-
-                {/* Big Interactive Colored Stage Buttons */}
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-                  gap: 12,
-                  width: '100%',
-                  maxWidth: 920,
-                  marginTop: 6
-                }}>
-                  {STAGES.map(st => (
-                    <button
-                      key={st.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedStage(st.id);
-                        setWizardStep(3);
-                      }}
-                      style={{
-                        padding: '18px 12px',
-                        borderRadius: 14,
-                        border: `2px solid ${st.border}`,
-                        background: st.bg,
-                        color: st.color,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 6,
-                        transition: 'all 0.15s ease',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.04)'
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.transform = 'translateY(-3px)';
-                        e.currentTarget.style.boxShadow = `0 8px 18px ${st.color}33`;
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.04)';
-                      }}
-                    >
-                      <span style={{ fontSize: '1.6rem' }}>{st.icon}</span>
-                      <span style={{ fontSize: '1rem', fontWeight: 900 }}>{st.name}</span>
-                      <span style={{ fontSize: '0.74rem', fontWeight: 700, opacity: 0.9 }}>{st.arabic}</span>
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setWizardStep(1)}
-                  style={{
-                    border: 'none',
-                    background: 'transparent',
-                    color: '#64748b',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    marginTop: 4
-                  }}
-                >
-                  <ArrowLeft size={14} /> {isArabic ? 'رجوع لتعديل السيريال' : 'Back to Serial'}
-                </button>
-              </div>
-            )}
-
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {/* ── STEP 3: ENTER DEFECT CODE (Buttons disappeared) ───────────── */}
-            {/* ════════════════════════════════════════════════════════════════ */}
-            {wizardStep === 3 && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 16 }}>
-                {/* Meter & Selected Stage Header Bar */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0f172a', color: '#ffffff', padding: '5px 14px', borderRadius: 999, fontSize: '0.86rem', fontWeight: 800 }}>
-                    <QrCode size={14} color="#38bdf8" />
-                    <span>{scanSerial}</span>
-                  </div>
-
-                  {(() => {
-                    const stObj = STAGES.find(s => s.id === selectedStage) || STAGES[0];
-                    return (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: stObj.bg, color: stObj.color, border: `1.5px solid ${stObj.border}`, padding: '4px 14px', borderRadius: 999, fontSize: '0.84rem', fontWeight: 900 }}>
-                        <span>{stObj.icon}</span>
-                        <span>{stObj.name} ({stObj.arabic})</span>
-                      </div>
-                    );
-                  })()}
-
-                  <button
-                    type="button"
-                    onClick={() => setWizardStep(2)}
-                    style={{
-                      background: '#f1f5f9',
-                      border: '1px solid #cbd5e1',
-                      color: '#475569',
-                      padding: '4px 10px',
-                      borderRadius: 999,
-                      cursor: 'pointer',
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <RotateCcw size={12} /> {isArabic ? 'تغيير المرحلة' : 'Change Stage'}
-                  </button>
-                </div>
-
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 900, color: 'var(--navy)' }}>
-                    {isArabic ? 'أدخل كود العطل أو نوع الخلل' : 'Enter Defect Code or Symptom'}
-                  </h2>
-                  <p style={{ margin: '6px 0 0', fontSize: '0.86rem', color: '#64748b' }}>
-                    {isArabic 
-                      ? 'اكتب كود العطل ثم اضغط Enter للحفظ' 
-                      : 'Type defect code and press Enter to save'}
-                  </p>
-                </div>
-
-                {/* Big Code Input Form */}
-                <div style={{ width: '100%', maxWidth: 500, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <input
-                    ref={codeInputRef}
-                    type="text"
-                    className="search-input"
-                    value={defectCode}
-                    onChange={e => setDefectCode(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleRegisterDefective();
-                      }
-                    }}
-                    placeholder={isArabic ? 'اكتب كود العطل هنا...' : 'Enter defect code...'}
-                    style={{
-                      height: 54,
-                      fontSize: '1.35rem',
-                      fontWeight: 900,
-                      textAlign: 'center',
-                      border: '2px solid #dc2626',
-                      boxShadow: '0 4px 14px rgba(220, 38, 38, 0.14)',
-                      borderRadius: 12
-                    }}
-                    autoFocus
-                  />
-
-                  {/* 💡 Assembly & Traceability Rule Alert Note */}
-                  <div style={{
-                    background: '#f0fdf4',
-                    border: '1.5px solid #86efac',
-                    borderRadius: 10,
-                    padding: '12px 16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    direction: isArabic ? 'rtl' : 'ltr',
-                    textAlign: isArabic ? 'right' : 'left',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
-                  }}>
-                    <span style={{ fontSize: '1.25rem' }}>💡</span>
-                    <span style={{ fontSize: '0.86rem', fontWeight: 800, color: '#166534', lineHeight: 1.45 }}>
-                      {isArabic 
-                        ? 'ملاحظة: في حال كان العداد في مرحلة التجميع (Assembly) ولم يدخل نظام التتبع، يكون الكود 0' 
-                        : 'Note: If the meter is at Assembly and has not entered the traceability system, code is 0'}
-                    </span>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-                    <button
-                      type="button"
-                      onClick={() => setWizardStep(2)}
-                      className="btn-secondary"
-                      style={{ flex: 1, height: 46, fontWeight: 800 }}
-                    >
-                      {isArabic ? '← رجوع للمرحلة' : '← Back'}
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSubmittingDefect || isViewer || !defectCode.trim() || !!meterBlockReason}
-                      onClick={handleRegisterDefective}
-                      className="btn-primary"
-                      style={{
-                        flex: 2,
-                        height: 46,
-                        fontWeight: 900,
-                        fontSize: '0.96rem',
-                        background: '#059669',
-                        borderColor: 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 8
-                      }}
-                    >
-                      <Check size={18} />
-                      {isSubmittingDefect ? 'Saving...' : (isArabic ? 'تأكيد وتسجيل العداد المعطل (Enter)' : 'Confirm & Log Defect (Enter)')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── Top 4 KPI Cards for Defective Meters ── */}
-          {(() => {
-            const recoveryPct = trackerKPIs.total > 0 ? Math.round((trackerKPIs.returnedToLine / trackerKPIs.total) * 100) : 0;
-
-            return (
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-                gap: 16
-              }}>
-                {/* KPI 1: Total Defective Meters */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #ffffff 0%, #f0f9ff 100%)',
-                  borderRadius: 14,
-                  border: '1.5px solid #bae6fd',
-                  borderTop: '4px solid #0284c7',
-                  padding: '18px 20px',
-                  boxShadow: '0 4px 16px rgba(2, 132, 199, 0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: 10,
-                        background: '#e0f2fe',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#0284c7'
-                      }}>
-                        <Scan size={22} />
-                      </div>
-                      <span style={{
-                        fontSize: '0.70rem',
-                        fontWeight: 800,
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        background: '#e0f2fe',
-                        color: '#0369a1'
-                      }}>
-                        {isArabic ? 'سجل الرصد' : 'Total Intake'}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                      {isArabic ? 'إجمالي العدادات المعطلة' : 'Total Defective Meters'}
-                    </div>
-
-                    <div style={{
-                      fontSize: '2.2rem',
-                      fontWeight: 900,
-                      color: '#0369a1',
-                      lineHeight: 1.15,
-                      marginTop: 4,
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 6
-                    }}>
-                      {trackerKPIs.total}
-                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#64748b' }}>
-                        {isArabic ? 'عداد' : 'units'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{
-                    fontSize: '0.74rem',
-                    color: '#64748b',
-                    marginTop: 12,
-                    paddingTop: 10,
-                    borderTop: '1px solid #e0f2fe',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#0284c7', display: 'inline-block' }} />
-                    <span>
-                      {trackerKPIs.isFiltered 
-                        ? (isArabic ? `مفلترة (${trackerKPIs.total} من أصل ${trackerKPIs.allLifetimeTotal})` : `Filtered (${trackerKPIs.total} of ${trackerKPIs.allLifetimeTotal})`)
-                        : (isArabic ? 'جميع الحالات المسجلة بالباركود' : 'All barcode-scanned intakes')}
-                    </span>
-                  </div>
-                </div>
-
-                {/* KPI 2: Active Under Repair */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #ffffff 0%, #fffbeb 100%)',
-                  borderRadius: 14,
-                  border: '1.5px solid #fde68a',
-                  borderTop: '4px solid #f59e0b',
-                  padding: '18px 20px',
-                  boxShadow: '0 4px 16px rgba(217, 119, 6, 0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: 10,
-                        background: '#fef3c7',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#d97706'
-                      }}>
-                        <Wrench size={22} />
-                      </div>
-                      <span style={{
-                        fontSize: '0.70rem',
-                        fontWeight: 800,
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        background: '#fef3c7',
-                        color: '#92400e'
-                      }}>
-                        {isArabic ? '⏳ جاري الإصلاح' : 'In Rework'}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                      {isArabic ? 'قيد المعاينة والإصلاح حالياً' : 'Active Under Repair'}
-                    </div>
-
-                    <div style={{
-                      fontSize: '2.2rem',
-                      fontWeight: 900,
-                      color: '#b45309',
-                      lineHeight: 1.15,
-                      marginTop: 4,
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 6
-                    }}>
-                      {trackerKPIs.underInspection}
-                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#92400e' }}>
-                        {isArabic ? 'قيد الفحص' : 'in shop'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{
-                    fontSize: '0.74rem',
-                    color: '#b45309',
-                    fontWeight: 700,
-                    marginTop: 12,
-                    paddingTop: 10,
-                    borderTop: '1px solid #fef3c7',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', display: 'inline-block' }} />
-                    <span>
-                      {isArabic ? 'بانتظار الصيانة أو إعادة الاختبار' : 'Awaiting rework / re-test'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* KPI 3: Repaired & Returned */}
-                <div style={{
-                  background: 'linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%)',
-                  borderRadius: 14,
-                  border: '1.5px solid #bbf7d0',
-                  borderTop: '4px solid #10b981',
-                  padding: '18px 20px',
-                  boxShadow: '0 4px 16px rgba(16, 185, 129, 0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: 10,
-                        background: '#dcfce7',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: '#059669'
-                      }}>
-                        <CheckCircle2 size={22} />
-                      </div>
-                      <span style={{
-                        fontSize: '0.70rem',
-                        fontWeight: 800,
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        background: '#dcfce7',
-                        color: '#166534'
-                      }}>
-                        {recoveryPct}% {isArabic ? 'استعادة' : 'Recovery'}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                      {isArabic ? 'تم الإصلاح وعاد للإنتاج' : 'Repaired & Returned'}
-                    </div>
-
-                    <div style={{
-                      fontSize: '2.2rem',
-                      fontWeight: 900,
-                      color: '#15803d',
-                      lineHeight: 1.15,
-                      marginTop: 4,
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 6
-                    }}>
-                      {trackerKPIs.returnedToLine}
-                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: '#166534' }}>
-                        {isArabic ? 'مستعاد للخط' : 'recovered'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <div style={{ width: '100%', height: 6, background: '#e2e8f0', borderRadius: 4, marginTop: 10, overflow: 'hidden' }}>
-                      <div style={{
-                        width: `${Math.min(100, recoveryPct)}%`,
-                        height: '100%',
-                        background: 'linear-gradient(90deg, #10b981 0%, #059669 100%)',
-                        borderRadius: 4,
-                        transition: 'width 0.5s ease'
-                      }} />
-                    </div>
-                    <div style={{
-                      fontSize: '0.74rem',
-                      color: '#15803d',
-                      fontWeight: 700,
-                      marginTop: 6,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}>
-                      <span>{isArabic ? 'نسبة الاستعادة:' : 'Recovery Rate:'}</span>
-                      <span style={{ fontWeight: 900 }}>{recoveryPct}%</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* KPI 4: Recurring Failures */}
-                <div style={{
-                  background: trackerKPIs.recurringCount > 0 
-                    ? 'linear-gradient(135deg, #ffffff 0%, #fef2f2 100%)' 
-                    : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
-                  borderRadius: 14,
-                  border: `1.5px solid ${trackerKPIs.recurringCount > 0 ? '#fca5a5' : '#cbd5e1'}`,
-                  borderTop: `4px solid ${trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981'}`,
-                  padding: '18px 20px',
-                  boxShadow: trackerKPIs.recurringCount > 0 
-                    ? '0 4px 16px rgba(220, 38, 38, 0.08)' 
-                    : '0 4px 16px rgba(0,0,0,0.04)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: 10,
-                        background: trackerKPIs.recurringCount > 0 ? '#fee2e2' : '#f1f5f9',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981'
-                      }}>
-                        <AlertTriangle size={22} />
-                      </div>
-                      <span style={{
-                        fontSize: '0.70rem',
-                        fontWeight: 800,
-                        padding: '3px 9px',
-                        borderRadius: 999,
-                        background: trackerKPIs.recurringCount > 0 ? '#fee2e2' : '#dcfce7',
-                        color: trackerKPIs.recurringCount > 0 ? '#991b1b' : '#166534'
-                      }}>
-                        {trackerKPIs.recurringCount > 0 
-                          ? (isArabic ? '⚠️ تكرار عطل' : 'Repeated') 
-                          : (isArabic ? '✅ صفر مكرر' : 'Zero Repeat')}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#475569', marginTop: 12, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
-                      {isArabic ? 'عدادات متكررة العطل (2+)' : 'Recurring Failures (2+)'}
-                    </div>
-
-                    <div style={{
-                      fontSize: '2.2rem',
-                      fontWeight: 900,
-                      color: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#16a34a',
-                      lineHeight: 1.15,
-                      marginTop: 4,
-                      display: 'flex',
-                      alignItems: 'baseline',
-                      gap: 6
-                    }}>
-                      {trackerKPIs.recurringCount}
-                      <span style={{ fontSize: '0.84rem', fontWeight: 700, color: trackerKPIs.recurringCount > 0 ? '#991b1b' : '#15803d' }}>
-                        {isArabic ? 'حالة مكررة' : 'repeats'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{
-                    fontSize: '0.74rem',
-                    color: trackerKPIs.recurringCount > 0 ? '#b91c1c' : '#15803d',
-                    fontWeight: 700,
-                    marginTop: 12,
-                    paddingTop: 10,
-                    borderTop: trackerKPIs.recurringCount > 0 ? '1px solid #fee2e2' : '1px solid #e2e8f0',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6
-                  }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: trackerKPIs.recurringCount > 0 ? '#dc2626' : '#10b981', display: 'inline-block' }} />
-                    <span>
-                      {trackerKPIs.recurringCount > 0 
-                        ? (isArabic ? 'تتطلب تدخلاً هندسياً حاسماً (دورتان فأكثر)' : 'Requires engineering root cause') 
-                        : (isArabic ? 'لا توجد عدادات مكررة (أداء ممتاز)' : 'Zero repeated defectives')}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── Defective Meters Live Table ── */}
-          <div className="card-white" style={{ padding: 20, border: '1px solid #cbd5e1' }}>
-            {/* Filter Bar */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 14 }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: 'var(--navy)' }}>
-                  {isArabic ? 'سجل تتبع العدادات المعطلة وحلقات الإصلاح' : 'Defective Meters Live Tracking Registry'}
-                </h3>
-                <span style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                  {isArabic ? `إجمالي المسجل: ${filteredDefectiveMeters.length} عداد` : `Showing ${filteredDefectiveMeters.length} defective units`}
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                {/* Search */}
-                <div className="search-wrap" style={{ minWidth: 170 }}>
-                  <Search className="search-icon" size={13} />
-                  <input
-                    type="text"
-                    className="search-input"
-                    placeholder={isArabic ? 'بحث بالسيريال، الكود...' : 'Search serial, code...'}
-                    value={trackerSearch}
-                    onChange={e => setTrackerSearch(e.target.value)}
-                    style={{ padding: '6px 10px 6px 30px', fontSize: '0.78rem' }}
-                  />
-                </div>
-
-                {/* Stage Filter */}
-                <select
-                  className="search-input"
-                  value={trackerStageFilter}
-                  onChange={e => setTrackerStageFilter(e.target.value)}
-                  style={{ width: 'auto', padding: '6px 10px', fontSize: '0.78rem', fontWeight: 700 }}
-                >
-                  <option value="ALL">{isArabic ? 'جميع المراحل' : 'All Stages'}</option>
-                  {STAGES.map(st => (
-                    <option key={st.id} value={st.id}>{st.name}</option>
-                  ))}
-                </select>
-
-                {/* Status Filter */}
-                <select
-                  className="search-input"
-                  value={trackerStatusFilter}
-                  onChange={e => setTrackerStatusFilter(e.target.value)}
-                  style={{ width: 'auto', padding: '6px 10px', fontSize: '0.78rem', fontWeight: 700 }}
-                >
-                  <option value="ALL">{isArabic ? 'جميع الحالات' : 'All Statuses'}</option>
-                  <option value="UNDER_INSPECTION">{isArabic ? 'قيد المعاينة والإصلاح' : 'Under Inspection'}</option>
-                  <option value="RETURNED_TO_LINE">{isArabic ? 'تم الإصلاح وعاد للخط' : 'Returned to Line'}</option>
-                  <option value="SCRAPPED_KO">{isArabic ? 'تالف نهائي (Scrapped)' : 'Scrapped KO'}</option>
-                </select>
-
-                {/* Recurring Failures Toggle Pill */}
-                <button
-                  type="button"
-                  onClick={() => setOnlyRecurringFilter(!onlyRecurringFilter)}
-                  style={{
-                    padding: '6px 12px',
-                    borderRadius: 8,
-                    fontSize: '0.76rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    border: onlyRecurringFilter ? '2px solid #dc2626' : '1px solid #cbd5e1',
-                    background: onlyRecurringFilter ? '#fee2e2' : '#ffffff',
-                    color: onlyRecurringFilter ? '#991b1b' : '#64748b'
-                  }}
-                >
-                  <AlertTriangle size={13} />
-                  {isArabic ? 'المتكررة فقط (2+)' : 'Recurring Only'}
-                </button>
-
-                {/* Print Report Button */}
-                <button
-                  type="button"
-                  onClick={() => setShowReportModal(true)}
-                  className="btn-outline"
-                  style={{
-                    padding: '6px 14px',
-                    borderRadius: 8,
-                    fontSize: '0.76rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    border: '1.5px solid #0284c7',
-                    background: '#f0f9ff',
-                    color: '#0369a1'
-                  }}
-                >
-                  <Printer size={13} />
-                  {isArabic ? 'معاينة وطباعة التقرير' : 'Print Report'}
-                </button>
-              </div>
-            </div>
-
-            {/* Date / Time Filtering Toolbar */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: 10,
-              padding: '10px 14px',
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0',
-              borderRadius: 10,
-              marginBottom: 14
-            }}>
-              {/* Left: Mode Buttons & Date Pickers */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginInlineEnd: 4, color: 'var(--navy)', fontWeight: 800, fontSize: '0.78rem' }}>
-                  <Calendar size={15} color="#0284c7" />
-                  <span>{isArabic ? 'فلترة بالوقت والتاريخ:' : 'Time & Date Filter:'}</span>
-                </div>
-
-                {[
-                  { id: 'ALL', label: isArabic ? 'الكل' : 'All Time' },
-                  { id: 'TODAY', label: isArabic ? 'اليوم' : 'Today' },
-                  { id: 'WEEK', label: isArabic ? 'هذا الأسبوع' : 'This Week' },
-                  { id: 'CUSTOM_DATE', label: isArabic ? 'تحديد تاريخ' : 'Specific Date' },
-                  { id: 'RANGE', label: isArabic ? 'نطاق زمني' : 'Date Range' }
-                ].map(tab => {
-                  const isActive = trackerDateMode === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setTrackerDateMode(tab.id)}
-                      style={{
-                        padding: '5px 12px',
-                        borderRadius: 6,
-                        fontSize: '0.76rem',
-                        fontWeight: isActive ? 800 : 600,
-                        cursor: 'pointer',
-                        border: isActive ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
-                        background: isActive ? '#e0f2fe' : '#ffffff',
-                        color: isActive ? '#0369a1' : '#475569',
-                        transition: 'all 0.15s ease',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
-
-                {/* Specific Date Picker */}
-                {trackerDateMode === 'CUSTOM_DATE' && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#ffffff', padding: '3px 8px', borderRadius: 6, border: '1.5px solid #0284c7' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
-                      {isArabic ? 'التاريخ:' : 'Date:'}
-                    </span>
-                    <input
-                      type="date"
-                      value={trackerCustomDate}
-                      onChange={e => setTrackerCustomDate(e.target.value)}
-                      style={{
-                        border: 'none',
-                        outline: 'none',
-                        fontSize: '0.76rem',
-                        fontWeight: 700,
-                        color: 'var(--navy)',
-                        background: 'transparent',
-                        cursor: 'pointer'
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Date Range Pickers */}
-                {trackerDateMode === 'RANGE' && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#ffffff', padding: '3px 10px', borderRadius: 6, border: '1.5px solid #0284c7' }}>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
-                        {isArabic ? 'من:' : 'From:'}
-                      </span>
-                      <input
-                        type="date"
-                        value={trackerStartDate}
-                        onChange={e => setTrackerStartDate(e.target.value)}
-                        style={{
-                          border: 'none',
-                          outline: 'none',
-                          fontSize: '0.76rem',
-                          fontWeight: 700,
-                          color: 'var(--navy)',
-                          background: 'transparent',
-                          cursor: 'pointer'
-                        }}
-                      />
-                    </div>
-                    <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>—</span>
-                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#0369a1' }}>
-                        {isArabic ? 'إلى:' : 'To:'}
-                      </span>
-                      <input
-                        type="date"
-                        value={trackerEndDate}
-                        onChange={e => setTrackerEndDate(e.target.value)}
-                        style={{
-                          border: 'none',
-                          outline: 'none',
-                          fontSize: '0.76rem',
-                          fontWeight: 700,
-                          color: 'var(--navy)',
-                          background: 'transparent',
-                          cursor: 'pointer'
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Reset button if date filter is active */}
-                {trackerDateMode !== 'ALL' && (
-                  <button
-                    type="button"
-                    onClick={() => setTrackerDateMode('ALL')}
-                    title={isArabic ? 'إلغاء فلترة التاريخ' : 'Clear date filter'}
-                    style={{
-                      padding: '4px 8px',
-                      borderRadius: 6,
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: '1px solid #fca5a5',
-                      background: '#fef2f2',
-                      color: '#b91c1c',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4
-                    }}
-                  >
-                    <RotateCcw size={11} />
-                    {isArabic ? 'إلغاء الفلترة' : 'Clear'}
-                  </button>
-                )}
-              </div>
-
-              {/* Right: Summary badges */}
-              <div style={{ fontSize: '0.74rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                {trackerDateMode === 'TODAY' && (
-                  <span style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
-                    {isArabic ? `📅 اليوم (${getTodayDateStr()})` : `📅 Today (${getTodayDateStr()})`}
-                  </span>
-                )}
-                {trackerDateMode === 'WEEK' && (
-                  <span style={{ background: '#ecfeff', color: '#0e7490', border: '1px solid #a5f3fc', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
-                    {isArabic ? `📆 آخر 7 أيام (${getDaysAgoDateStr(6)} إلى ${getTodayDateStr()})` : `📆 Last 7 Days (${getDaysAgoDateStr(6)} to ${getTodayDateStr()})`}
-                  </span>
-                )}
-                {trackerDateMode === 'CUSTOM_DATE' && trackerCustomDate && (
-                  <span style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
-                    {isArabic ? `🗓️ تاريخ: ${trackerCustomDate}` : `🗓️ Date: ${trackerCustomDate}`}
-                  </span>
-                )}
-                {trackerDateMode === 'RANGE' && (
-                  <span style={{ background: '#f5f3ff', color: '#6d28d9', border: '1px solid #ddd6fe', padding: '3px 8px', borderRadius: 6, fontWeight: 700 }}>
-                    {isArabic ? `⏳ الفترة: ${trackerStartDate || '...'} إلى ${trackerEndDate || '...'}` : `⏳ Period: ${trackerStartDate || '...'} to ${trackerEndDate || '...'}`}
-                  </span>
-                )}
-                <span style={{ fontWeight: 800, color: 'var(--navy)', background: '#ffffff', border: '1px solid #cbd5e1', padding: '3px 8px', borderRadius: 6 }}>
-                  {isArabic 
-                    ? `المعروض: ${filteredDefectiveMeters.length} من أصل ${defectiveMeters.length}` 
-                    : `Showing: ${filteredDefectiveMeters.length} of ${defectiveMeters.length}`}
-                </span>
-              </div>
-            </div>
-
-            {/* Registry Table */}
-            <div className="table-responsive">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>{isArabic ? 'سيريال العداد' : 'Serial Number'}</th>
-                    <th>{isArabic ? 'المرحلة' : 'Stage'}</th>
-                    <th>{isArabic ? 'كود العطل' : 'Defect Code'}</th>
-                    <th>{isArabic ? 'المشرف / وقت الرصد' : 'Logged By / Time'}</th>
-                    <th style={{ textAlign: 'center' }}>{t('entryCountLabel')}</th>
-                    <th style={{ textAlign: 'center' }}>{t('returnCountLabel')}</th>
-                    <th>{t('status')}</th>
-                    <th>{t('actions')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loadingDefects ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>
-                        {t('loading')}
-                      </td>
-                    </tr>
-                  ) : filteredDefectiveMeters.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>
-                        {isArabic ? 'لا توجد عدادات مطابقة للبحث أو الفلاتر.' : 'No defective meters matching current filters.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredDefectiveMeters.map(meter => {
-                      const isUnderRepair = meter.status === 'UNDER_INSPECTION' || meter.status === 'IN_REPAIR';
-                      const isReturned = meter.status === 'RETURNED_TO_LINE';
-                      const isScrapped = meter.status === 'SCRAPPED_KO';
-                      const isRepeated = meter.entry_count > 1;
-                      const stageObj = findStage(meter.stage);
-
-                      return (
-                        <tr key={meter.id} style={{ background: isRepeated ? '#fffbfb' : 'transparent' }}>
-                          {/* Serial Number & Recurring Badges */}
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                              <span style={{ fontWeight: 900, color: 'var(--navy)', fontSize: '0.88rem' }}>
-                                {meter.serial_number}
-                              </span>
-                              {meter.entry_count === 2 && (
-                                <span style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: 800,
-                                  background: '#fef3c7',
-                                  color: '#92400e',
-                                  border: '1px solid #fcd34d',
-                                  padding: '1px 5px',
-                                  borderRadius: 4
-                                }}>
-                                  ⚠️ 2nd Entry
-                                </span>
-                              )}
-                              {meter.entry_count >= 3 && (
-                                <span style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: 900,
-                                  background: '#fee2e2',
-                                  color: '#b91c1c',
-                                  border: '1px solid #fca5a5',
-                                  padding: '1px 5px',
-                                  borderRadius: 4
-                                }}>
-                                  🛑 {meter.entry_count}x Cycles (Critical)
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Stage (Vibrantly color-coded matching stage buttons) */}
-                          <td>
-                            <span style={{
-                              fontWeight: 800,
-                              fontSize: '0.76rem',
-                              padding: '2px 8px',
-                              borderRadius: 4,
-                              background: stageObj.bg,
-                              color: stageObj.color,
-                              border: `1px solid ${stageObj.border}`,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: 4
-                            }}>
-                              <span>{stageObj.icon}</span>
-                              <span>{stageObj.name}</span>
-                            </span>
-                          </td>
-
-                          {/* Defect Code */}
-                          <td>
-                            <span style={{
-                              fontWeight: 900,
-                              fontSize: '0.78rem',
-                              padding: '2px 8px',
-                              borderRadius: 4,
-                              background: '#fee2e2',
-                              color: '#b91c1c',
-                              border: '1px solid #fecaca'
-                            }}>
-                              {meter.defect_code}
-                            </span>
-                          </td>
-
-                          {/* Logged by & Time */}
-                          <td>
-                            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#334155' }}>
-                              {meter.logged_by || 'Supervisor'}
-                            </div>
-                            <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
-                              {meter.logged_at ? new Date(meter.logged_at).toLocaleDateString() : '—'}
-                            </div>
-                          </td>
-
-                          {/* Entry Count */}
-                          <td style={{ textAlign: 'center' }}>
-                            <span style={{
-                              fontSize: '0.82rem',
-                              fontWeight: 900,
-                              color: isRepeated ? '#dc2626' : '#0369a1',
-                              background: isRepeated ? '#fee2e2' : '#e0f2fe',
-                              padding: '2px 8px',
-                              borderRadius: 6
-                            }}>
-                              {meter.entry_count || 1}
-                            </span>
-                          </td>
-
-                          {/* Return Count */}
-                          <td style={{ textAlign: 'center' }}>
-                            <span style={{
-                              fontSize: '0.82rem',
-                              fontWeight: 900,
-                              color: meter.return_count > 0 ? '#16a34a' : '#64748b',
-                              background: meter.return_count > 0 ? '#dcfce7' : '#f1f5f9',
-                              padding: '2px 8px',
-                              borderRadius: 6
-                            }}>
-                              {meter.return_count || 0}
-                            </span>
-                          </td>
-
-                          {/* Status Badge */}
-                          <td>
-                            <span style={{
-                              padding: '3px 9px',
-                              borderRadius: 6,
-                              fontSize: '0.74rem',
-                              fontWeight: 800,
-                              background: isReturned ? '#dcfce7' : (isScrapped ? '#fee2e2' : '#fef3c7'),
-                              color: isReturned ? '#166534' : (isScrapped ? '#991b1b' : '#92400e'),
-                              border: isReturned ? '1px solid #86efac' : (isScrapped ? '1px solid #fca5a5' : '1px solid #fde68a')
-                            }}>
-                              {isReturned 
-                                ? (isArabic ? '✅ تم الإصلاح وعاد للخط' : 'Repaired & Returned') 
-                                : (isScrapped 
-                                    ? (isArabic ? '🛑 تالف نهائي (Scrapped)' : 'Scrapped KO') 
-                                    : (isArabic ? '⏳ قيد المعاينة والإصلاح' : 'Under Inspection'))}
-                            </span>
-                          </td>
-
-                          {/* Actions */}
-                          <td>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                              {/* Mark Repaired & Return Button */}
-                              {isUnderRepair && !isViewer && (
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  onClick={() => openRepairModal(meter)}
-                                  title={isArabic ? 'توثيق الإصلاح وإعادة للإنتاج' : 'Mark Repaired & Return'}
-                                  style={{
-                                    borderColor: '#10b981',
-                                    color: '#047857',
-                                    fontSize: '0.74rem',
-                                    fontWeight: 800,
-                                    padding: '4px 8px',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4
-                                  }}
-                                >
-                                  <Wrench size={13} /> {isArabic ? 'إصلاح وعودة' : 'Repair'}
-                                </button>
-                              )}
-
-                              {/* View Lifecycle History Button */}
-                              <button
-                                type="button"
-                                className="btn-outline"
-                                onClick={() => setLifecycleModalMeter(meter)}
-                                title={isArabic ? 'عرض دورة حياة وتاريخ العداد' : 'View Lifecycle History'}
-                                style={{ padding: '4px 8px', color: '#0369a1', borderColor: '#bae6fd' }}
-                              >
-                                <History size={14} />
-                              </button>
-
-                              {/* Scrap Button */}
-                              {isUnderRepair && !isViewer && (
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  onClick={() => handleScrapMeter(meter)}
-                                  title={isArabic ? 'استبعاد كتالف نهائي' : 'Mark Scrapped'}
-                                  style={{ padding: '4px 8px', color: '#dc2626', borderColor: '#fecdd3' }}
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              )}
-
-                              {/* Admin Edit Button */}
-                              {isAdmin && (
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  onClick={() => openAdminEditModal(meter)}
-                                  title={isArabic ? 'تعديل بيانات العداد (للأدمن)' : 'Edit Defect Record (Admin)'}
-                                  style={{
-                                    borderColor: '#0284c7',
-                                    color: '#0369a1',
-                                    fontSize: '0.74rem',
-                                    fontWeight: 800,
-                                    padding: '4px 8px',
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 4,
-                                    background: '#f0f9ff'
-                                  }}
-                                >
-                                  <Edit3 size={13} /> {isArabic ? 'تعديل' : 'Edit'}
-                                </button>
-                              )}
-
-                              {/* Admin Delete */}
-                              {isAdmin && (
-                                <button
-                                  type="button"
-                                  className="btn-outline"
-                                  onClick={() => handleDeleteMeter(meter.id)}
-                                  title="Delete record"
-                                  style={{ padding: '4px 6px', color: '#94a3b8', border: 'none' }}
-                                >
-                                  ×
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── Modal: Complete Rework & Return to Production Line ── */}
-          {repairModalMeter && (
-            <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setRepairModalMeter(null)}>
-              <div className="modal" style={{ maxWidth: 540 }}>
-                <div className="modal-header">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Wrench size={20} color="#10b981" />
-                    <span className="modal-title">
-                      {t('repairModalTitle')}
-                    </span>
-                  </div>
-                  <button type="button" className="modal-close" onClick={() => setRepairModalMeter(null)}>×</button>
-                </div>
-
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {/* Meter Quick Summary Box */}
-                  <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
-                      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{isArabic ? 'سيريال العداد' : 'Serial Number'}</span>
-                      <div style={{ fontWeight: 900, color: 'var(--navy)', fontSize: '0.94rem' }}>{repairModalMeter.serial_number}</div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{isArabic ? 'كود العطل' : 'Defect Code'}</span>
-                      <div style={{ fontWeight: 900, color: '#dc2626' }}>{repairModalMeter.defect_code}</div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.72rem', color: '#64748b' }}>{isArabic ? 'مرحلة الخروج' : 'Failure Stage'}</span>
-                      <div style={{ fontWeight: 800 }}>{repairModalMeter.stage}</div>
-                    </div>
-                  </div>
-
-                  {/* Technician Name */}
-                  <div>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                      {t('technicianName')}: <span style={{ color: '#dc2626' }}>*</span>
-                    </label>
-                    <input
-                      type="text"
-                      className="search-input"
-                      value={repairTechName}
-                      onChange={e => setRepairTechName(e.target.value)}
-                      placeholder="Technician Name"
-                      style={{ fontWeight: 700, fontSize: '0.86rem' }}
-                    />
-                  </div>
-
-                  {/* Return Destination Stage */}
-                  <div>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                      {t('returnDestination')}:
-                    </label>
-                    <select
-                      className="search-input"
-                      value={repairDestination}
-                      onChange={e => setRepairDestination(e.target.value)}
-                      style={{ fontWeight: 800, fontSize: '0.86rem' }}
-                    >
-                      {STAGES.map(st => (
-                        <option key={st.id} value={st.id}>{st.name} ({st.arabic})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Action Taken & Replaced Components */}
-                  <div>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                      {t('repairActionTaken')}: <span style={{ color: '#dc2626' }}>*</span>
-                    </label>
-                    <textarea
-                      rows={3}
-                      className="search-input"
-                      value={repairActionTaken}
-                      onChange={e => setRepairActionTaken(e.target.value)}
-                      placeholder={t('repairNotesPlaceholder')}
-                      style={{ width: '100%', padding: 10, fontSize: '0.82rem', resize: 'vertical' }}
-                    />
-                  </div>
-                </div>
-
-                <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <button type="button" className="btn-secondary" onClick={() => setRepairModalMeter(null)}>
-                    {t('cancel')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={isSubmittingRepair}
-                    onClick={handleConfirmRepair}
-                    style={{ background: '#10b981', borderColor: 'transparent', fontWeight: 800 }}
-                  >
-                    {isSubmittingRepair ? 'Saving...' : t('confirmReturnBtn')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Modal: Meter Lifecycle & Historical Timeline ── */}
-          {lifecycleModalMeter && (
-            <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setLifecycleModalMeter(null)}>
-              <div className="modal" style={{ maxWidth: 650, maxHeight: '90vh', overflowY: 'auto' }}>
-                <div className="modal-header">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <History size={20} color="#0284c7" />
-                    <span className="modal-title">
-                      {isArabic ? `سجل دورة حياة العداد (${lifecycleModalMeter.serial_number})` : `Lifecycle Timeline: ${lifecycleModalMeter.serial_number}`}
-                    </span>
-                  </div>
-                  <button type="button" className="modal-close" onClick={() => setLifecycleModalMeter(null)}>×</button>
-                </div>
-
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  {/* Status & Cycles Summary */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #cbd5e1' }}>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{isArabic ? 'مرات الدخول معطلاً' : 'Total In-Cycles'}</span>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: lifecycleModalMeter.entry_count > 1 ? '#dc2626' : '#0369a1' }}>
-                        {lifecycleModalMeter.entry_count || 1} {isArabic ? 'مرات' : 'times'}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{isArabic ? 'مرات الخروج للإنتاج' : 'Total Returns'}</span>
-                      <div style={{ fontSize: '1rem', fontWeight: 900, color: '#16a34a' }}>
-                        {lifecycleModalMeter.return_count || 0} {isArabic ? 'مرات' : 'times'}
-                      </div>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: '0.7rem', color: '#64748b' }}>{isArabic ? 'الحالة الحالية' : 'Current Status'}</span>
-                      <div style={{ fontSize: '0.86rem', fontWeight: 800 }}>
-                        {lifecycleModalMeter.status}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* History Timeline */}
-                  <div>
-                    <h4 style={{ margin: '0 0 10px', fontSize: '0.88rem', fontWeight: 800, color: 'var(--navy)' }}>
-                      {isArabic ? 'المحطات والأحداث المسجلة بالتسلسل الزمني:' : 'Chronological Events & Rework Stages:'}
-                    </h4>
-
-                    {(!lifecycleModalMeter.history || lifecycleModalMeter.history.length === 0) ? (
-                      <div style={{ fontSize: '0.8rem', color: '#94a3b8', textAlign: 'center', padding: 16 }}>
-                        {isArabic ? 'لا توجد تفاصيل إضافية مسجلة.' : 'No detailed events logged for this unit.'}
-                      </div>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderLeft: '2px solid #cbd5e1', paddingLeft: 14, marginLeft: 6 }}>
-                        {lifecycleModalMeter.history.map((ev, idx) => {
-                          const isEntry = ev.type === 'ENTRY';
-                          const isReturn = ev.type === 'RETURN_TO_LINE';
-                          const isScrap = ev.type === 'SCRAP_KO';
-
-                          return (
-                            <div key={idx} style={{ position: 'relative' }}>
-                              {/* Dot on timeline */}
-                              <div style={{
-                                position: 'absolute',
-                                left: -21,
-                                top: 4,
-                                width: 12,
-                                height: 12,
-                                borderRadius: '50%',
-                                background: isEntry ? '#dc2626' : (isReturn ? '#10b981' : '#64748b'),
-                                border: '2px solid #ffffff',
-                                boxShadow: '0 0 0 1.5px #cbd5e1'
-                              }} />
-
-                              <div style={{
-                                background: isEntry ? '#fff8f8' : (isReturn ? '#f0fdf4' : '#f8fafc'),
-                                border: isEntry ? '1px solid #fecaca' : (isReturn ? '1px solid #bbf7d0' : '1px solid #e2e8f0'),
-                                borderRadius: 8,
-                                padding: '10px 14px'
-                              }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                                  <span style={{
-                                    fontSize: '0.74rem',
-                                    fontWeight: 900,
-                                    color: isEntry ? '#991b1b' : (isReturn ? '#166534' : '#334155')
-                                  }}>
-                                    {isEntry && (isArabic ? `🔻 دخول معطل (الدورة #${ev.cycle}) - محطة ${ev.stage}` : `🔻 Defect Intake (Cycle #${ev.cycle}) - ${ev.stage}`)}
-                                    {isReturn && (isArabic ? `🟢 إصلاح وعودة لخط الإنتاج (الدورة #${ev.cycle})` : `🟢 Repaired & Returned to Line (Cycle #${ev.cycle})`)}
-                                    {isScrap && (isArabic ? `🛑 تم استبعاد العداد كتالف نهائي` : `🛑 Meter Scrapped / KO Permanent`)}
-                                  </span>
-                                  <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
-                                    {ev.logged_at ? new Date(ev.logged_at).toLocaleString() : (ev.returned_at ? new Date(ev.returned_at).toLocaleString() : '—')}
-                                  </span>
-                                </div>
-
-                                {isEntry && (
-                                  <div style={{ fontSize: '0.76rem', color: '#475569' }}>
-                                    <div><strong>{isArabic ? 'كود العطل:' : 'Defect Code:'}</strong> <span style={{ color: '#b91c1c', fontWeight: 800 }}>{ev.defect_code}</span></div>
-                                    <div><strong>{isArabic ? 'المشرف المدخل:' : 'Logged By:'}</strong> {ev.logged_by}</div>
-                                    {ev.notes && <div style={{ marginTop: 2, fontStyle: 'italic' }}>"{ev.notes}"</div>}
-                                  </div>
-                                )}
-
-                                {isReturn && (
-                                  <div style={{ fontSize: '0.76rem', color: '#475569' }}>
-                                    <div><strong>{isArabic ? 'الفني:' : 'Technician:'}</strong> {ev.technician}</div>
-                                    <div><strong>{isArabic ? 'الإجراء التصحيحي:' : 'Action Taken:'}</strong> {ev.action_taken}</div>
-                                    {ev.destination && <div><strong>{isArabic ? 'المحطة المستهدفة:' : 'Returned To:'}</strong> {ev.destination}</div>}
-                                  </div>
-                                )}
-
-                                {isScrap && (
-                                  <div style={{ fontSize: '0.76rem', color: '#991b1b' }}>
-                                    <div>{ev.reason || 'Scrapped permanently'}</div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                  <button type="button" className="btn-secondary" onClick={() => setLifecycleModalMeter(null)}>
-                    {t('close')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Modal: Admin Edit Defective Meter ── */}
-          {adminEditModalMeter && (
-            <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setAdminEditModalMeter(null)}>
-              <div className="modal" style={{ maxWidth: 620 }}>
-                <div className="modal-header">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Edit3 size={20} color="#0284c7" />
-                    <span className="modal-title">
-                      {isArabic ? 'تعديل بيانات العداد المعطل (صلاحية الأدمن)' : 'Edit Defective Meter (Admin Privileges)'}
-                    </span>
-                  </div>
-                  <button type="button" className="modal-close" onClick={() => setAdminEditModalMeter(null)}>×</button>
-                </div>
-
-                <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {/* Grid fields: Serial, Stage, Code, Status, Cycles */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-                    {/* Serial Number */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'سيريال العداد:' : 'Serial Number:'} <span style={{ color: '#dc2626' }}>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        className="search-input"
-                        value={editFormData.serial_number}
-                        onChange={e => setEditFormData(prev => ({ ...prev, serial_number: e.target.value }))}
-                        style={{ fontWeight: 800, fontSize: '0.9rem' }}
-                      />
-                    </div>
-
-                    {/* Stage */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'مرحلة الخروج:' : 'Failure Stage:'}
-                      </label>
-                      <select
-                        className="search-input"
-                        value={editFormData.stage}
-                        onChange={e => setEditFormData(prev => ({ ...prev, stage: e.target.value }))}
-                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
-                      >
-                        {STAGES.map(st => (
-                          <option key={st.id} value={st.id}>{st.name} ({st.arabic})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Defect Code */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'كود العطل:' : 'Defect Code:'} <span style={{ color: '#dc2626' }}>*</span>
-                      </label>
-                      <input
-                        type="text"
-                        className="search-input"
-                        value={editFormData.defect_code}
-                        onChange={e => setEditFormData(prev => ({ ...prev, defect_code: e.target.value }))}
-                        placeholder={isArabic ? 'مثال: 0 أو -640' : 'e.g. 0 or -640'}
-                        style={{ fontWeight: 800, fontSize: '0.9rem', color: '#dc2626' }}
-                      />
-                    </div>
-
-                    {/* Status */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'حالة العداد:' : 'Status:'}
-                      </label>
-                      <select
-                        className="search-input"
-                        value={editFormData.status}
-                        onChange={e => setEditFormData(prev => ({ ...prev, status: e.target.value }))}
-                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
-                      >
-                        <option value="UNDER_INSPECTION">{isArabic ? '⏳ قيد المعاينة / بانتظار الإصلاح' : 'UNDER_INSPECTION (Pending Repair)'}</option>
-                        <option value="RETURNED_TO_LINE">{isArabic ? '✅ تم الإصلاح وأعيد للخط' : 'RETURNED_TO_LINE (Repaired)'}</option>
-                        <option value="SCRAPPED_KO">{isArabic ? '🛑 تالف دائم (Scrapped / KO)' : 'SCRAPPED_KO (Scrapped)'}</option>
-                      </select>
-                    </div>
-
-                    {/* Entry Count */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'مرات الدخول (دورة العطل):' : 'Entry Cycles:'}
-                      </label>
-                      <input
-                        type="number"
-                        min="1"
-                        className="search-input"
-                        value={editFormData.entry_count}
-                        onChange={e => setEditFormData(prev => ({ ...prev, entry_count: e.target.value }))}
-                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
-                      />
-                    </div>
-
-                    {/* Return Count */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'مرات الخروج / الإصلاح:' : 'Return Cycles:'}
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        className="search-input"
-                        value={editFormData.return_count}
-                        onChange={e => setEditFormData(prev => ({ ...prev, return_count: e.target.value }))}
-                        style={{ fontWeight: 800, fontSize: '0.86rem' }}
-                      />
-                    </div>
-
-                    {/* Logged By */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'مسؤول التسجيل / المشرف:' : 'Logged By:'}
-                      </label>
-                      <input
-                        type="text"
-                        className="search-input"
-                        value={editFormData.logged_by}
-                        onChange={e => setEditFormData(prev => ({ ...prev, logged_by: e.target.value }))}
-                        style={{ fontWeight: 700, fontSize: '0.86rem' }}
-                      />
-                    </div>
-
-                    {/* Repaired By */}
-                    <div>
-                      <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                        {isArabic ? 'فني الصيانة:' : 'Repaired By:'}
-                      </label>
-                      <input
-                        type="text"
-                        className="search-input"
-                        value={editFormData.repaired_by}
-                        onChange={e => setEditFormData(prev => ({ ...prev, repaired_by: e.target.value }))}
-                        placeholder={isArabic ? 'اسم الفني...' : 'Technician name...'}
-                        style={{ fontWeight: 700, fontSize: '0.86rem' }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Defect Notes */}
-                  <div>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                      {isArabic ? 'ملاحظات العطل أو العرض:' : 'Defect Symptom Notes:'}
-                    </label>
-                    <textarea
-                      rows={2}
-                      className="search-input"
-                      value={editFormData.notes}
-                      onChange={e => setEditFormData(prev => ({ ...prev, notes: e.target.value }))}
-                      placeholder={isArabic ? 'تفاصيل العطل...' : 'Defect details...'}
-                      style={{ width: '100%', padding: 8, fontSize: '0.82rem', resize: 'vertical' }}
-                    />
-                  </div>
-
-                  {/* Repair Notes */}
-                  <div>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--navy)', display: 'block', marginBottom: 4 }}>
-                      {isArabic ? 'إجراءات وقطع الصيانة المستبدلة:' : 'Repair Action & Replaced Parts:'}
-                    </label>
-                    <textarea
-                      rows={2}
-                      className="search-input"
-                      value={editFormData.repair_notes}
-                      onChange={e => setEditFormData(prev => ({ ...prev, repair_notes: e.target.value }))}
-                      placeholder={isArabic ? 'الإجراء التصحيحي...' : 'Corrective action taken...'}
-                      style={{ width: '100%', padding: 8, fontSize: '0.82rem', resize: 'vertical' }}
-                    />
-                  </div>
-                </div>
-
-                <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <button type="button" className="btn-secondary" onClick={() => setAdminEditModalMeter(null)}>
-                    {t('cancel')}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={isSavingAdminEdit}
-                    onClick={handleSaveAdminEdit}
-                    style={{ background: '#0284c7', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 900 }}
-                  >
-                    <Save size={16} />
-                    {isSavingAdminEdit ? 'Saving...' : (isArabic ? 'حفظ التعديلات' : 'Save Changes')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
+      {/* ── TAB 1: DEFECTIVE METERS TRACKER & REWORK HUB ── */}
+      {data.activeTab === "TRACKER" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {/* Step-by-Step Guided Intake Stepper */}
+          <TrackerIntakeStepper
+            wizardStep={data.wizardStep}
+            setWizardStep={data.setWizardStep}
+            scanSerial={data.scanSerial}
+            setScanSerial={data.setScanSerial}
+            selectedStage={data.selectedStage}
+            setSelectedStage={data.setSelectedStage}
+            defectCode={data.defectCode}
+            setDefectCode={data.setDefectCode}
+            meterBlockReason={data.meterBlockReason}
+            detectedPreviousMeter={data.detectedPreviousMeter}
+            isArabic={isArabic}
+            isViewer={data.isViewer}
+            isSubmittingDefect={data.isSubmittingDefect}
+            openRepairModal={data.openRepairModal}
+            handleRegisterDefective={data.handleRegisterDefective}
+          />
+
+          {/* KPI Summary Cards */}
+          <TrackerKPICards trackerKPIs={data.trackerKPIs} isArabic={isArabic} />
+
+          {/* Filter Bar & Live Defective Meters Table */}
+          <TrackerTableView
+            filteredDefectiveMeters={data.filteredDefectiveMeters}
+            totalDefectiveCount={data.defectiveMeters.length}
+            loadingDefects={data.loadingDefects}
+            trackerSearch={data.trackerSearch}
+            setTrackerSearch={data.setTrackerSearch}
+            trackerStageFilter={data.trackerStageFilter}
+            setTrackerStageFilter={data.setTrackerStageFilter}
+            trackerStatusFilter={data.trackerStatusFilter}
+            setTrackerStatusFilter={data.setTrackerStatusFilter}
+            onlyRecurringFilter={data.onlyRecurringFilter}
+            setOnlyRecurringFilter={data.setOnlyRecurringFilter}
+            trackerDateMode={data.trackerDateMode}
+            setTrackerDateMode={data.setTrackerDateMode}
+            trackerCustomDate={data.trackerCustomDate}
+            setTrackerCustomDate={data.setTrackerCustomDate}
+            trackerStartDate={data.trackerStartDate}
+            setTrackerStartDate={data.setTrackerStartDate}
+            trackerEndDate={data.trackerEndDate}
+            setTrackerEndDate={data.setTrackerEndDate}
+            setShowReportModal={data.setShowReportModal}
+            openRepairModal={data.openRepairModal}
+            setLifecycleModalMeter={data.setLifecycleModalMeter}
+            handleScrapMeter={data.handleScrapMeter}
+            openAdminEditModal={data.openAdminEditModal}
+            handleDeleteMeter={data.handleDeleteMeter}
+            isAdmin={data.isAdmin}
+            isViewer={data.isViewer}
+            isArabic={isArabic}
+            t={t}
+          />
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {/* ── TAB 2: STATISTICAL CALIBRATION & REWORK ENGINE ─────────────────── */}
-      {/* ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab === 'ANALYTICS' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {/* Header & Target Control Bar */}
-          <div className="card-white" style={{ padding: '20px 24px', border: '1.5px solid #e2e8f0' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: 40, height: 40, borderRadius: 10, background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <AlertTriangle size={22} color="#dc2626" />
-                </div>
-                <div>
-                  <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900, color: 'var(--navy)' }}>
-                    {isArabic ? 'تحليل ومعايرة عدادات العيوب' : 'Defect Meters Analysis & Calibration'}
-                  </h2>
-                  <p style={{ margin: '2px 0 0', fontSize: '0.8rem', color: 'var(--gray-500)' }}>
-                    {isArabic 
-                      ? 'مطابقة العيوب الفعلية المعتمدة واستبعاد دورات إعادة الفحص وحلقات التعديل (Rework Loop Calibration)' 
-                      : 'Reconciling ground-truth physical defects by eliminating test re-runs & rework loops (Rework Loop Calibration)'}
-                  </p>
-                </div>
-              </div>
-
-              <button 
-                onClick={fetchProductionRecords} 
-                disabled={loadingRecords}
-                className="btn btn-secondary"
-                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}
-              >
-                <RefreshCw size={13} className={loadingRecords ? 'spin' : ''} />
-                {loadingRecords ? (isArabic ? 'جارِ التحديث...' : 'Refreshing...') : (isArabic ? 'تحديث البيانات' : 'Refresh Data')}
-              </button>
-            </div>
-
-            {/* Calibration Control Bar */}
-            <div style={{
-              marginTop: 16,
-              background: '#f8fafc',
-              border: '1.5px solid #cbd5e1',
-              borderRadius: 10,
-              padding: '12px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 12
-            }}>
-              <div>
-                <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#334155' }}>
-                  {isArabic ? 'المعيار الأساسي للعدادات المعيبة الفعلية (Ground Truth)' : 'Baseline Physical Defective Meters (Ground Truth)'}
-                </div>
-                <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
-                  {isArabic ? (
-                    <>نسبة المعايرة الحالية: <strong>{(overallMetrics.calibrationRatio * 100).toFixed(2)}%</strong> من إجمالي حالات الفشل المسجلة ({overallMetrics.totalReportedKOAll.toLocaleString()} لوحة KO)</>
-                  ) : (
-                    <>Current Calibration Ratio: <strong>{(overallMetrics.calibrationRatio * 100).toFixed(2)}%</strong> of total reported failure instances ({overallMetrics.totalReportedKOAll.toLocaleString()} Boards KO)</>
-                  )}
-                </div>
-              </div>
-
-              <div>
-                {isEditingTarget ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <input
-                      type="number"
-                      value={targetInput}
-                      onChange={e => setTargetInput(e.target.value)}
-                      style={{ width: 100, padding: '5px 8px', borderRadius: 6, border: '1.5px solid #0284c7', fontWeight: 800, fontSize: '0.9rem' }}
-                      autoFocus
-                    />
-                    <button onClick={handleSaveTarget} className="btn btn-primary" style={{ padding: '5px 10px', fontSize: '0.75rem' }}>
-                      <Save size={13} /> {t('save')}
-                    </button>
-                    <button onClick={() => { setIsEditingTarget(false); setTargetInput(String(actualTarget)); }} className="btn btn-secondary" style={{ padding: '5px 10px', fontSize: '0.75rem' }}>
-                      {t('cancel')}
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: '1.2rem', fontWeight: 900, color: '#0369a1', background: '#e0f2fe', padding: '3px 12px', borderRadius: 8 }}>
-                      {actualTarget.toLocaleString()} <span style={{ fontSize: '0.72rem' }}>{isArabic ? 'عداد فعلي' : 'Units'}</span>
-                    </span>
-                    {isAdmin && (
-                      <button onClick={() => { setTargetInput(String(actualTarget)); setIsEditingTarget(true); }} className="btn btn-secondary" style={{ padding: '5px 8px', fontSize: '0.74rem' }}>
-                        <Edit3 size={12} /> {t('edit')}
-                      </button>
-                    )}
-                    {actualTarget !== DEFAULT_ACTUAL_DEFECTS && (
-                      <button onClick={handleResetTarget} className="btn btn-secondary" style={{ padding: '5px 8px', fontSize: '0.74rem', color: '#b91c1c' }}>
-                        <RotateCcw size={12} /> {isArabic ? 'الافتراضي' : 'Default'}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* KPI Analytics Cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-            {/* Net Defective Meters */}
-            <div style={{ background: '#fef2f2', border: '1.5px solid #fca5a5', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>
-                  {isArabic ? 'صافي العدادات المعيبة الفعلي' : 'Actual Net Defective Meters'}
-                </span>
-                <span className="badge badge-red" style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
-                  {isArabic ? 'لايف' : 'Live'}
-                </span>
-              </div>
-              <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#b91c1c', margin: '4px 0' }}>
-                {overallMetrics.totalActualDefects.toLocaleString()}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#7f1d1d', display: 'flex', justifyContent: 'space-between', marginTop: 4, flexWrap: 'wrap', gap: 4 }}>
-                <span>{isArabic ? `أساس: ${overallMetrics.baseActualDefects.toLocaleString()}` : `Base: ${overallMetrics.baseActualDefects.toLocaleString()}`}</span>
-                <span style={{ fontWeight: 700, color: '#991b1b' }}>+{overallMetrics.liveDefectsLogged.toLocaleString()} {isArabic ? 'مسجل' : 'Logged'}</span>
-              </div>
-            </div>
-
-            {/* Reported KO */}
-            <div style={{ background: '#fffbeb', border: '1.5px solid #fcd34d', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase' }}>
-                {isArabic ? 'حالات الفشل المسجلة (Boards KO)' : 'Reported Failures (Boards KO)'}
-              </div>
-              <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#b45309', margin: '4px 0' }}>
-                {overallMetrics.totalReportedKOAll.toLocaleString()}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#78350f' }}>
-                {isArabic ? 'إجمالي اللوحات الراسبة المسجلة عبر التقارير' : 'Total reported failed boards across all shifts'}
-              </div>
-            </div>
-
-            {/* Calibration Ratio */}
-            <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#166534', textTransform: 'uppercase' }}>
-                {isArabic ? 'معامل المعايرة' : 'Calibration Ratio'}
-              </div>
-              <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#15803d', margin: '4px 0' }}>
-                {(overallMetrics.calibrationRatio * 100).toFixed(2)}%
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#14532d' }}>
-                {isArabic ? 'معامل الدقة المحسوب' : 'Computed accuracy factor'}
-              </div>
-            </div>
-
-            {/* Repaired / Recycled */}
-            <div style={{ background: '#eef2ff', border: '1.5px solid #c7d2fe', borderRadius: 12, padding: '16px 18px' }}>
-              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#3730a3', textTransform: 'uppercase' }}>
-                {isArabic ? 'العدادات المُصلحة والمعاد تدويرها' : 'Repaired & Recycled (Rework)'}
-              </div>
-              <div style={{ fontSize: '1.9rem', fontWeight: 900, color: '#4338ca', margin: '4px 0' }}>
-                {overallMetrics.totalRepairedFromKOAll.toLocaleString()}
-              </div>
-              <div style={{ fontSize: '0.72rem', color: '#312e81' }}>
-                {overallMetrics.repairRateOverallPct.toFixed(1)}% {isArabic ? 'نسبة الاستعادة والإصلاح' : 'Recovery rate'}
-              </div>
-            </div>
-          </div>
-
-          {/* Shift Table for Calibration */}
-          <div className="table-card">
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--gray-200)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-              <span style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.94rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Activity size={16} color="var(--teal)" />
-                {isArabic ? 'سجل العيوب المعايرة حسب كل وردية' : 'Shift-by-Shift Calibrated Defects Log'}
-              </span>
-
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input
-                  type="text"
-                  placeholder={isArabic ? 'بحث بالتاريخ أو الفريق...' : 'Search date or team...'}
-                  value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  style={{ padding: '5px 10px', fontSize: '0.78rem', width: 150, borderRadius: 6, border: '1px solid #cbd5e1' }}
-                />
-
-                <select
-                  value={selectedMonth}
-                  onChange={e => setSelectedMonth(e.target.value)}
-                  style={{ padding: '5px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
-                >
-                  <option value="ALL">{isArabic ? 'جميع الشهور' : 'All Months'}</option>
-                  {availableMonths.map(m => (
-                    <option key={m} value={m}>{m}</option>
-                  ))}
-                </select>
-
-                <select
-                  value={analyticsDateMode}
-                  onChange={e => setAnalyticsDateMode(e.target.value)}
-                  style={{ padding: '5px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
-                >
-                  <option value="ALL">{isArabic ? 'جميع التواريخ' : 'All Dates'}</option>
-                  <option value="TODAY">{isArabic ? 'اليوم' : 'Today'}</option>
-                  <option value="WEEK">{isArabic ? 'هذا الأسبوع' : 'This Week'}</option>
-                  <option value="CUSTOM_DATE">{isArabic ? 'تحديد تاريخ' : 'Specific Date'}</option>
-                  <option value="RANGE">{isArabic ? 'نطاق زمني' : 'Date Range'}</option>
-                </select>
-
-                {analyticsDateMode === 'CUSTOM_DATE' && (
-                  <input
-                    type="date"
-                    value={analyticsCustomDate}
-                    onChange={e => setAnalyticsCustomDate(e.target.value)}
-                    style={{ padding: '4px 8px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-                  />
-                )}
-
-                {analyticsDateMode === 'RANGE' && (
-                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="date"
-                      value={analyticsStartDate}
-                      onChange={e => setAnalyticsStartDate(e.target.value)}
-                      style={{ padding: '4px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-                    />
-                    <span style={{ fontSize: '0.72rem', color: '#64748b' }}>-</span>
-                    <input
-                      type="date"
-                      value={analyticsEndDate}
-                      onChange={e => setAnalyticsEndDate(e.target.value)}
-                      style={{ padding: '4px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{t('date')}</th>
-                    <th>{isArabic ? 'الوردية والفريق' : 'Shift & Team'}</th>
-                    <th style={{ textAlign: 'center' }}>{isArabic ? 'المفحوص' : 'Tested'}</th>
-                    <th style={{ textAlign: 'center' }}>{isArabic ? 'المطابق (OK)' : 'OK'}</th>
-                    <th style={{ textAlign: 'center' }}>{isArabic ? 'الفشل (KO)' : 'Reported KO'}</th>
-                    <th style={{ textAlign: 'center', background: '#fef2f2' }}>{isArabic ? 'الصافي المعاير' : 'Calibrated Net'}</th>
-                    <th style={{ textAlign: 'center', background: '#f0fdf4' }}>{isArabic ? 'المُصلح' : 'Reworked'}</th>
-                    <th style={{ textAlign: 'center' }}>{isArabic ? 'تفاصيل' : 'Details'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRecords.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: 24, color: 'var(--gray-400)' }}>
-                        {isArabic ? 'لا توجد سجلات مطابقة للفلاتر.' : 'No records matching filters.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredRecords.slice(0, 15).map(r => (
-                      <tr key={r.id}>
-                        <td><span style={{ fontWeight: 800, color: 'var(--navy)' }}>{r.date}</span></td>
-                        <td><span style={{ fontWeight: 700 }}>{r.team_name || 'Standard Shift'}</span></td>
-                        <td style={{ textAlign: 'center' }}>{r.tb.toLocaleString()}</td>
-                        <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: 700 }}>{r.ach.toLocaleString()}</td>
-                        <td style={{ textAlign: 'center', color: '#b45309', fontWeight: 800 }}>{r.reportedKO.toLocaleString()}</td>
-                        <td style={{ textAlign: 'center', background: '#fef2f2', color: '#b91c1c', fontWeight: 900 }}>{r.estimatedActual.toLocaleString()}</td>
-                        <td style={{ textAlign: 'center', background: '#f0fdf4', color: '#15803d', fontWeight: 800 }}>{r.repairedMeters.toLocaleString()}</td>
-                        <td style={{ textAlign: 'center' }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedShiftForModal(r)}
-                            className="btn-icon"
-                            style={{ background: '#e0f2fe', color: '#0369a1' }}
-                          >
-                            <Eye size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Modal: Shift Defect & Rework Breakdown Details ── */}
-      {selectedShiftForModal && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setSelectedShiftForModal(null)}>
-          <div className="modal" style={{ maxWidth: 580, maxHeight: '90vh', overflowY: 'auto' }}>
-            <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Activity size={20} color="var(--teal)" />
-                <span className="modal-title">
-                  {isArabic 
-                    ? `تفاصيل فحص وعيوب الوردية: ${selectedShiftForModal.date}` 
-                    : `Shift Defect Details: ${selectedShiftForModal.date}`}
-                </span>
-              </div>
-              <button type="button" className="modal-close" onClick={() => setSelectedShiftForModal(null)}>×</button>
-            </div>
-
-            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: 10, border: '1px solid #cbd5e1', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <div>
-                  <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{isArabic ? 'الفريق / الوردية' : 'Team / Shift'}</span>
-                  <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--navy)' }}>
-                    {selectedShiftForModal.team_name || (isArabic ? 'الوردية القياسية' : 'Standard Shift')}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{isArabic ? 'تاريخ التشغيل' : 'Production Date'}</span>
-                  <div style={{ fontSize: '0.94rem', fontWeight: 800, color: '#0369a1' }}>
-                    {selectedShiftForModal.date}
-                  </div>
-                </div>
-              </div>
-
-              {/* Metric Cards Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
-                <div style={{ background: '#f8fafc', padding: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: '0.74rem', color: '#64748b', fontWeight: 700 }}>{isArabic ? 'إجمالي المفحوص' : 'Total Tested'}</div>
-                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: 'var(--navy)' }}>{selectedShiftForModal.tb.toLocaleString()}</div>
-                </div>
-                <div style={{ background: '#f0fdf4', padding: 12, borderRadius: 8, border: '1px solid #bbf7d0' }}>
-                  <div style={{ fontSize: '0.74rem', color: '#166534', fontWeight: 700 }}>{isArabic ? 'مطابق من أول مرة (OK)' : 'Passed OK'}</div>
-                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#16a34a' }}>{selectedShiftForModal.ach.toLocaleString()}</div>
-                </div>
-                <div style={{ background: '#fffbeb', padding: 12, borderRadius: 8, border: '1px solid #fde68a' }}>
-                  <div style={{ fontSize: '0.74rem', color: '#92400e', fontWeight: 700 }}>{isArabic ? 'حالات الفشل المسجلة (KO)' : 'Reported KO Failures'}</div>
-                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#b45309' }}>{selectedShiftForModal.reportedKO.toLocaleString()}</div>
-                </div>
-                <div style={{ background: '#fef2f2', padding: 12, borderRadius: 8, border: '1px solid #fca5a5' }}>
-                  <div style={{ fontSize: '0.74rem', color: '#991b1b', fontWeight: 700 }}>{isArabic ? 'الصافي المعاير الفعلي' : 'Calibrated Net Defects'}</div>
-                  <div style={{ fontSize: '1.35rem', fontWeight: 900, color: '#dc2626' }}>{selectedShiftForModal.estimatedActual.toLocaleString()}</div>
-                </div>
-              </div>
-
-              {/* Recovery info box */}
-              <div style={{ background: '#eef2ff', padding: '12px 14px', borderRadius: 8, border: '1px solid #c7d2fe' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#3730a3' }}>
-                    {isArabic ? 'العدادات المُستعادة والمُصلحة (Rework):' : 'Repaired & Recovered Units:'}
-                  </span>
-                  <span style={{ fontSize: '1.1rem', fontWeight: 900, color: '#4338ca' }}>
-                    {selectedShiftForModal.repairedMeters.toLocaleString()} {isArabic ? 'عداد' : 'units'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.72rem', color: '#4338ca', marginTop: 4 }}>
-                  {isArabic 
-                    ? `نسبة الاستعادة المحسوبة لهذه الوردية: ${selectedShiftForModal.shiftRepairPct.toFixed(1)}%` 
-                    : `Calculated recovery rate for this shift: ${selectedShiftForModal.shiftRepairPct.toFixed(1)}%`}
-                </div>
-              </div>
-
-              {selectedShiftForModal.notes && (
-                <div style={{ background: '#fffbeb', padding: '10px 14px', borderRadius: 8, border: '1px solid #fde68a', fontSize: '0.82rem', color: '#78350f' }}>
-                  <strong>{isArabic ? 'ملاحظات المشرف:' : 'Supervisor Notes:'} </strong>
-                  {selectedShiftForModal.notes}
-                </div>
-              )}
-            </div>
-
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn-secondary" onClick={() => setSelectedShiftForModal(null)}>
-                {t('close')}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Official Printable Defective Meters Report Modal ── */}
-      {showReportModal && (
-        <DefectiveMetersReportModal
-          isOpen={showReportModal}
-          onClose={() => setShowReportModal(false)}
-          defectiveMeters={defectiveMeters}
-          initialDateMode={trackerDateMode}
-          initialCustomDate={trackerCustomDate}
-          initialStartDate={trackerStartDate}
-          initialEndDate={trackerEndDate}
-          trackerKPIs={trackerKPIs}
-          overallMetrics={overallMetrics}
-          actualTarget={actualTarget}
+      {/* ── TAB 2: STATISTICAL CALIBRATION & REWORK ENGINE ── */}
+      {data.activeTab === "ANALYTICS" && (
+        <DefectAnalyticsTab
+          fetchProductionRecords={data.fetchProductionRecords}
+          loadingRecords={data.loadingRecords}
+          overallMetrics={data.overallMetrics}
+          actualTarget={data.actualTarget}
+          isEditingTarget={data.isEditingTarget}
+          setIsEditingTarget={data.setIsEditingTarget}
+          targetInput={data.targetInput}
+          setTargetInput={data.setTargetInput}
+          handleSaveTarget={data.handleSaveTarget}
+          handleResetTarget={data.handleResetTarget}
+          searchQuery={data.searchQuery}
+          setSearchQuery={data.setSearchQuery}
+          selectedMonth={data.selectedMonth}
+          setSelectedMonth={data.setSelectedMonth}
+          availableMonths={data.availableMonths}
+          analyticsDateMode={data.analyticsDateMode}
+          setAnalyticsDateMode={data.setAnalyticsDateMode}
+          analyticsCustomDate={data.analyticsCustomDate}
+          setAnalyticsCustomDate={data.setAnalyticsCustomDate}
+          analyticsStartDate={data.analyticsStartDate}
+          setAnalyticsStartDate={data.setAnalyticsStartDate}
+          analyticsEndDate={data.analyticsEndDate}
+          setAnalyticsEndDate={data.setAnalyticsEndDate}
+          filteredRecords={data.filteredRecords}
+          selectedShiftForModal={data.selectedShiftForModal}
+          setSelectedShiftForModal={data.setSelectedShiftForModal}
+          isAdmin={data.isAdmin}
           isArabic={isArabic}
           t={t}
-          currentUser={user}
         />
       )}
-    </div>
-  );
-}
 
-// ─── Official Defective Meters Report & Print Component ───────────────────────
-function DefectiveMetersReportModal({
-  isOpen,
-  onClose,
-  defectiveMeters,
-  initialDateMode = 'ALL',
-  initialCustomDate = '',
-  initialStartDate = '',
-  initialEndDate = '',
-  trackerKPIs,
-  overallMetrics,
-  actualTarget,
-  isArabic,
-  t,
-  currentUser
-}) {
-  const [reportStageFilter, setReportStageFilter] = useState('ALL');
-  const [reportStatusFilter, setReportStatusFilter] = useState('ALL');
-  const [reportDateMode, setReportDateMode] = useState(initialDateMode);
-  const [reportCustomDate, setReportCustomDate] = useState(initialCustomDate || getTodayDateStr());
-  const [reportStartDate, setReportStartDate] = useState(initialStartDate || getDaysAgoDateStr(6));
-  const [reportEndDate, setReportEndDate] = useState(initialEndDate || getTodayDateStr());
+      {/* ── Modal: Repair & Return ── */}
+      <RepairModal
+        repairModalMeter={data.repairModalMeter}
+        setRepairModalMeter={data.setRepairModalMeter}
+        repairTechName={data.repairTechName}
+        setRepairTechName={data.setRepairTechName}
+        repairDestination={data.repairDestination}
+        setRepairDestination={data.setRepairDestination}
+        repairActionTaken={data.repairActionTaken}
+        setRepairActionTaken={data.setRepairActionTaken}
+        isSubmittingRepair={data.isSubmittingRepair}
+        handleConfirmRepair={data.handleConfirmRepair}
+        isArabic={isArabic}
+        t={t}
+      />
 
-  if (!isOpen) return null;
+      {/* ── Modal: Lifecycle Timeline ── */}
+      <LifecycleModal
+        lifecycleModalMeter={data.lifecycleModalMeter}
+        setLifecycleModalMeter={data.setLifecycleModalMeter}
+        isArabic={isArabic}
+        t={t}
+      />
 
-  // Filtered list for print report
-  const filteredList = defectiveMeters.filter(m => {
-    if (reportStageFilter !== 'ALL' && m.stage !== reportStageFilter) return false;
-    if (reportStatusFilter === 'UNDER_INSPECTION' && !(m.status === 'UNDER_INSPECTION' || m.status === 'IN_REPAIR')) return false;
-    if (reportStatusFilter === 'RETURNED_TO_LINE' && m.status !== 'RETURNED_TO_LINE') return false;
-    if (reportStatusFilter === 'SCRAPPED_KO' && m.status !== 'SCRAPPED_KO') return false;
-    if (reportStatusFilter === 'RECURRING' && !(m.entry_count > 1)) return false;
+      {/* ── Modal: Admin Edit ── */}
+      <AdminEditModal
+        adminEditModalMeter={data.adminEditModalMeter}
+        setAdminEditModalMeter={data.setAdminEditModalMeter}
+        editFormData={data.editFormData}
+        setEditFormData={data.setEditFormData}
+        isSavingAdminEdit={data.isSavingAdminEdit}
+        handleSaveAdminEdit={data.handleSaveAdminEdit}
+        isArabic={isArabic}
+        t={t}
+      />
 
-    const meterDateStr = getMeterDateStr(m);
-    if (reportDateMode === 'TODAY' && meterDateStr !== getTodayDateStr()) return false;
-    if (reportDateMode === 'WEEK') {
-      const today = getTodayDateStr();
-      const weekStart = getDaysAgoDateStr(6);
-      if (meterDateStr < weekStart || meterDateStr > today) return false;
-    }
-    if (reportDateMode === 'CUSTOM_DATE' && reportCustomDate && meterDateStr !== reportCustomDate) return false;
-    if (reportDateMode === 'RANGE') {
-      if (reportStartDate && meterDateStr < reportStartDate) return false;
-      if (reportEndDate && meterDateStr > reportEndDate) return false;
-    }
-    return true;
-  });
-
-  // Calculate 8-station counts from filtered view
-  const stationCounts = {};
-  STAGES.forEach(s => { stationCounts[s.id] = 0; });
-  filteredList.forEach(m => {
-    const matched = findStage(m.stage);
-    if (matched && stationCounts[matched.id] !== undefined) {
-      stationCounts[matched.id]++;
-    }
-  });
-
-  const handlePrint = () => {
-    printReportDocument('defect-report-printable-area', { orientation: 'landscape' });
-  };
-
-  const todayStr = new Date().toISOString().split('T')[0];
-
-  return (
-    <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal report-modal" style={{ maxWidth: 1100, width: '96vw', maxHeight: '94vh', overflowY: 'auto' }}>
-        {/* Modal Header */}
-        <div className="modal-header" style={{ padding: '12px 18px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Printer size={20} color="var(--teal)" />
-            <span className="modal-title" style={{ fontSize: '1rem', fontWeight: 800 }}>
-              {isArabic 
-                ? 'معاينة طباعة تقرير العدادات المعطلة وحلقات الإصلاح (PSM-DEF-08-2026)' 
-                : 'Defective Meters Report Print Preview (PSM-DEF-08-2026)'}
-            </span>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
-        </div>
-
-        {/* Modal Toolbar (Filters & Print trigger on screen) */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: 10,
-          padding: '10px 18px',
-          background: '#f8fafc',
-          borderBottom: '1px solid #e2e8f0'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--navy)' }}>
-              {isArabic ? 'فلترة نطاق التقرير:' : 'Report Filters:'}
-            </span>
-
-            {/* Filter by Stage */}
-            <select
-              value={reportStageFilter}
-              onChange={e => setReportStageFilter(e.target.value)}
-              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
-            >
-              <option value="ALL">{isArabic ? 'جميع المحطات (الـ 8)' : 'All 8 Stations'}</option>
-              {STAGES.map(st => (
-                <option key={st.id} value={st.id}>{st.num}. {isArabic ? st.arabic : st.name}</option>
-              ))}
-            </select>
-
-            {/* Filter by Status */}
-            <select
-              value={reportStatusFilter}
-              onChange={e => setReportStatusFilter(e.target.value)}
-              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #cbd5e1', fontWeight: 700 }}
-            >
-              <option value="ALL">{isArabic ? 'جميع الحالات' : 'All Statuses'}</option>
-              <option value="UNDER_INSPECTION">{isArabic ? 'قيد المعاينة والإصلاح' : 'Under Inspection'}</option>
-              <option value="RETURNED_TO_LINE">{isArabic ? 'تم الإصلاح وعاد للخط' : 'Returned to Line'}</option>
-              <option value="SCRAPPED_KO">{isArabic ? 'تالف نهائي (Scrapped)' : 'Scrapped KO'}</option>
-              <option value="RECURRING">{isArabic ? 'المتكررة فقط (2+)' : 'Recurring Only'}</option>
-            </select>
-
-            {/* Filter by Date Mode */}
-            <select
-              value={reportDateMode}
-              onChange={e => setReportDateMode(e.target.value)}
-              style={{ padding: '4px 10px', fontSize: '0.78rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700, color: '#0369a1', background: '#f0f9ff' }}
-            >
-              <option value="ALL">{isArabic ? 'جميع التواريخ' : 'All Time'}</option>
-              <option value="TODAY">{isArabic ? 'اليوم' : 'Today'}</option>
-              <option value="WEEK">{isArabic ? 'هذا الأسبوع (آخر 7 أيام)' : 'This Week (7 Days)'}</option>
-              <option value="CUSTOM_DATE">{isArabic ? 'تحديد تاريخ' : 'Specific Date'}</option>
-              <option value="RANGE">{isArabic ? 'نطاق زمني' : 'Date Range'}</option>
-            </select>
-
-            {reportDateMode === 'CUSTOM_DATE' && (
-              <input
-                type="date"
-                value={reportCustomDate}
-                onChange={e => setReportCustomDate(e.target.value)}
-                style={{ padding: '3px 8px', fontSize: '0.76rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-              />
-            )}
-
-            {reportDateMode === 'RANGE' && (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <input
-                  type="date"
-                  value={reportStartDate}
-                  onChange={e => setReportStartDate(e.target.value)}
-                  style={{ padding: '3px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-                />
-                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>-</span>
-                <input
-                  type="date"
-                  value={reportEndDate}
-                  onChange={e => setReportEndDate(e.target.value)}
-                  style={{ padding: '3px 6px', fontSize: '0.74rem', borderRadius: 6, border: '1px solid #0284c7', fontWeight: 700 }}
-                />
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handlePrint}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 16px', fontWeight: 800, fontSize: '0.84rem' }}
-          >
-            <Printer size={15} />
-            <span>{isArabic ? '🖨️ طباعة التقرير (A4 أفقي)' : '🖨️ Print Report (A4)'}</span>
-          </button>
-        </div>
-
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        {/* Printable Document Area (A4 Landscape Single-Page Optimized)       */}
-        {/* ════════════════════════════════════════════════════════════════════ */}
-        <div id="defect-report-printable-area" className="report-document" style={{ padding: '8px 12px', background: '#ffffff', color: '#0f172a' }}>
-          {/* Official Document Header */}
-          <div className="report-doc-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1.5px solid var(--navy)', paddingBottom: 4, marginBottom: 4 }}>
-            <div className="report-logo-box" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <img src="/ectron-logo.png" alt="ECTRON" className="report-logo-img" style={{ height: 26, objectFit: 'contain' }} />
-              <div>
-                <div style={{ fontSize: '0.80rem', fontWeight: 900, color: 'var(--navy)', letterSpacing: '0.02em', lineHeight: 1.1 }}>
-                  ECTRON S.A.E — SMART METERS DIVISION
-                </div>
-                <div style={{ fontSize: '0.60rem', color: '#64748b', fontWeight: 600 }}>
-                  {isArabic ? 'نظام إلكترون لمتابعة وإدارة الإنتاج والجودة' : 'ECTRON PRODUCTION & QUALITY CONTROL SYSTEM'}
-                </div>
-              </div>
-            </div>
-
-            <div className="report-title-box" style={{ textAlign: isArabic ? 'left' : 'right' }}>
-              <div style={{ display: 'flex', gap: 4, justifyContent: isArabic ? 'flex-start' : 'flex-end', marginBottom: 1 }}>
-                <span style={{ fontSize: '0.58rem', background: '#0f172a', color: '#ffffff', fontWeight: 800, padding: '1px 5px', borderRadius: 3 }}>
-                  FORM NO: PSM-DEF-08-2026
-                </span>
-                <span style={{ fontSize: '0.58rem', background: '#e2e8f0', color: '#334155', fontWeight: 800, padding: '1px 4px', borderRadius: 3 }}>
-                  REV: 01
-                </span>
-              </div>
-              <h1 className="report-main-title" style={{ fontSize: '0.94rem', fontWeight: 900, color: 'var(--navy)', margin: 0, lineHeight: 1.15 }}>
-                {isArabic ? 'تقرير حصر وتتبع العدادات المعطلة وحلقات الإصلاح والهالك' : 'DEFECTIVE METERS & REWORK MANAGEMENT REPORT'}
-              </h1>
-            </div>
-          </div>
-
-          {/* Compact Metadata Row */}
-          <div className="report-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #cbd5e1', marginBottom: 4 }}>
-            <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{isArabic ? 'نطاق / تاريخ التقرير' : 'Report Date / Range'}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>
-                {reportDateMode === 'TODAY' 
-                  ? (isArabic ? `اليوم (${getTodayDateStr()})` : `Today (${getTodayDateStr()})`)
-                  : reportDateMode === 'WEEK'
-                    ? (isArabic ? `آخر 7 أيام (${getDaysAgoDateStr(6)} إلى ${getTodayDateStr()})` : `Past 7 Days`)
-                    : reportDateMode === 'CUSTOM_DATE'
-                      ? reportCustomDate
-                      : reportDateMode === 'RANGE'
-                        ? `${reportStartDate} - ${reportEndDate}`
-                        : (isArabic ? `شامل (${todayStr})` : `All Records (${todayStr})`)}
-              </span>
-            </div>
-
-            <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>{t('supervisor')}</span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--navy)' }}>{currentUser?.name || 'Supervisor'}</span>
-            </div>
-
-            <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
-                {isArabic ? 'إجمالي حالات KO' : 'Reported KO'}
-              </span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 800, color: '#b45309' }}>
-                {overallMetrics.totalReportedKOAll.toLocaleString()}
-              </span>
-            </div>
-
-            <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
-                {isArabic ? 'الصافي الفعلي المعاير' : 'Calibrated Net'}
-              </span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 900, color: '#dc2626' }}>
-                {actualTarget.toLocaleString()}
-              </span>
-            </div>
-
-            <div className="report-meta-item">
-              <span className="report-meta-label" style={{ fontSize: '0.58rem', color: '#64748b', fontWeight: 800, display: 'block' }}>
-                {isArabic ? 'معدل الإصلاح والاستعادة' : 'Recovery Rate'}
-              </span>
-              <span className="report-meta-value" style={{ fontSize: '0.74rem', fontWeight: 900, color: '#16a34a' }}>
-                {overallMetrics.repairRateOverallPct.toFixed(1)}%
-              </span>
-            </div>
-          </div>
-
-          {/* 6 Compact KPI Badges */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 5, marginBottom: 4 }}>
-            <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#475569' }}>{isArabic ? 'إجمالي المسجل' : 'Total Logged'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: 'var(--navy)' }}>{trackerKPIs.total}</div>
-            </div>
-            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#92400e' }}>{isArabic ? 'قيد المعاينة' : 'Under Repair'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#b45309' }}>{trackerKPIs.underInspection}</div>
-            </div>
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#166534' }}>{isArabic ? 'تم الإصلاح وعاد' : 'Returned'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#16a34a' }}>{trackerKPIs.returnedToLine}</div>
-            </div>
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#991b1b' }}>{isArabic ? 'تالف نهائي' : 'Scrapped'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#dc2626' }}>{trackerKPIs.scrapped}</div>
-            </div>
-            <div style={{ background: '#fff1f2', border: '1px solid #fecdd3', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#9f1239' }}>{isArabic ? 'متكرر (2+)' : 'Recurring'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#be123c' }}>{trackerKPIs.recurringCount}</div>
-            </div>
-            <div style={{ background: '#e0f2fe', border: '1px solid #bae6fd', borderRadius: 4, padding: '3px 6px', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.56rem', fontWeight: 800, color: '#0369a1' }}>{isArabic ? 'نسبة الاستعادة' : 'Recovery %'}</div>
-              <div style={{ fontSize: '0.90rem', fontWeight: 900, color: '#0284c7' }}>{trackerKPIs.repairRate}%</div>
-            </div>
-          </div>
-
-          {/* 8-Station Defect Distribution Strip */}
-          <div style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 6px', marginBottom: 4 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-              <span style={{ fontSize: '0.58rem', fontWeight: 900, color: 'var(--navy)' }}>
-                {isArabic ? '📊 توزيع العيوب حسب تسلسل المحطات الـ 8 المعتمد:' : '📊 Defect Distribution by 8 Line Stations:'}
-              </span>
-              <span style={{ fontSize: '0.54rem', color: '#64748b' }}>
-                {isArabic ? '1.التجميع 2.العزل 3.التردد 4.المعايرة 5.الفحص الشامل 6.التخصيص 7.التغليف 8.الفيرموير' : '1.Assembly 2.Insulation 3.RF 4.Calibration 5.Multin 6.Perso 7.Packaging 8.FW'}
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 4 }}>
-              {STAGES.map(st => (
-                <div key={st.id} style={{
-                  background: '#ffffff',
-                  border: '1px solid #cbd5e1',
-                  borderRadius: 3,
-                  padding: '2px 4px',
-                  textAlign: 'center',
-                  fontSize: '0.56rem'
-                }}>
-                  <div style={{ fontWeight: 800, color: '#334155', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {st.num}. {isArabic ? st.arabic : st.name}
-                  </div>
-                  <div style={{ fontWeight: 900, color: (stationCounts[st.id] || 0) > 0 ? '#b91c1c' : '#16a34a', fontSize: '0.70rem', marginTop: 1 }}>
-                    {stationCounts[st.id] || 0}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Defective Meters Data Table */}
-          <div style={{ marginBottom: 4 }}>
-            <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.62rem', marginBottom: 0 }}>
-              <thead>
-                <tr style={{ background: '#f1f5f9' }}>
-                  <th style={{ width: 22, textAlign: 'center', padding: '2px 3px', border: '1px solid #cbd5e1' }}>#</th>
-                  <th style={{ width: 100, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'سيريال العداد' : 'Serial Number'}</th>
-                  <th style={{ width: 85, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'المحطة (من 8)' : 'Station (of 8)'}</th>
-                  <th style={{ width: 65, textAlign: 'center', padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'كود العطل' : 'Defect Code'}</th>
-                  <th style={{ width: 45, textAlign: 'center', padding: '2px 2px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الدخول' : 'Cycles'}</th>
-                  <th style={{ width: 45, textAlign: 'center', padding: '2px 2px', border: '1px solid #cbd5e1' }}>{isArabic ? 'العودة' : 'Returns'}</th>
-                  <th style={{ width: 95, textAlign: 'center', padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الحالة الحالية' : 'Status'}</th>
-                  <th style={{ width: 105, padding: '2px 4px', border: '1px solid #cbd5e1' }}>{isArabic ? 'تاريخ والرصد' : 'Logged Date & By'}</th>
-                  <th style={{ padding: '2px 6px', border: '1px solid #cbd5e1' }}>{isArabic ? 'الإجراء المتخذ / ملاحظات الإصلاح' : 'Resolution / Notes'}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredList.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ textAlign: 'center', padding: 12, color: '#94a3b8' }}>
-                      {isArabic ? 'لا توجد عدادات معطلة مطابقة للفلاتر.' : 'No defective meters matching selected filters.'}
-                    </td>
-                  </tr>
-                ) : (
-                  filteredList.slice(0, 18).map((m, idx) => {
-                    const stObj = findStage(m.stage);
-                    const isReturned = m.status === 'RETURNED_TO_LINE';
-                    const isScrapped = m.status === 'SCRAPPED_KO';
-                    const isRepeated = m.entry_count > 1;
-
-                    return (
-                      <tr key={m.id} style={{ background: isRepeated ? '#fffbfb' : (idx % 2 === 1 ? '#f8fafc' : '#ffffff') }}>
-                        <td style={{ textAlign: 'center', fontWeight: 800, color: 'var(--navy)', border: '1px solid #cbd5e1', padding: '2px 2px' }}>
-                          {idx + 1}
-                        </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontWeight: 900, color: 'var(--navy)', fontFamily: 'monospace' }}>
-                          {m.serial_number}
-                          {isRepeated && (
-                            <span style={{ fontSize: '0.52rem', fontWeight: 800, color: '#dc2626', marginInlineStart: 3 }}>
-                              ({m.entry_count}x)
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle' }}>
-                          <span style={{ fontWeight: 800, color: '#0369a1', fontSize: '0.60rem' }}>
-                            {stObj.num}. {isArabic ? stObj.arabic : stObj.name}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontWeight: 800, color: '#b91c1c' }}>
-                          {m.defect_code || '—'}
-                        </td>
-                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 2px', verticalAlign: 'middle', fontWeight: 800, color: isRepeated ? '#dc2626' : '#334155' }}>
-                          {m.entry_count || 1}
-                        </td>
-                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 2px', verticalAlign: 'middle', fontWeight: 800, color: m.return_count > 0 ? '#16a34a' : '#64748b' }}>
-                          {m.return_count || 0}
-                        </td>
-                        <td style={{ textAlign: 'center', border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle' }}>
-                          <span style={{
-                            fontSize: '0.56rem',
-                            fontWeight: 800,
-                            padding: '1px 5px',
-                            borderRadius: 3,
-                            display: 'inline-block',
-                            background: isReturned ? '#dcfce7' : (isScrapped ? '#fee2e2' : '#fef3c7'),
-                            color: isReturned ? '#166534' : (isScrapped ? '#991b1b' : '#92400e')
-                          }}>
-                            {isReturned 
-                              ? (isArabic ? '✅ عاد للخط' : 'Returned') 
-                              : (isScrapped 
-                                  ? (isArabic ? '🛑 تالف نهائي' : 'Scrapped') 
-                                  : (isArabic ? '⏳ قيد الإصلاح' : 'In Repair'))}
-                          </span>
-                        </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 4px', verticalAlign: 'middle', fontSize: '0.58rem', color: '#475569' }}>
-                          <div>{m.logged_at ? new Date(m.logged_at).toLocaleDateString() : '—'}</div>
-                          <div style={{ color: '#0f172a', fontWeight: 700 }}>{m.logged_by || 'Supervisor'}</div>
-                        </td>
-                        <td style={{ border: '1px solid #cbd5e1', padding: '2px 6px', verticalAlign: 'middle', fontSize: '0.58rem' }}>
-                          {m.repair_notes || m.notes ? (
-                            <span style={{ color: '#334155', fontWeight: 600 }}>
-                              {m.repair_notes || m.notes}
-                            </span>
-                          ) : (
-                            <span style={{ color: '#94a3b8' }}>—</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-            {filteredList.length > 18 && (
-              <div style={{ textAlign: 'center', fontSize: '0.54rem', color: '#64748b', marginTop: 2 }}>
-                {isArabic 
-                  ? `* تم عرض أول 18 عداداً في الصفحة الأولى من إجمالي ${filteredList.length} عداداً مسجلاً.` 
-                  : `* Showing first 18 of ${filteredList.length} total logged meters in summary printout.`}
-              </div>
-            )}
-          </div>
-
-          {/* Quality Engineering Remarks Box */}
-          <div style={{ background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 4, padding: '3px 8px', marginBottom: 4 }}>
-            <span style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)', textTransform: 'uppercase', marginInlineEnd: 6 }}>
-              {isArabic ? 'توجيهات الجودة الهندسية:' : 'Quality & Engineering Directives:'}
-            </span>
-            <span style={{ fontSize: '0.62rem', color: '#334155' }}>
-              {isArabic 
-                ? 'الالتزام بحصر العدادات فورياً عند كل محطة من الـ 8 محطات، وفحص العدادات المتكررة (2+ دورات) تحليلياً لاستبعاد العطل الجذري وتفريغ حاويات الهالك.'
-                : 'Enforce immediate defective logging across all 8 line stations; analyze 2+ cycle recurring meters for root causes and clear scrap bins.'}
-            </span>
-          </div>
-
-          {/* Official 3-Party Sign-Off Block */}
-          <div className="report-sign-block" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, paddingTop: 4, borderTop: '1px dashed #cbd5e1' }}>
-            <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
-                1. {isArabic ? 'مراقب الجودة (QA/QC Inspector)' : 'QA/QC INSPECTOR SIGN & STAMP'}
-              </span>
-              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
-                QA Department
-              </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
-                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Stamp / Sign: ____________</span>
-              </div>
-            </div>
-
-            <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
-                2. {isArabic ? 'فني الإصلاح والتشغيل (Rework Tech)' : 'REWORK TECHNICIAN SIGN'}
-              </span>
-              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
-                Maintenance & Rework Team
-              </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
-                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Sign: ____________________</span>
-              </div>
-            </div>
-
-            <div className="sign-line">
-              <span className="sign-line-title" style={{ fontSize: '0.58rem', fontWeight: 800, color: 'var(--navy)' }}>
-                3. {isArabic ? 'مشرف خط الإنتاج (Production Supervisor)' : 'PRODUCTION SUPERVISOR APPROVAL'}
-              </span>
-              <div style={{ fontSize: '0.66rem', fontWeight: 700, color: '#334155', margin: '1px 0' }}>
-                {currentUser?.name || 'Production Supervisor'}
-              </div>
-              <div className="sign-line-placeholder" style={{ minHeight: 12 }}>
-                <span style={{ fontSize: '0.54rem', color: '#94a3b8' }}>Approval: _________________</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Form Footer Stamp */}
-          <div style={{ marginTop: 3, paddingTop: 2, borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.52rem', color: '#94a3b8' }}>
-            <span>ECTRON MANUFACTURING OPERATIONS — FORM PSM-DEF-08-2026 (REV 01) — A4 LANDSCAPE REPORT</span>
-            <span>Printed: {new Date().toLocaleString()}</span>
-          </div>
-        </div>
-
-        {/* Modal Footer Controls */}
-        <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 18px', borderTop: '1px solid #e2e8f0' }}>
-          <button type="button" className="btn-secondary" onClick={onClose}>
-            {t('close')}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={handlePrint}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 18px', fontWeight: 800 }}
-          >
-            <Printer size={16} />
-            <span>{isArabic ? '🖨️ طباعة التقرير (A4 أفقي - صفحة واحدة)' : '🖨️ Print Single Page (A4 Landscape)'}</span>
-          </button>
-        </div>
-      </div>
+      {/* ── Modal: Printable Report ── */}
+      <DefectiveMetersReportModal
+        isOpen={data.showReportModal}
+        onClose={() => data.setShowReportModal(false)}
+        defectiveMeters={data.defectiveMeters}
+        initialDateMode={data.trackerDateMode}
+        initialCustomDate={data.trackerCustomDate}
+        initialStartDate={data.trackerStartDate}
+        initialEndDate={data.trackerEndDate}
+        trackerKPIs={data.trackerKPIs}
+        overallMetrics={data.overallMetrics}
+        actualTarget={data.actualTarget}
+        isArabic={isArabic}
+        t={t}
+        currentUser={user}
+      />
     </div>
   );
 }

@@ -1,17 +1,18 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
-import Layout from './components/Layout';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import ManagementDashboard from './pages/ManagementDashboard';
-import Downtime from './pages/Downtime';
-import Production from './pages/Production';
-import DefectMeters from './pages/DefectMeters';
-import KitMeters from './pages/KitMeters';
-import Batches from './pages/Batches';
-import PreProductionChecklist from './pages/PreProductionChecklist';
-import CrewManagement from './pages/CrewManagement';
-import Users from './pages/Users';
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./context/AuthContext";
+import Layout from "./components/Layout";
+import Login from "./pages/Login";
+import Dashboard from "./pages/Dashboard";
+import ManagementDashboard from "./pages/ManagementDashboard";
+import Downtime from "./pages/Downtime";
+import Production from "./pages/Production";
+import DefectMeters from "./pages/DefectMeters";
+import KitMeters from "./pages/KitMeters";
+import Batches from "./pages/Batches";
+import BatchLookup from "./pages/BatchLookup";
+import PreProductionChecklist from "./pages/PreProductionChecklist";
+import CrewManagement from "./pages/CrewManagement";
+import Users from "./pages/Users";
 
 function PrivateRoute({ children }) {
   const { token } = useAuth();
@@ -20,15 +21,25 @@ function PrivateRoute({ children }) {
 
 function IndexRedirect() {
   const { user } = useAuth();
-  const role = (user?.access || 'viewer').toLowerCase();
-  return <Navigate to={role === 'viewer' ? '/management-dashboard' : '/dashboard'} replace />;
+  const role = (user?.access || "viewer").toLowerCase();
+  return (
+    <Navigate
+      to={role === "viewer" ? "/management-dashboard" : "/dashboard"}
+      replace
+    />
+  );
 }
 
 function RoleRoute({ allowedRoles, children }) {
   const { user } = useAuth();
-  const role = (user?.access || 'viewer').toLowerCase();
+  const role = (user?.access || "viewer").toLowerCase();
   if (!allowedRoles.includes(role)) {
-    return <Navigate to={role === 'viewer' ? '/management-dashboard' : '/dashboard'} replace />;
+    return (
+      <Navigate
+        to={role === "viewer" ? "/management-dashboard" : "/dashboard"}
+        replace
+      />
+    );
   }
   return children;
 }
@@ -38,10 +49,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={token ? <IndexRedirect /> : <Login />}
-      />
+      <Route path="/login" element={token ? <IndexRedirect /> : <Login />} />
       <Route
         path="/"
         element={
@@ -54,7 +62,7 @@ export default function App() {
         <Route
           path="dashboard"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <Dashboard />
             </RoleRoute>
           }
@@ -62,7 +70,7 @@ export default function App() {
         <Route
           path="management-dashboard"
           element={
-            <RoleRoute allowedRoles={['admin', 'viewer']}>
+            <RoleRoute allowedRoles={["admin", "viewer"]}>
               <ManagementDashboard />
             </RoleRoute>
           }
@@ -70,7 +78,7 @@ export default function App() {
         <Route
           path="production"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <Production />
             </RoleRoute>
           }
@@ -78,7 +86,7 @@ export default function App() {
         <Route
           path="crew"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <CrewManagement />
             </RoleRoute>
           }
@@ -86,7 +94,7 @@ export default function App() {
         <Route
           path="pre-production-checklist"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <PreProductionChecklist />
             </RoleRoute>
           }
@@ -94,7 +102,7 @@ export default function App() {
         <Route
           path="downtime"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <Downtime />
             </RoleRoute>
           }
@@ -102,7 +110,7 @@ export default function App() {
         <Route
           path="defect-meters"
           element={
-            <RoleRoute allowedRoles={['admin', 'supervisor']}>
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <DefectMeters />
             </RoleRoute>
           }
@@ -110,7 +118,7 @@ export default function App() {
         <Route
           path="kit-meters"
           element={
-            <RoleRoute allowedRoles={['admin']}>
+            <RoleRoute allowedRoles={["admin"]}>
               <KitMeters />
             </RoleRoute>
           }
@@ -118,15 +126,23 @@ export default function App() {
         <Route
           path="batches"
           element={
-            <RoleRoute allowedRoles={['admin']}>
+            <RoleRoute allowedRoles={["admin"]}>
               <Batches />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="batch-lookup"
+          element={
+            <RoleRoute allowedRoles={["admin", "supervisor", "viewer"]}>
+              <BatchLookup />
             </RoleRoute>
           }
         />
         <Route
           path="users"
           element={
-            <RoleRoute allowedRoles={['admin']}>
+            <RoleRoute allowedRoles={["admin"]}>
               <Users />
             </RoleRoute>
           }

@@ -1,30 +1,27 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import * as XLSX from 'xlsx';
-import { 
-  Upload, 
-  FileSpreadsheet, 
-  Trash2, 
-  Eye, 
-  Edit3, 
-  CheckCircle, 
-  RefreshCw, 
-  Cpu, 
-  Layers, 
-  Users as UsersIcon, 
+import { useState, useEffect, useMemo, useCallback } from "react";
+import * as XLSX from "xlsx";
+import {
+  Upload,
+  FileSpreadsheet,
+  Trash2,
+  Eye,
+  Edit3,
+  CheckCircle,
+  RefreshCw,
+  Cpu,
+  Layers,
+  Users as UsersIcon,
   Calendar,
   Search,
-  Database,
   Check,
-  AlertCircle,
-  Package,
-  X
-} from 'lucide-react';
-import { supabase } from '../supabaseClient';
-import { useAuth } from '../context/AuthContext';
-import { useLanguage } from '../context/LanguageContext';
+} from "lucide-react";
+import { supabase } from "../supabaseClient";
+import { useAuth } from "../context/AuthContext";
+import { useLanguage } from "../context/LanguageContext";
 
 // Direct Google Cloud Apps Script Web API (accessible globally from any computer/browser)
-const GOOGLE_DRIVE_SYNC_API_URL = 'https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec';
+const GOOGLE_DRIVE_SYNC_API_URL =
+  "https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec";
 
 async function fetchFwSyncCount(date, shift) {
   const query = `date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`;
@@ -39,7 +36,10 @@ async function fetchFwSyncCount(date, shift) {
       }
     }
   } catch (apiErr) {
-    console.warn('/api/sync-fw proxy failed, trying direct Google Apps Script fallback:', apiErr);
+    console.warn(
+      "/api/sync-fw proxy failed, trying direct Google Apps Script fallback:",
+      apiErr,
+    );
   }
 
   // 2. Direct Google Cloud Apps Script fallback
@@ -52,30 +52,30 @@ async function fetchFwSyncCount(date, shift) {
       }
     }
   } catch (cloudErr) {
-    console.warn('Google Cloud Drive direct API sync failed:', cloudErr);
+    console.warn("Google Cloud Drive direct API sync failed:", cloudErr);
   }
 
   // 3. Database Fallback (Supabase production_records): Always available for recorded shifts
   try {
-    const isMorning = shift === 'Morning';
+    const isMorning = shift === "Morning";
     const { data, error } = await supabase
-      .from('production_records')
-      .select('updated_fw_qty, team_name, notes')
-      .eq('date', date);
+      .from("production_records")
+      .select("updated_fw_qty, team_name, notes")
+      .eq("date", date);
 
     if (!error && data && data.length > 0) {
-      const match = data.find(r => {
-        const str = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
-        return isMorning 
-          ? (str.includes('morning') || str.includes('صباح')) 
-          : (str.includes('evening') || str.includes('مسا'));
+      const match = data.find((r) => {
+        const str = `${r.team_name || ""} ${r.notes || ""}`.toLowerCase();
+        return isMorning
+          ? str.includes("morning") || str.includes("صباح")
+          : str.includes("evening") || str.includes("مسا");
       });
       if (match && match.updated_fw_qty != null && match.updated_fw_qty > 0) {
         return match.updated_fw_qty;
       }
     }
   } catch (dbErr) {
-    console.warn('Supabase fallback error in fetchFwSyncCount:', dbErr);
+    console.warn("Supabase fallback error in fetchFwSyncCount:", dbErr);
   }
 
   return null;
@@ -83,18 +83,24 @@ async function fetchFwSyncCount(date, shift) {
 
 // ===================== EXCEL PARSER =====================
 function parseFPYExcel(arrayBuffer) {
-  const wb = XLSX.read(arrayBuffer, { type: 'array' });
-  const sheetName = wb.SheetNames.find(n => n.toLowerCase().includes('product')) || wb.SheetNames[0];
+  const wb = XLSX.read(arrayBuffer, { type: "array" });
+  const sheetName =
+    wb.SheetNames.find((n) => n.toLowerCase().includes("product")) ||
+    wb.SheetNames[0];
   const ws = wb.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
 
   let headerIdx = -1;
   for (let i = 0; i < rows.length; i++) {
     if (Array.isArray(rows[i])) {
-      const isHeader = rows[i].some(c => {
+      const isHeader = rows[i].some((c) => {
         if (!c) return false;
         const str = String(c).toLowerCase();
-        return str.includes('board') || str.includes('pass') || str.includes('test bench');
+        return (
+          str.includes("board") ||
+          str.includes("pass") ||
+          str.includes("test bench")
+        );
       });
       if (isHeader) {
         headerIdx = i;
@@ -104,14 +110,18 @@ function parseFPYExcel(arrayBuffer) {
   }
 
   if (headerIdx === -1) {
-    throw new Error('Expected column headers not found in file (Board, Pass, Test Bench).');
+    throw new Error(
+      "Expected column headers not found in file (Board, Pass, Test Bench).",
+    );
   }
 
-  let product = 'Unknown';
+  let product = "Unknown";
   try {
     for (let i = 0; i < headerIdx; i++) {
       if (!Array.isArray(rows[i])) continue;
-      const cell = rows[i].find(c => c && String(c).toLowerCase().includes('produit'));
+      const cell = rows[i].find(
+        (c) => c && String(c).toLowerCase().includes("produit"),
+      );
       if (cell) {
         const match = String(cell).match(/Produit\s*:\s*([^>]+)/i);
         if (match && match[1]) product = match[1].trim();
@@ -119,44 +129,50 @@ function parseFPYExcel(arrayBuffer) {
       }
     }
   } catch (e) {
-    console.warn('Product info parsing failed', e);
+    console.warn("Product info parsing failed", e);
   }
 
   const headers = rows[headerIdx] || [];
   const getCol = (name) => {
     if (!Array.isArray(headers)) return -1;
-    return headers.findIndex(h => h && String(h).toLowerCase().includes(name.toLowerCase()));
+    return headers.findIndex(
+      (h) => h && String(h).toLowerCase().includes(name.toLowerCase()),
+    );
   };
 
   const col = {
-    benchName: getCol('test bench') !== -1 ? getCol('test bench') : getCol('product name'),
-    nbBoards: getCol('nb board') !== -1 ? getCol('nb board') : getCol('board'),
-    nbFirstPass: getCol('1st pass'),
-    nbOkFirstPass: getCol('ok 1st pass'),
-    nbBoardsOK: getCol('boards ok') !== -1 ? getCol('boards ok') : getCol('board ok'),
-    fpy: getCol('fpy'),
-    top1: getCol('top 1'),
-    qty1: getCol('qty 1'),
-    top2: getCol('top 2'),
-    qty2: getCol('qty 2'),
-    top3: getCol('top 3'),
-    qty3: getCol('qty 3'),
-    nbTestRun: getCol('test run') !== -1 ? getCol('test run') : getCol('runs')
+    benchName:
+      getCol("test bench") !== -1
+        ? getCol("test bench")
+        : getCol("product name"),
+    nbBoards: getCol("nb board") !== -1 ? getCol("nb board") : getCol("board"),
+    nbFirstPass: getCol("1st pass"),
+    nbOkFirstPass: getCol("ok 1st pass"),
+    nbBoardsOK:
+      getCol("boards ok") !== -1 ? getCol("boards ok") : getCol("board ok"),
+    fpy: getCol("fpy"),
+    top1: getCol("top 1"),
+    qty1: getCol("qty 1"),
+    top2: getCol("top 2"),
+    qty2: getCol("qty 2"),
+    top3: getCol("top 3"),
+    qty3: getCol("qty 3"),
+    nbTestRun: getCol("test run") !== -1 ? getCol("test run") : getCol("runs"),
   };
 
   const nameIdx = col.benchName !== -1 ? col.benchName : 0;
 
-  const parsePct = v => {
+  const parsePct = (v) => {
     if (!v) return null;
-    let n = parseFloat(String(v).replace('%', '').trim());
+    let n = parseFloat(String(v).replace("%", "").trim());
     return isNaN(n) ? null : n;
   };
-  const parseNum = v => {
+  const parseNum = (v) => {
     if (!v) return 0;
     const n = parseInt(v, 10);
     return isNaN(n) ? 0 : n;
   };
-  const parseDefect = v => v ? String(v).replace(/[>]/g, '').trim() : null;
+  const parseDefect = (v) => (v ? String(v).replace(/[>]/g, "").trim() : null);
 
   const stations = [];
   const defectsMap = {};
@@ -166,26 +182,33 @@ function parseFPYExcel(arrayBuffer) {
     if (!Array.isArray(row) || row.length === 0 || !row[nameIdx]) continue;
 
     const nameCell = String(row[nameIdx]).trim();
-    if (!nameCell || nameCell.toUpperCase().includes('TOTAL')) {
-      if (product === 'Unknown' && nameCell.toUpperCase().includes('TOTAL')) {
-        product = nameCell.replace(/TOTAL/i, '').trim();
+    if (!nameCell || nameCell.toUpperCase().includes("TOTAL")) {
+      if (product === "Unknown" && nameCell.toUpperCase().includes("TOTAL")) {
+        product = nameCell.replace(/TOTAL/i, "").trim();
       }
       continue;
     }
 
-    const parts = nameCell.split('|');
-    const bench = parts[0] ? parts[0].trim() : 'Unknown';
+    const parts = nameCell.split("|");
+    const bench = parts[0] ? parts[0].trim() : "Unknown";
     const stationName = parts.length > 1 ? parts[1].trim() : bench;
 
     const nbBoards = col.nbBoards >= 0 ? parseNum(row[col.nbBoards]) : 0;
-    const nbFirstPass = col.nbFirstPass >= 0 ? parseNum(row[col.nbFirstPass]) : 0;
-    const nbOkFirstPass = col.nbOkFirstPass >= 0 ? parseNum(row[col.nbOkFirstPass]) : 0;
+    const nbFirstPass =
+      col.nbFirstPass >= 0 ? parseNum(row[col.nbFirstPass]) : 0;
+    const nbOkFirstPass =
+      col.nbOkFirstPass >= 0 ? parseNum(row[col.nbOkFirstPass]) : 0;
     const nbBoardsOK = col.nbBoardsOK >= 0 ? parseNum(row[col.nbBoardsOK]) : 0;
     const nbTestRun = col.nbTestRun >= 0 ? parseNum(row[col.nbTestRun]) : 0;
 
     let fpy = col.fpy >= 0 ? parsePct(row[col.fpy]) : null;
     if (fpy === null || fpy > 100 || fpy <= 0) {
-      fpy = nbFirstPass > 0 ? (nbOkFirstPass / nbFirstPass) * 100 : (nbBoards > 0 ? (nbBoardsOK / nbBoards) * 100 : 0);
+      fpy =
+        nbFirstPass > 0
+          ? (nbOkFirstPass / nbFirstPass) * 100
+          : nbBoards > 0
+            ? (nbBoardsOK / nbBoards) * 100
+            : 0;
     }
 
     const top1 = col.top1 >= 0 ? parseDefect(row[col.top1]) : null;
@@ -210,7 +233,7 @@ function parseFPYExcel(arrayBuffer) {
       nbTestRun,
       fpy,
       top1,
-      qty1
+      qty1,
     });
   }
 
@@ -218,7 +241,9 @@ function parseFPYExcel(arrayBuffer) {
   let achieved = 0;
   let overallFPY = null;
 
-  const assemblyRow = stations.find(s => s.stationName && s.stationName.toLowerCase().includes('assembly'));
+  const assemblyRow = stations.find(
+    (s) => s.stationName && s.stationName.toLowerCase().includes("assembly"),
+  );
   if (assemblyRow) {
     totalBoards = assemblyRow.nbBoards;
   } else if (stations.length > 0) {
@@ -227,7 +252,11 @@ function parseFPYExcel(arrayBuffer) {
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
-    if (Array.isArray(row) && row[nameIdx] && String(row[nameIdx]).toUpperCase().includes('TOTAL')) {
+    if (
+      Array.isArray(row) &&
+      row[nameIdx] &&
+      String(row[nameIdx]).toUpperCase().includes("TOTAL")
+    ) {
       if (totalBoards === 0) {
         totalBoards = col.nbBoards >= 0 ? parseNum(row[col.nbBoards]) : 0;
       }
@@ -237,10 +266,18 @@ function parseFPYExcel(arrayBuffer) {
   }
 
   if (totalBoards === 0) {
-    totalBoards = stations.reduce((max, r) => r.nbBoards > max ? r.nbBoards : max, 0);
+    totalBoards = stations.reduce(
+      (max, r) => (r.nbBoards > max ? r.nbBoards : max),
+      0,
+    );
   }
 
-  const multiTestRow = stations.find(s => s.stationName && (s.stationName.toLowerCase().includes('multi-test') || s.stationName.toLowerCase().includes('multitest')));
+  const multiTestRow = stations.find(
+    (s) =>
+      s.stationName &&
+      (s.stationName.toLowerCase().includes("multi-test") ||
+        s.stationName.toLowerCase().includes("multitest")),
+  );
   if (multiTestRow) {
     achieved = multiTestRow.nbBoardsOK;
   } else {
@@ -258,7 +295,14 @@ function parseFPYExcel(arrayBuffer) {
     .sort((a, b) => b.qty - a.qty)
     .slice(0, 8);
 
-  return { product, stations, defects: defectsArr, achieved, totalBoards, overallFPY };
+  return {
+    product,
+    stations,
+    defects: defectsArr,
+    achieved,
+    totalBoards,
+    overallFPY,
+  };
 }
 
 function getProductionDateAndShift() {
@@ -267,23 +311,23 @@ function getProductionDateAndShift() {
   if (hour >= 6 && hour < 18) {
     return {
       date: now.toISOString().slice(0, 10),
-      shift: 'Morning'
+      shift: "Morning",
     };
   } else if (hour >= 18) {
     return {
       date: now.toISOString().slice(0, 10),
-      shift: 'Evening'
+      shift: "Evening",
     };
   } else {
     // 00:00 to 05:59 belongs to previous day's evening shift
     const prev = new Date(now);
     prev.setDate(prev.getDate() - 1);
     const py = prev.getFullYear();
-    const pm = String(prev.getMonth() + 1).padStart(2, '0');
-    const pd = String(prev.getDate()).padStart(2, '0');
+    const pm = String(prev.getMonth() + 1).padStart(2, "0");
+    const pd = String(prev.getDate()).padStart(2, "0");
     return {
       date: `${py}-${pm}-${pd}`,
-      shift: 'Evening'
+      shift: "Evening",
     };
   }
 }
@@ -295,14 +339,19 @@ function getTodayString() {
 export default function Production() {
   const { user } = useAuth();
   const { isArabic, t } = useLanguage();
-  const isAdmin = user?.access === 'admin';
-  const isSupervisor = user?.access === 'supervisor';
-  const isViewer = user?.access === 'viewer';
+  const isAdmin = user?.access === "admin";
+  const isSupervisor = user?.access === "supervisor";
+  const isViewer = user?.access === "viewer";
 
   // State
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [availableTeams, setAvailableTeams] = useState(['Team Alpha', 'Team Beta', 'Shift A', 'Management']);
+  const [availableTeams, setAvailableTeams] = useState([
+    "Team Alpha",
+    "Team Beta",
+    "Shift A",
+    "Management",
+  ]);
   const [supabaseConnected, setSupabaseConnected] = useState(true);
 
   // Modals state
@@ -311,10 +360,10 @@ export default function Production() {
   const [selectedRecordForDetail, setSelectedRecordForDetail] = useState(null);
 
   // Filters
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterTeam, setFilterTeam] = useState('ALL');
-  const [filterShift, setFilterShift] = useState('ALL');
-  const [filterDate, setFilterDate] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterTeam, setFilterTeam] = useState("ALL");
+  const [filterShift, setFilterShift] = useState("ALL");
+  const [filterDate, setFilterDate] = useState("");
 
   // Upload modal form states
   const initialShiftInfo = getProductionDateAndShift();
@@ -324,54 +373,58 @@ export default function Production() {
   const [uploadTarget, setUploadTarget] = useState(650);
   const [uploadShift, setUploadShift] = useState(initialShiftInfo.shift); // 'Morning' or 'Evening'
   const [uploadFwQty, setUploadFwQty] = useState(0);
-  const [uploadTeamName, setUploadTeamName] = useState('');
-  const [uploadNotes, setUploadNotes] = useState('');
-  const [uploadError, setUploadError] = useState('');
+  const [uploadTeamName, setUploadTeamName] = useState("");
+  const [uploadNotes, setUploadNotes] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState("");
 
   // Manual FW QTY modal form states
   const [fwRecordId, setFwRecordId] = useState(null);
   const [fwDate, setFwDate] = useState(getTodayString());
-  const [fwProduct, setFwProduct] = useState('G3 Smart Meter');
-  const [fwQty, setFwQty] = useState('');
-  const [fwTeamName, setFwTeamName] = useState('');
-  const [fwError, setFwError] = useState('');
+  const [fwProduct, setFwProduct] = useState("G3 Smart Meter");
+  const [fwQty, setFwQty] = useState("");
+  const [fwTeamName, setFwTeamName] = useState("");
+  const [fwError, setFwError] = useState("");
   const [fwSaving, setFwSaving] = useState(false);
 
   // Edit Production Report Modal states
   const [editRecordId, setEditRecordId] = useState(null);
-  const [editDate, setEditDate] = useState('');
-  const [editShift, setEditShift] = useState('Morning');
+  const [editDate, setEditDate] = useState("");
+  const [editShift, setEditShift] = useState("Morning");
   const [editTarget, setEditTarget] = useState(650);
-  const [editProduct, setEditProduct] = useState('');
+  const [editProduct, setEditProduct] = useState("");
   const [editAchieved, setEditAchieved] = useState(0);
   const [editTotalBoards, setEditTotalBoards] = useState(0);
   const [editFwQty, setEditFwQty] = useState(0);
-  const [editTeamName, setEditTeamName] = useState('');
-  const [editNotes, setEditNotes] = useState('');
+  const [editTeamName, setEditTeamName] = useState("");
+  const [editNotes, setEditNotes] = useState("");
   const [isUpdatingRecord, setIsUpdatingRecord] = useState(false);
-  const [editError, setEditError] = useState('');
+  const [editError, setEditError] = useState("");
   const [isSyncingEditFw, setIsSyncingEditFw] = useState(false);
-  const [syncEditMsg, setSyncEditMsg] = useState('');
+  const [syncEditMsg, setSyncEditMsg] = useState("");
 
   const handleSyncEditFw = async (dateVal, shiftVal) => {
     const d = dateVal || editDate;
     const s = shiftVal || editShift;
     if (!d || !s) return;
     setIsSyncingEditFw(true);
-    setSyncEditMsg('');
+    setSyncEditMsg("");
     try {
       const count = await fetchFwSyncCount(d, s);
       if (count != null) {
         setEditFwQty(count);
-        setSyncEditMsg(`✓ Synced ${count.toLocaleString()} kits from Google Drive (${s})`);
+        setSyncEditMsg(
+          `✓ Synced ${count.toLocaleString()} kits from Google Drive (${s})`,
+        );
       } else {
-        setSyncEditMsg('⚠️ Could not sync: No matching records or server unreachable.');
+        setSyncEditMsg(
+          "⚠️ Could not sync: No matching records or server unreachable.",
+        );
       }
     } catch (e) {
-      console.warn('Edit sync error:', e);
-      setSyncEditMsg('⚠️ Sync error: ' + (e.message || ''));
+      console.warn("Edit sync error:", e);
+      setSyncEditMsg("⚠️ Sync error: " + (e.message || ""));
     } finally {
       setIsSyncingEditFw(false);
     }
@@ -379,13 +432,13 @@ export default function Production() {
 
   // Initialize Team logic based on user
   useEffect(() => {
-    const userTeam = user?.team_name?.trim() || 'Team Alpha';
+    const userTeam = user?.team_name?.trim() || "Team Alpha";
     if (isSupervisor) {
       setUploadTeamName(userTeam);
       setFwTeamName(userTeam);
     } else {
-      setUploadTeamName(user?.team_name?.trim() || 'Management');
-      setFwTeamName(user?.team_name?.trim() || 'Management');
+      setUploadTeamName(user?.team_name?.trim() || "Management");
+      setFwTeamName(user?.team_name?.trim() || "Management");
     }
   }, [user, isSupervisor]);
 
@@ -393,24 +446,30 @@ export default function Production() {
   useEffect(() => {
     async function fetchTeams() {
       try {
-        const { data, error } = await supabase.from('users').select('team_name');
-        const teamsSet = new Set(['Management']);
+        const { data, error } = await supabase
+          .from("users")
+          .select("team_name");
+        const teamsSet = new Set(["Management"]);
         if (data && data.length > 0) {
-          data.forEach(u => {
-            if (u.team_name && u.team_name.trim()) teamsSet.add(u.team_name.trim());
+          data.forEach((u) => {
+            if (u.team_name && u.team_name.trim())
+              teamsSet.add(u.team_name.trim());
           });
         }
         if (records && records.length > 0) {
-          records.forEach(r => {
+          records.forEach((r) => {
             if (r.team_name) {
-              const base = r.team_name.split(' - ')[0].replace(/\[.*?\]/, '').trim();
+              const base = r.team_name
+                .split(" - ")[0]
+                .replace(/\[.*?\]/, "")
+                .trim();
               if (base) teamsSet.add(base);
             }
           });
         }
         setAvailableTeams(Array.from(teamsSet).filter(Boolean));
       } catch (e) {
-        console.warn('Teams fetch error:', e);
+        console.warn("Teams fetch error:", e);
       }
     }
     fetchTeams();
@@ -421,28 +480,33 @@ export default function Production() {
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('production_records')
-        .select('*')
-        .order('date', { ascending: false });
+        .from("production_records")
+        .select("*")
+        .order("date", { ascending: false });
 
       if (error) {
         setSupabaseConnected(false);
         // Try fallback view or local cache
-        const local = localStorage.getItem('ectron_production_records');
+        const local = localStorage.getItem("ectron_production_records");
         if (local) {
           setRecords(JSON.parse(local));
         }
       } else {
         setSupabaseConnected(true);
         setRecords(data || []);
-        localStorage.setItem('ectron_production_records', JSON.stringify(data || []));
+        localStorage.setItem(
+          "ectron_production_records",
+          JSON.stringify(data || []),
+        );
       }
     } catch (err) {
-      console.warn('Supabase fetch records error:', err);
+      console.warn("Supabase fetch records error:", err);
       setSupabaseConnected(false);
-      const local = localStorage.getItem('ectron_production_records');
+      const local = localStorage.getItem("ectron_production_records");
       if (local) {
-        try { setRecords(JSON.parse(local)); } catch {}
+        try {
+          setRecords(JSON.parse(local));
+        } catch {}
       }
     } finally {
       setLoading(false);
@@ -457,10 +521,10 @@ export default function Production() {
   const handleFileUpload = (file) => {
     if (!file) return;
     setIsParsing(true);
-    setUploadError('');
-    setSaveSuccessMsg('');
+    setUploadError("");
+    setSaveSuccessMsg("");
     const reader = new FileReader();
-    reader.onload = e => {
+    reader.onload = (e) => {
       try {
         const data = parseFPYExcel(e.target.result);
         const curShift = getProductionDateAndShift();
@@ -472,13 +536,13 @@ export default function Production() {
         // Automatically sync FW QTY from Google Drive LOG.csv for this production shift
         syncFwForUpload(curShift.date, curShift.shift);
       } catch (err) {
-        setUploadError(err.message || 'Error reading Excel file.');
+        setUploadError(err.message || "Error reading Excel file.");
       } finally {
         setIsParsing(false);
       }
     };
     reader.onerror = () => {
-      setUploadError('Failed to read file from disk.');
+      setUploadError("Failed to read file from disk.");
       setIsParsing(false);
     };
     reader.readAsArrayBuffer(file);
@@ -498,16 +562,19 @@ export default function Production() {
       }
 
       // 2. Fallback: Find matching shift count in existing production_records in Supabase
-      const isMorning = targetShift === 'Morning';
+      const isMorning = targetShift === "Morning";
       const { data, error } = await supabase
-        .from('production_records')
-        .select('updated_fw_qty, team_name, notes')
-        .eq('date', targetDate);
+        .from("production_records")
+        .select("updated_fw_qty, team_name, notes")
+        .eq("date", targetDate);
 
       if (!error && data && data.length > 0) {
-        const match = data.find(r => {
-          const str = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
-          return isMorning ? (str.includes('morning') || str.includes('\u0635\u0628\u0627\u062d')) : (str.includes('evening') || str.includes('\u0645\u0633\u0627'));
+        const match = data.find((r) => {
+          const str = `${r.team_name || ""} ${r.notes || ""}`.toLowerCase();
+          return isMorning
+            ? str.includes("morning") ||
+                str.includes("\u0635\u0628\u0627\u062d")
+            : str.includes("evening") || str.includes("\u0645\u0633\u0627");
         });
         if (match && match.updated_fw_qty != null && match.updated_fw_qty > 0) {
           setUploadFwQty(match.updated_fw_qty);
@@ -517,9 +584,9 @@ export default function Production() {
       }
 
       // If not yet recorded, default or fallback
-      setUploadFwQty(prev => prev > 0 ? prev : 0);
+      setUploadFwQty((prev) => (prev > 0 ? prev : 0));
     } catch (err) {
-      console.warn('Sync FW error:', err);
+      console.warn("Sync FW error:", err);
     } finally {
       setIsSyncingFw(false);
     }
@@ -529,32 +596,34 @@ export default function Production() {
   const handleSaveUpload = async () => {
     if (!parsedData) return;
     setIsSaving(true);
-    setUploadError('');
+    setUploadError("");
 
-    const shiftLabel = uploadShift === 'Evening' ? 'Evening' : 'Morning';
-    const assignedTeamBase = isSupervisor 
-      ? (user?.team_name?.trim() || 'Team Alpha') 
-      : (uploadTeamName || 'Management');
+    const shiftLabel = uploadShift === "Evening" ? "Evening" : "Morning";
+    const assignedTeamBase = isSupervisor
+      ? user?.team_name?.trim() || "Team Alpha"
+      : uploadTeamName || "Management";
     const assignedTeam = `${assignedTeamBase} - ${shiftLabel}`;
 
     const payload = {
       date: uploadDate,
-      product: parsedData.product || 'Unknown',
+      product: parsedData.product || "Unknown",
       target: parseInt(uploadTarget) || 650,
-      overall_fpy: parsedData.overallFPY ? parseFloat(parsedData.overallFPY.toFixed(2)) : null,
+      overall_fpy: parsedData.overallFPY
+        ? parseFloat(parsedData.overallFPY.toFixed(2))
+        : null,
       total_boards: parsedData.totalBoards || 0,
       achieved: parsedData.achieved || 0,
       updated_fw_qty: parseInt(uploadFwQty) || 0,
-      entered_by: user?.name || 'Admin',
+      entered_by: user?.name || "Admin",
       team_name: assignedTeam,
       notes: uploadNotes.trim(),
       stations: parsedData.stations || [],
-      defects: parsedData.defects || []
+      defects: parsedData.defects || [],
     };
 
     try {
       const { data, error } = await supabase
-        .from('production_records')
+        .from("production_records")
         .insert([payload])
         .select();
 
@@ -564,7 +633,10 @@ export default function Production() {
         const newRecord = { ...payload, id: Date.now() };
         currentList.unshift(newRecord);
         setRecords(currentList);
-        localStorage.setItem('ectron_production_records', JSON.stringify(currentList));
+        localStorage.setItem(
+          "ectron_production_records",
+          JSON.stringify(currentList),
+        );
       } else {
         await loadRecords();
       }
@@ -572,12 +644,12 @@ export default function Production() {
       setShowUploadModal(false);
       setParsedData(null);
       setUploadFwQty(0);
-      setUploadNotes('');
-      setSaveSuccessMsg('Production report saved successfully!');
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setUploadNotes("");
+      setSaveSuccessMsg("Production report saved successfully!");
+      setTimeout(() => setSaveSuccessMsg(""), 4000);
     } catch (err) {
-      console.error('Save FPY error:', err);
-      setUploadError('Error occurred while saving: ' + (err.message || ''));
+      console.error("Save FPY error:", err);
+      setUploadError("Error occurred while saving: " + (err.message || ""));
     } finally {
       setIsSaving(false);
     }
@@ -585,19 +657,23 @@ export default function Production() {
 
   // Open manual FW QTY Modal
   const openFwModalForRecord = (record = null) => {
-    setFwError('');
+    setFwError("");
     if (record) {
       setFwRecordId(record.id);
       setFwDate(record.date || getTodayString());
-      setFwProduct(record.product || 'G3 Smart Meter');
-      setFwQty(record.updated_fw_qty || '');
-      setFwTeamName(record.team_name || (user?.team_name?.trim() || 'Team Alpha'));
+      setFwProduct(record.product || "G3 Smart Meter");
+      setFwQty(record.updated_fw_qty || "");
+      setFwTeamName(
+        record.team_name || user?.team_name?.trim() || "Team Alpha",
+      );
     } else {
       setFwRecordId(null);
       setFwDate(getTodayString());
-      setFwProduct('G3 Smart Meter');
-      setFwQty('');
-      const defaultTeam = isSupervisor ? (user?.team_name?.trim() || 'Team Alpha') : (availableTeams[0] || 'Management');
+      setFwProduct("G3 Smart Meter");
+      setFwQty("");
+      const defaultTeam = isSupervisor
+        ? user?.team_name?.trim() || "Team Alpha"
+        : availableTeams[0] || "Management";
       setFwTeamName(defaultTeam);
     }
     setShowFwModal(true);
@@ -608,72 +684,94 @@ export default function Production() {
     e.preventDefault();
     const qtyNum = parseInt(fwQty, 10);
     if (isNaN(qtyNum) || qtyNum < 0) {
-      setFwError('Please enter a valid quantity greater than or equal to 0.');
+      setFwError("Please enter a valid quantity greater than or equal to 0.");
       return;
     }
 
     setFwSaving(true);
-    setFwError('');
+    setFwError("");
 
-    const assignedTeam = isSupervisor ? (user?.team_name?.trim() || 'Team Alpha') : (fwTeamName || 'Management');
+    const assignedTeam = isSupervisor
+      ? user?.team_name?.trim() || "Team Alpha"
+      : fwTeamName || "Management";
 
     try {
       if (fwRecordId) {
         const { error } = await supabase
-          .from('production_records')
+          .from("production_records")
           .update({
             updated_fw_qty: qtyNum,
-            entered_by: user?.name || 'Admin',
-            team_name: assignedTeam
+            entered_by: user?.name || "Admin",
+            team_name: assignedTeam,
           })
-          .eq('id', fwRecordId);
+          .eq("id", fwRecordId);
 
         if (error) {
           // Update local cache
-          const updated = records.map(r => r.id === fwRecordId ? { ...r, updated_fw_qty: qtyNum, team_name: assignedTeam } : r);
+          const updated = records.map((r) =>
+            r.id === fwRecordId
+              ? { ...r, updated_fw_qty: qtyNum, team_name: assignedTeam }
+              : r,
+          );
           setRecords(updated);
-          localStorage.setItem('ectron_production_records', JSON.stringify(updated));
+          localStorage.setItem(
+            "ectron_production_records",
+            JSON.stringify(updated),
+          );
         } else {
           await loadRecords();
         }
       } else {
-        const existing = records.find(r => r.date === fwDate && (r.team_name === assignedTeam || !r.team_name));
+        const existing = records.find(
+          (r) =>
+            r.date === fwDate && (r.team_name === assignedTeam || !r.team_name),
+        );
         if (existing) {
           const newQty = (existing.updated_fw_qty || 0) + qtyNum;
           const { error } = await supabase
-            .from('production_records')
+            .from("production_records")
             .update({
               updated_fw_qty: newQty,
-              entered_by: user?.name || 'Admin'
+              entered_by: user?.name || "Admin",
             })
-            .eq('id', existing.id);
+            .eq("id", existing.id);
 
           if (error) {
-            const updated = records.map(r => r.id === existing.id ? { ...r, updated_fw_qty: newQty } : r);
+            const updated = records.map((r) =>
+              r.id === existing.id ? { ...r, updated_fw_qty: newQty } : r,
+            );
             setRecords(updated);
-            localStorage.setItem('ectron_production_records', JSON.stringify(updated));
+            localStorage.setItem(
+              "ectron_production_records",
+              JSON.stringify(updated),
+            );
           } else {
             await loadRecords();
           }
         } else {
           const newRec = {
             date: fwDate,
-            product: fwProduct || 'Smart Meter',
+            product: fwProduct || "Smart Meter",
             target: 320,
             overall_fpy: 100,
             total_boards: qtyNum,
             achieved: qtyNum,
             updated_fw_qty: qtyNum,
-            entered_by: user?.name || 'Admin',
+            entered_by: user?.name || "Admin",
             team_name: assignedTeam,
             stations: [],
-            defects: []
+            defects: [],
           };
-          const { error } = await supabase.from('production_records').insert([newRec]);
+          const { error } = await supabase
+            .from("production_records")
+            .insert([newRec]);
           if (error) {
             const list = [{ ...newRec, id: Date.now() }, ...records];
             setRecords(list);
-            localStorage.setItem('ectron_production_records', JSON.stringify(list));
+            localStorage.setItem(
+              "ectron_production_records",
+              JSON.stringify(list),
+            );
           } else {
             await loadRecords();
           }
@@ -681,12 +779,12 @@ export default function Production() {
       }
 
       setShowFwModal(false);
-      setFwQty('');
-      setSaveSuccessMsg('Updated FW QTY saved successfully!');
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setFwQty("");
+      setSaveSuccessMsg("Updated FW QTY saved successfully!");
+      setTimeout(() => setSaveSuccessMsg(""), 4000);
     } catch (err) {
-      console.error('Error saving FW QTY:', err);
-      setFwError('Failed to save: ' + (err.message || ''));
+      console.error("Error saving FW QTY:", err);
+      setFwError("Failed to save: " + (err.message || ""));
     } finally {
       setFwSaving(false);
     }
@@ -695,29 +793,36 @@ export default function Production() {
   // Open Full Production Report Edit Modal
   const openEditModalForRecord = (record) => {
     if (!record) return;
-    setEditError('');
-    setSyncEditMsg('');
+    setEditError("");
+    setSyncEditMsg("");
     setEditRecordId(record.id);
     const recDate = record.date || getTodayString();
     setEditDate(recDate);
-    
-    const recStr = `${record.team_name || ''} ${record.notes || ''}`.toLowerCase();
-    const isEvening = recStr.includes('evening') || recStr.includes('\u0645\u0633\u0627');
-    const detectedShift = isEvening ? 'Evening' : 'Morning';
+
+    const recStr =
+      `${record.team_name || ""} ${record.notes || ""}`.toLowerCase();
+    const isEvening =
+      recStr.includes("evening") || recStr.includes("\u0645\u0633\u0627");
+    const detectedShift = isEvening ? "Evening" : "Morning";
     setEditShift(detectedShift);
 
     setEditTarget(record.target || 650);
-    setEditProduct(record.product || '254100543S - SFIN MT212 OMAN - A01');
+    setEditProduct(record.product || "254100543S - SFIN MT212 OMAN - A01");
     setEditAchieved(record.achieved || 0);
     setEditTotalBoards(record.total_boards || 0);
     setEditFwQty(record.updated_fw_qty || 0);
 
-    const baseTeam = record.team_name 
-      ? record.team_name.split(' - ')[0].replace(/\[.*?\]/, '').trim() 
-      : (user?.team_name?.trim() || 'Team Alpha');
+    const baseTeam = record.team_name
+      ? record.team_name
+          .split(" - ")[0]
+          .replace(/\[.*?\]/, "")
+          .trim()
+      : user?.team_name?.trim() || "Team Alpha";
     setEditTeamName(baseTeam);
 
-    const cleanedNotes = record.notes ? record.notes.replace(/\[Shift:.*?\]/, '').trim() : '';
+    const cleanedNotes = record.notes
+      ? record.notes.replace(/\[Shift:.*?\]/, "").trim()
+      : "";
     setEditNotes(cleanedNotes);
 
     // Auto-fetch fresh FW count from Google Drive for this date and shift
@@ -729,11 +834,13 @@ export default function Production() {
     e.preventDefault();
     if (!editRecordId) return;
     setIsUpdatingRecord(true);
-    setEditError('');
+    setEditError("");
 
-    const shiftLabel = editShift === 'Evening' ? 'Evening' : 'Morning';
-    const assignedTeam = `${editTeamName || 'Team Alpha'} - ${shiftLabel}`;
-    const notesWithShift = editNotes.trim() ? `[Shift: ${shiftLabel}] ${editNotes.trim()}` : `[Shift: ${shiftLabel}]`;
+    const shiftLabel = editShift === "Evening" ? "Evening" : "Morning";
+    const assignedTeam = `${editTeamName || "Team Alpha"} - ${shiftLabel}`;
+    const notesWithShift = editNotes.trim()
+      ? `[Shift: ${shiftLabel}] ${editNotes.trim()}`
+      : `[Shift: ${shiftLabel}]`;
 
     const boardsNum = parseInt(editTotalBoards, 10) || 0;
     const achievedNum = parseInt(editAchieved, 10) || 0;
@@ -741,10 +848,11 @@ export default function Production() {
     const fwNum = parseInt(editFwQty, 10) || 0;
 
     // Achieved and total_boards are auto-derived from test logs, FW QTY is synced from Update PCs
-    const originalRecord = records.find(r => r.id === editRecordId);
+    const originalRecord = records.find((r) => r.id === editRecordId);
     const safeAchieved = originalRecord ? originalRecord.achieved : achievedNum;
     const safeBoards = originalRecord ? originalRecord.total_boards : boardsNum;
-    const safeFw = fwNum >= 0 ? fwNum : (originalRecord ? originalRecord.updated_fw_qty : 0);
+    const safeFw =
+      fwNum >= 0 ? fwNum : originalRecord ? originalRecord.updated_fw_qty : 0;
 
     let computedFpy = null;
     if (safeBoards > 0) {
@@ -761,37 +869,50 @@ export default function Production() {
       overall_fpy: computedFpy,
       team_name: assignedTeam,
       notes: notesWithShift,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     };
 
     try {
       const { data, error } = await supabase
-        .from('production_records')
+        .from("production_records")
         .update(updatedFields)
-        .eq('id', editRecordId)
+        .eq("id", editRecordId)
         .select();
 
       if (error) {
-        console.warn('Supabase update report error:', error);
-        throw new Error(error.message || 'Failed to update record in database');
+        console.warn("Supabase update report error:", error);
+        throw new Error(error.message || "Failed to update record in database");
       }
 
       // Update local state and localStorage
-      const updatedList = records.map(r => r.id === editRecordId ? { ...r, ...updatedFields } : r);
+      const updatedList = records.map((r) =>
+        r.id === editRecordId ? { ...r, ...updatedFields } : r,
+      );
       setRecords(updatedList);
-      localStorage.setItem('ectron_production_records', JSON.stringify(updatedList));
+      localStorage.setItem(
+        "ectron_production_records",
+        JSON.stringify(updatedList),
+      );
 
-      if (selectedRecordForDetail && selectedRecordForDetail.id === editRecordId) {
-        setSelectedRecordForDetail({ ...selectedRecordForDetail, ...updatedFields });
+      if (
+        selectedRecordForDetail &&
+        selectedRecordForDetail.id === editRecordId
+      ) {
+        setSelectedRecordForDetail({
+          ...selectedRecordForDetail,
+          ...updatedFields,
+        });
       }
 
       setEditRecordId(null);
-      setSaveSuccessMsg(`Production report updated successfully! Date: ${editDate}`);
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+      setSaveSuccessMsg(
+        `Production report updated successfully! Date: ${editDate}`,
+      );
+      setTimeout(() => setSaveSuccessMsg(""), 4000);
       await loadRecords();
     } catch (err) {
-      console.error('Update report error:', err);
-      setEditError(err.message || 'Error occurred while updating report.');
+      console.error("Update report error:", err);
+      setEditError(err.message || "Error occurred while updating report.");
     } finally {
       setIsUpdatingRecord(false);
     }
@@ -800,40 +921,63 @@ export default function Production() {
   // Delete Record from Supabase (Strictly Admin only)
   const handleDeleteRecord = async (id, date) => {
     if (!isAdmin) {
-      alert('Only administrators have permission to delete production records.');
+      alert(
+        "Only administrators have permission to delete production records.",
+      );
       return;
     }
-    if (!window.confirm(`Are you sure you want to permanently delete the production record for ${date}?`)) return;
+    if (
+      !window.confirm(
+        `Are you sure you want to permanently delete the production record for ${date}?`,
+      )
+    )
+      return;
 
     try {
-      await supabase.from('production_records').delete().eq('id', id);
-      const remaining = records.filter(r => r.id !== id);
+      await supabase.from("production_records").delete().eq("id", id);
+      const remaining = records.filter((r) => r.id !== id);
       setRecords(remaining);
-      localStorage.setItem('ectron_production_records', JSON.stringify(remaining));
+      localStorage.setItem(
+        "ectron_production_records",
+        JSON.stringify(remaining),
+      );
       await loadRecords();
     } catch (err) {
-      console.warn('Delete error:', err);
+      console.warn("Delete error:", err);
     }
   };
 
   // Filtered records
   const filteredRecords = useMemo(() => {
-    return records.filter(r => {
-      const matchSearch = searchTerm === '' || 
-        (r.product && r.product.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.entered_by && r.entered_by.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (r.team_name && r.team_name.toLowerCase().includes(searchTerm.toLowerCase()));
+    return records.filter((r) => {
+      const matchSearch =
+        searchTerm === "" ||
+        (r.product &&
+          r.product.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.entered_by &&
+          r.entered_by.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (r.team_name &&
+          r.team_name.toLowerCase().includes(searchTerm.toLowerCase()));
 
-      const rBaseTeam = (r.team_name || '').split(' - ')[0].replace(/\[.*?\]/, '').trim();
-      const matchTeam = filterTeam === 'ALL' || 
+      const rBaseTeam = (r.team_name || "")
+        .split(" - ")[0]
+        .replace(/\[.*?\]/, "")
+        .trim();
+      const matchTeam =
+        filterTeam === "ALL" ||
         r.team_name === filterTeam ||
         rBaseTeam.toLowerCase() === filterTeam.toLowerCase() ||
-        (r.team_name && r.team_name.toLowerCase().includes(filterTeam.toLowerCase()));
-      const matchDate = filterDate === '' || r.date === filterDate;
-      const rText = `${r.team_name || ''} ${r.notes || ''}`.toLowerCase();
-      const matchShift = filterShift === 'ALL' ||
-        (filterShift === 'Morning' && (rText.includes('morning') || rText.includes('\u0635\u0628\u0627\u062d'))) ||
-        (filterShift === 'Evening' && (rText.includes('evening') || rText.includes('\u0645\u0633\u0627')));
+        (r.team_name &&
+          r.team_name.toLowerCase().includes(filterTeam.toLowerCase()));
+      const matchDate = filterDate === "" || r.date === filterDate;
+      const rText = `${r.team_name || ""} ${r.notes || ""}`.toLowerCase();
+      const matchShift =
+        filterShift === "ALL" ||
+        (filterShift === "Morning" &&
+          (rText.includes("morning") ||
+            rText.includes("\u0635\u0628\u0627\u062d"))) ||
+        (filterShift === "Evening" &&
+          (rText.includes("evening") || rText.includes("\u0645\u0633\u0627")));
 
       return matchSearch && matchTeam && matchDate && matchShift;
     });
@@ -842,71 +986,107 @@ export default function Production() {
   // Stats
   const stats = useMemo(() => {
     const totalRecs = filteredRecords.length;
-    const totalBoards = filteredRecords.reduce((sum, r) => sum + (r.total_boards || 0), 0);
-    const totalAchieved = filteredRecords.reduce((sum, r) => sum + (r.achieved || 0), 0);
-    const totalFw = filteredRecords.reduce((sum, r) => sum + (r.updated_fw_qty || 0), 0);
+    const totalBoards = filteredRecords.reduce(
+      (sum, r) => sum + (r.total_boards || 0),
+      0,
+    );
+    const totalAchieved = filteredRecords.reduce(
+      (sum, r) => sum + (r.achieved || 0),
+      0,
+    );
+    const totalFw = filteredRecords.reduce(
+      (sum, r) => sum + (r.updated_fw_qty || 0),
+      0,
+    );
     return { totalRecs, totalBoards, totalAchieved, totalFw };
   }, [filteredRecords]);
 
   const fpyBadgeClass = (fpy) => {
-    if (fpy == null) return 'badge-viewer';
-    if (fpy >= 90) return 'badge-green';
-    if (fpy >= 75) return 'badge-amber';
-    return 'badge-red';
+    if (fpy == null) return "badge-viewer";
+    if (fpy >= 90) return "badge-green";
+    if (fpy >= 75) return "badge-amber";
+    return "badge-red";
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* ── Status Banners ── */}
       {saveSuccessMsg && (
-        <div style={{ background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0', padding: '12px 18px', borderRadius: 10, display: 'flex', alignItems: 'center', gap: 10, fontWeight: 700 }}>
+        <div
+          style={{
+            background: "#dcfce7",
+            color: "#15803d",
+            border: "1px solid #bbf7d0",
+            padding: "12px 18px",
+            borderRadius: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            fontWeight: 700,
+          }}
+        >
           <Check size={20} />
           {saveSuccessMsg}
         </div>
       )}
 
       {/* ── Page Header ── */}
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
+      <div
+        className="page-header"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: 16,
+        }}
+      >
         <div>
-          <h1 className="page-title">{t('prodTitle')}</h1>
-          <p className="page-subtitle">{t('prodSubtitle')}</p>
+          <h1 className="page-title">{t("prodTitle")}</h1>
+          <p className="page-subtitle">{t("prodSubtitle")}</p>
         </div>
 
         {/* Action Buttons at Top */}
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
           {!isViewer && (
-            <button 
+            <button
               type="button"
-              className="btn-primary" 
-              style={{ 
-                background: 'var(--teal)', 
-                display: 'inline-flex', 
-                alignItems: 'center', 
-                gap: 8, 
-                padding: '10px 20px', 
-                fontWeight: 700, 
-                fontSize: '0.92rem',
-                boxShadow: '0 4px 12px rgba(0, 175, 170, 0.25)' 
+              className="btn-primary"
+              style={{
+                background: "var(--teal)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 20px",
+                fontWeight: 700,
+                fontSize: "0.92rem",
+                boxShadow: "0 4px 12px rgba(0, 175, 170, 0.25)",
               }}
               onClick={() => {
                 setParsedData(null);
-                setUploadError('');
+                setUploadError("");
                 setUploadDate(getTodayString());
                 setShowUploadModal(true);
               }}
             >
               <Upload size={18} />
-              {t('uploadFpyBtn')}
+              {t("uploadFpyBtn")}
             </button>
           )}
 
-          <button 
-            type="button" 
-            className="btn-outline" 
-            title={t('refresh')}
+          <button
+            type="button"
+            className="btn-outline"
+            title={t("refresh")}
             onClick={loadRecords}
-            style={{ padding: '9px 12px' }}
+            style={{ padding: "9px 12px" }}
           >
             <RefreshCw size={16} />
           </button>
@@ -915,100 +1095,170 @@ export default function Production() {
 
       {/* ── Summary Counters ── */}
       <div className="kpi-grid">
-        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid var(--teal)', borderRight: isArabic ? '4px solid var(--teal)' : 'none' }}>
-          <div className="kpi-icon" style={{ background: 'var(--teal-light)', color: 'var(--teal-dark)' }}>
+        <div
+          className="kpi-card"
+          style={{
+            borderLeft: isArabic ? "none" : "4px solid var(--teal)",
+            borderRight: isArabic ? "4px solid var(--teal)" : "none",
+          }}
+        >
+          <div
+            className="kpi-icon"
+            style={{
+              background: "var(--teal-light)",
+              color: "var(--teal-dark)",
+            }}
+          >
             <FileSpreadsheet size={24} />
           </div>
           <div>
             <div className="kpi-val">{stats.totalRecs}</div>
-            <div className="kpi-lbl">{t('totalRecordsLogged')}</div>
+            <div className="kpi-lbl">{t("totalRecordsLogged")}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #3b82f6', borderRight: isArabic ? '4px solid #3b82f6' : 'none' }}>
-          <div className="kpi-icon" style={{ background: '#dbeafe', color: '#1d4ed8' }}>
+        <div
+          className="kpi-card"
+          style={{
+            borderLeft: isArabic ? "none" : "4px solid #3b82f6",
+            borderRight: isArabic ? "4px solid #3b82f6" : "none",
+          }}
+        >
+          <div
+            className="kpi-icon"
+            style={{ background: "#dbeafe", color: "#1d4ed8" }}
+          >
             <Layers size={24} />
           </div>
           <div>
             <div className="kpi-val">{stats.totalBoards.toLocaleString()}</div>
-            <div className="kpi-lbl">{t('totalBoardsInput')}</div>
+            <div className="kpi-lbl">{t("totalBoardsInput")}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #10b981', borderRight: isArabic ? '4px solid #10b981' : 'none' }}>
-          <div className="kpi-icon" style={{ background: '#d1fae5', color: '#047857' }}>
+        <div
+          className="kpi-card"
+          style={{
+            borderLeft: isArabic ? "none" : "4px solid #10b981",
+            borderRight: isArabic ? "4px solid #10b981" : "none",
+          }}
+        >
+          <div
+            className="kpi-icon"
+            style={{ background: "#d1fae5", color: "#047857" }}
+          >
             <CheckCircle size={24} />
           </div>
           <div>
-            <div className="kpi-val">{stats.totalAchieved.toLocaleString()}</div>
-            <div className="kpi-lbl">{t('finalOkOutput')}</div>
+            <div className="kpi-val">
+              {stats.totalAchieved.toLocaleString()}
+            </div>
+            <div className="kpi-lbl">{t("finalOkOutput")}</div>
           </div>
         </div>
 
-        <div className="kpi-card" style={{ borderLeft: isArabic ? 'none' : '4px solid #7c3aed', borderRight: isArabic ? '4px solid #7c3aed' : 'none' }}>
-          <div className="kpi-icon" style={{ background: '#ede9fe', color: '#7c3aed' }}>
+        <div
+          className="kpi-card"
+          style={{
+            borderLeft: isArabic ? "none" : "4px solid #7c3aed",
+            borderRight: isArabic ? "4px solid #7c3aed" : "none",
+          }}
+        >
+          <div
+            className="kpi-icon"
+            style={{ background: "#ede9fe", color: "#7c3aed" }}
+          >
             <Cpu size={24} />
           </div>
           <div>
-            <div className="kpi-val" style={{ color: '#7c3aed' }}>{stats.totalFw.toLocaleString()}</div>
-            <div className="kpi-lbl">{t('updatedFwQtyTotal')}</div>
+            <div className="kpi-val" style={{ color: "#7c3aed" }}>
+              {stats.totalFw.toLocaleString()}
+            </div>
+            <div className="kpi-lbl">{t("updatedFwQtyTotal")}</div>
           </div>
         </div>
       </div>
 
       {/* ── Filter Toolbar ── */}
-      <div className="card-white" style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div
+        className="card-white"
+        style={{
+          display: "flex",
+          gap: 12,
+          flexWrap: "wrap",
+          alignItems: "center",
+        }}
+      >
         <div className="search-wrap" style={{ minWidth: 260 }}>
           <Search className="search-icon" size={16} />
-          <input 
-            type="text" 
-            className="search-input" 
-            placeholder={isArabic ? 'بحث بالمنتج، الفريق، أو اسم المدخل...' : 'Search by product, team, or operator...'} 
+          <input
+            type="text"
+            className="search-input"
+            placeholder={
+              isArabic
+                ? "بحث بالمنتج، الفريق، أو اسم المدخل..."
+                : "Search by product, team, or operator..."
+            }
             value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <UsersIcon size={16} color="var(--gray-500)" />
-          <select 
-            className="search-input" 
-            style={{ width: 'auto', padding: '9px 12px' }}
-            value={filterTeam} 
-            onChange={e => setFilterTeam(e.target.value)}
+          <select
+            className="search-input"
+            style={{ width: "auto", padding: "9px 12px" }}
+            value={filterTeam}
+            onChange={(e) => setFilterTeam(e.target.value)}
           >
-            <option value="ALL">{isArabic ? 'جميع الفِرق' : 'All Teams'}</option>
-            {availableTeams.map(tName => (
-              <option key={tName} value={tName}>{tName}</option>
+            <option value="ALL">
+              {isArabic ? "جميع الفِرق" : "All Teams"}
+            </option>
+            {availableTeams.map((tName) => (
+              <option key={tName} value={tName}>
+                {tName}
+              </option>
             ))}
           </select>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <select 
-            className="search-input" 
-            style={{ width: 'auto', padding: '9px 12px', fontWeight: 600 }}
-            value={filterShift} 
-            onChange={e => setFilterShift(e.target.value)}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <select
+            className="search-input"
+            style={{ width: "auto", padding: "9px 12px", fontWeight: 600 }}
+            value={filterShift}
+            onChange={(e) => setFilterShift(e.target.value)}
           >
-            <option value="ALL">{isArabic ? 'جميع الورديات' : 'All Shifts'}</option>
-            <option value="Morning">{isArabic ? '☀️ الوردية الصباحية' : '☀️ Morning Shift'}</option>
-            <option value="Evening">{isArabic ? '🌙 الوردية المسائية' : '🌙 Evening Shift'}</option>
+            <option value="ALL">
+              {isArabic ? "جميع الورديات" : "All Shifts"}
+            </option>
+            <option value="Morning">
+              {isArabic ? "☀️ الوردية الصباحية" : "☀️ Morning Shift"}
+            </option>
+            <option value="Evening">
+              {isArabic ? "🌙 الوردية المسائية" : "🌙 Evening Shift"}
+            </option>
           </select>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <Calendar size={16} color="var(--gray-500)" />
-          <input 
-            type="date" 
-            className="search-input" 
-            style={{ width: 'auto', padding: '8px 12px' }}
+          <input
+            type="date"
+            className="search-input"
+            style={{ width: "auto", padding: "8px 12px" }}
             value={filterDate}
-            onChange={e => setFilterDate(e.target.value)}
+            onChange={(e) => setFilterDate(e.target.value)}
           />
           {filterDate && (
-            <button type="button" className="btn-outline" style={{ padding: '6px 10px', fontSize: '0.78rem' }} onClick={() => setFilterDate('')}>
-              {isArabic ? 'مسح التاريخ' : 'Clear Date'}
+            <button
+              type="button"
+              className="btn-outline"
+              style={{ padding: "6px 10px", fontSize: "0.78rem" }}
+              onClick={() => setFilterDate("")}
+            >
+              {isArabic ? "مسح التاريخ" : "Clear Date"}
             </button>
           )}
         </div>
@@ -1020,52 +1270,105 @@ export default function Production() {
           <table>
             <thead>
               <tr>
-                <th>{t('date')}</th>
-                <th>{t('product')}</th>
-                <th>{t('team')}</th>
-                <th>{isArabic ? 'المُدخِل' : 'Entered By'}</th>
-                <th style={{ textAlign: 'center' }}>{isArabic ? 'إجمالي اللوحات' : 'Total Boards'}</th>
-                <th style={{ textAlign: 'center' }}>{isArabic ? 'المنجز (OK)' : 'Achieved (OK)'}</th>
-                <th style={{ textAlign: 'center' }}>{isArabic ? 'معدل الجودة FPY' : 'FPY Yield'}</th>
-                <th style={{ textAlign: 'center', background: 'rgba(124, 58, 237, 0.06)' }}>
-                  <span style={{ color: '#7c3aed', fontWeight: 800 }}>{isArabic ? '⚡ كمية تحديث الفيرموير' : '⚡ Updated FW QTY'}</span>
+                <th>{t("date")}</th>
+                <th>{t("product")}</th>
+                <th>{t("team")}</th>
+                <th>{isArabic ? "المُدخِل" : "Entered By"}</th>
+                <th style={{ textAlign: "center" }}>
+                  {isArabic ? "إجمالي اللوحات" : "Total Boards"}
                 </th>
-                <th style={{ width: 120, textAlign: 'center' }}>{t('actions')}</th>
+                <th style={{ textAlign: "center" }}>
+                  {isArabic ? "المنجز (OK)" : "Achieved (OK)"}
+                </th>
+                <th style={{ textAlign: "center" }}>
+                  {isArabic ? "معدل الجودة FPY" : "FPY Yield"}
+                </th>
+                <th
+                  style={{
+                    textAlign: "center",
+                    background: "rgba(124, 58, 237, 0.06)",
+                  }}
+                >
+                  <span style={{ color: "#7c3aed", fontWeight: 800 }}>
+                    {isArabic ? "⚡ كمية تحديث الفيرموير" : "⚡ Updated FW QTY"}
+                  </span>
+                </th>
+                <th style={{ width: 120, textAlign: "center" }}>
+                  {t("actions")}
+                </th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
                   <td colSpan="9" className="table-empty">
-                    <span className="spinner" style={{ borderColor: 'rgba(18,168,157,.2)', borderTopColor: 'var(--teal)' }} />
+                    <span
+                      className="spinner"
+                      style={{
+                        borderColor: "rgba(18,168,157,.2)",
+                        borderTopColor: "var(--teal)",
+                      }}
+                    />
                   </td>
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
                   <td colSpan="9" className="table-empty">
-                    {records.length === 0 
-                      ? 'No records logged yet. Click "Upload FPY Report (Excel)" above to get started!' 
-                      : 'No records matching the selected filters.'}
+                    {records.length === 0
+                      ? 'No records logged yet. Click "Upload FPY Report (Excel)" above to get started!'
+                      : "No records matching the selected filters."}
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map(r => (
+                filteredRecords.map((r) => (
                   <tr key={r.id}>
-                    <td style={{ fontWeight: 700, color: 'var(--gray-900)', whiteSpace: 'nowrap' }}>
+                    <td
+                      style={{
+                        fontWeight: 700,
+                        color: "var(--gray-900)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
                       📅 {r.date}
                     </td>
                     <td>
-                      <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{r.product}</div>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 600, color: "var(--navy)" }}>
+                        {r.product}
+                      </div>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 6,
+                          alignItems: "center",
+                          marginTop: 3,
+                          flexWrap: "wrap",
+                        }}
+                      >
                         {r.target && (
-                          <span style={{ fontSize: '0.72rem', color: 'var(--gray-600)', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              color: "var(--gray-600)",
+                              background: "#f1f5f9",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              fontWeight: 700,
+                            }}
+                          >
                             🎯 Target: {r.target}
                           </span>
                         )}
                         {r.notes && (
-                          <span 
+                          <span
                             title={r.notes}
-                            style={{ fontSize: '0.7rem', background: '#fef3c7', color: '#b45309', padding: '1px 6px', borderRadius: 4, cursor: 'help' }}
+                            style={{
+                              fontSize: "0.7rem",
+                              background: "#fef3c7",
+                              color: "#b45309",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              cursor: "help",
+                            }}
                           >
                             📝 Note
                           </span>
@@ -1073,70 +1376,151 @@ export default function Production() {
                       </div>
                     </td>
                     <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <span style={{ 
-                          display: 'inline-flex', 
-                          alignItems: 'center', 
-                          gap: 5, 
-                          padding: '3px 8px', 
-                          borderRadius: 6, 
-                          fontSize: '0.8rem', 
-                          background: 'rgba(35, 63, 121, 0.08)', 
-                          color: 'var(--navy)', 
-                          fontWeight: 700,
-                          width: 'fit-content'
-                        }}>
-                          👥 {r.team_name ? r.team_name.split(' - ')[0] : '—'}
+                      <div
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                      >
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 5,
+                            padding: "3px 8px",
+                            borderRadius: 6,
+                            fontSize: "0.8rem",
+                            background: "rgba(35, 63, 121, 0.08)",
+                            color: "var(--navy)",
+                            fontWeight: 700,
+                            width: "fit-content",
+                          }}
+                        >
+                          👥 {r.team_name ? r.team_name.split(" - ")[0] : "—"}
                         </span>
-                        {(r.team_name?.includes('\u0635\u0628\u0627\u062d') || r.team_name?.includes('Morning') || r.notes?.includes('Morning')) && (
-                          <span style={{ fontSize: '0.72rem', background: '#fffbeb', color: '#b45309', border: '1px solid #fde68a', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
+                        {(r.team_name?.includes("\u0635\u0628\u0627\u062d") ||
+                          r.team_name?.includes("Morning") ||
+                          r.notes?.includes("Morning")) && (
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              background: "#fffbeb",
+                              color: "#b45309",
+                              border: "1px solid #fde68a",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              fontWeight: 800,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              width: "fit-content",
+                            }}
+                          >
                             ☀️ Morning Shift
                           </span>
                         )}
-                        {(r.team_name?.includes('\u0645\u0633\u0627') || r.team_name?.includes('Evening') || r.notes?.includes('Evening')) && (
-                          <span style={{ fontSize: '0.72rem', background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', padding: '1px 6px', borderRadius: 4, fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 4, width: 'fit-content' }}>
+                        {(r.team_name?.includes("\u0645\u0633\u0627") ||
+                          r.team_name?.includes("Evening") ||
+                          r.notes?.includes("Evening")) && (
+                          <span
+                            style={{
+                              fontSize: "0.72rem",
+                              background: "#f5f3ff",
+                              color: "#7c3aed",
+                              border: "1px solid #ddd6fe",
+                              padding: "1px 6px",
+                              borderRadius: 4,
+                              fontWeight: 800,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: 4,
+                              width: "fit-content",
+                            }}
+                          >
                             🌙 Evening Shift
                           </span>
                         )}
                       </div>
                     </td>
                     <td>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--gray-700)' }}>
-                        👤 {r.entered_by || '—'}
+                      <span
+                        style={{
+                          fontSize: "0.85rem",
+                          fontWeight: 600,
+                          color: "var(--gray-700)",
+                        }}
+                      >
+                        👤 {r.entered_by || "—"}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: '0.95rem' }}>
+                    <td
+                      style={{
+                        textAlign: "center",
+                        fontWeight: 700,
+                        fontSize: "0.95rem",
+                      }}
+                    >
                       {r.total_boards?.toLocaleString() || 0}
                     </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700, color: '#16a34a', fontSize: '0.95rem' }}>
+                    <td
+                      style={{
+                        textAlign: "center",
+                        fontWeight: 700,
+                        color: "#16a34a",
+                        fontSize: "0.95rem",
+                      }}
+                    >
                       {r.achieved?.toLocaleString() || 0}
                     </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span className={`badge ${fpyBadgeClass(r.overall_fpy)}`} style={{ padding: '4px 10px', fontSize: '0.82rem' }}>
-                        {r.overall_fpy != null ? `${r.overall_fpy}%` : '—'}
+                    <td style={{ textAlign: "center" }}>
+                      <span
+                        className={`badge ${fpyBadgeClass(r.overall_fpy)}`}
+                        style={{ padding: "4px 10px", fontSize: "0.82rem" }}
+                      >
+                        {r.overall_fpy != null ? `${r.overall_fpy}%` : "—"}
                       </span>
                     </td>
-                    <td style={{ textAlign: 'center', background: 'rgba(124, 58, 237, 0.04)' }}>
-                      <span style={{ 
-                        fontWeight: 800, 
-                        fontSize: '1rem', 
-                        color: '#7c3aed',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4
-                      }}>
+                    <td
+                      style={{
+                        textAlign: "center",
+                        background: "rgba(124, 58, 237, 0.04)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 800,
+                          fontSize: "1rem",
+                          color: "#7c3aed",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                        }}
+                      >
                         {r.updated_fw_qty != null && r.updated_fw_qty > 0 ? (
-                          <><span>⚙️</span> {r.updated_fw_qty.toLocaleString()}</>
+                          <>
+                            <span>⚙️</span> {r.updated_fw_qty.toLocaleString()}
+                          </>
                         ) : (
-                          <span style={{ color: 'var(--gray-400)', fontWeight: 400 }}>0</span>
+                          <span
+                            style={{
+                              color: "var(--gray-400)",
+                              fontWeight: 400,
+                            }}
+                          >
+                            0
+                          </span>
                         )}
                       </span>
                     </td>
                     <td>
-                      <div className="action-btns" style={{ justifyContent: 'center' }}>
-                        <button 
+                      <div
+                        className="action-btns"
+                        style={{ justifyContent: "center" }}
+                      >
+                        <button
                           type="button"
-                          className="btn-icon btn-edit" 
+                          className="btn-icon btn-edit"
                           title="View Station Details & Defects"
                           onClick={() => setSelectedRecordForDetail(r)}
                         >
@@ -1145,10 +1529,13 @@ export default function Production() {
 
                         {!isViewer && (
                           <>
-                            <button 
+                            <button
                               type="button"
-                              className="btn-icon" 
-                              style={{ background: '#e0f2fe', color: '#0369a1' }}
+                              className="btn-icon"
+                              style={{
+                                background: "#e0f2fe",
+                                color: "#0369a1",
+                              }}
                               title="Edit Production Report & Date"
                               onClick={() => openEditModalForRecord(r)}
                             >
@@ -1156,9 +1543,9 @@ export default function Production() {
                             </button>
 
                             {isAdmin && (
-                              <button 
+                              <button
                                 type="button"
-                                className="btn-icon btn-delete" 
+                                className="btn-icon btn-delete"
                                 title="Delete Record (Admin Only)"
                                 onClick={() => handleDeleteRecord(r.id, r.date)}
                               >
@@ -1179,16 +1566,29 @@ export default function Production() {
 
       {/* ── MODAL 1: Upload Modal ── */}
       {showUploadModal && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setShowUploadModal(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={(e) =>
+            e.target === e.currentTarget && setShowUploadModal(false)
+          }
+        >
           <div className="modal" style={{ maxWidth: 640 }}>
             <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Upload size={20} color="var(--teal)" />
                 <span className="modal-title">
-                  {parsedData ? 'Review & Confirm FPY Upload' : 'Upload SAGEMCOM FPY Excel File'}
+                  {parsedData
+                    ? "Review & Confirm FPY Upload"
+                    : "Upload SAGEMCOM FPY Excel File"}
                 </span>
               </div>
-              <button type="button" className="modal-close" onClick={() => setShowUploadModal(false)}>×</button>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowUploadModal(false)}
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body">
@@ -1196,229 +1596,471 @@ export default function Production() {
 
               {!parsedData ? (
                 /* Step 1: File Dropzone inside Modal */
-                <div 
-                  className="upload-dropzone" 
-                  style={{ 
-                    border: '2px dashed var(--teal)', 
-                    background: '#f0fdfa', 
-                    padding: '40px 20px', 
+                <div
+                  className="upload-dropzone"
+                  style={{
+                    border: "2px dashed var(--teal)",
+                    background: "#f0fdfa",
+                    padding: "40px 20px",
                     borderRadius: 12,
-                    cursor: 'pointer',
-                    textAlign: 'center'
+                    cursor: "pointer",
+                    textAlign: "center",
                   }}
-                  onClick={() => document.getElementById('modal-excel-input').click()}
-                  onDragOver={e => { e.preventDefault(); e.currentTarget.style.background = '#e6fffa'; }}
-                  onDragLeave={e => { e.currentTarget.style.background = '#f0fdfa'; }}
-                  onDrop={e => {
+                  onClick={() =>
+                    document.getElementById("modal-excel-input").click()
+                  }
+                  onDragOver={(e) => {
                     e.preventDefault();
-                    if (e.dataTransfer.files?.[0]) handleFileUpload(e.dataTransfer.files[0]);
+                    e.currentTarget.style.background = "#e6fffa";
+                  }}
+                  onDragLeave={(e) => {
+                    e.currentTarget.style.background = "#f0fdfa";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (e.dataTransfer.files?.[0])
+                      handleFileUpload(e.dataTransfer.files[0]);
                   }}
                 >
-                  <input 
-                    type="file" 
-                    id="modal-excel-input" 
-                    style={{ display: 'none' }} 
-                    accept=".xls,.xlsx" 
-                    onChange={e => handleFileUpload(e.target.files?.[0])} 
+                  <input
+                    type="file"
+                    id="modal-excel-input"
+                    style={{ display: "none" }}
+                    accept=".xls,.xlsx"
+                    onChange={(e) => handleFileUpload(e.target.files?.[0])}
                   />
-                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--teal-light)', color: 'var(--teal-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                  <div
+                    style={{
+                      width: 56,
+                      height: 56,
+                      borderRadius: "50%",
+                      background: "var(--teal-light)",
+                      color: "var(--teal-dark)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      margin: "0 auto 12px",
+                    }}
+                  >
                     <FileSpreadsheet size={30} />
                   </div>
-                  <div style={{ fontWeight: 800, fontSize: '1.05rem', color: 'var(--navy)' }}>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "1.05rem",
+                      color: "var(--navy)",
+                    }}
+                  >
                     Click to browse or drag and drop Excel file here
                   </div>
-                  <div style={{ fontSize: '0.82rem', color: 'var(--gray-500)', marginTop: 4 }}>
+                  <div
+                    style={{
+                      fontSize: "0.82rem",
+                      color: "var(--gray-500)",
+                      marginTop: 4,
+                    }}
+                  >
                     Supports SAGEMCOM FPY report sheets (.xlsx or .xls)
                   </div>
 
                   {isParsing && (
                     <div style={{ marginTop: 14 }}>
-                      <span className="spinner" style={{ margin: '0 auto 6px' }} />
-                      <div style={{ fontSize: '0.85rem', color: 'var(--teal-dark)', fontWeight: 600 }}>Parsing Excel data...</div>
+                      <span
+                        className="spinner"
+                        style={{ margin: "0 auto 6px" }}
+                      />
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                          color: "var(--teal-dark)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Parsing Excel data...
+                      </div>
                     </div>
                   )}
                 </div>
               ) : (
                 /* Step 2: Confirmation & Metadata */
                 <>
-                  <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                      <span style={{ fontWeight: 800, color: 'var(--navy)', fontSize: '0.95rem' }}>📦 {parsedData.product}</span>
-                      <button 
-                        type="button" 
-                        className="btn-outline" 
-                        style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      padding: 14,
+                      borderRadius: 10,
+                      border: "1px solid #e2e8f0",
+                      marginBottom: 16,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 800,
+                          color: "var(--navy)",
+                          fontSize: "0.95rem",
+                        }}
+                      >
+                        📦 {parsedData.product}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-outline"
+                        style={{ padding: "3px 8px", fontSize: "0.75rem" }}
                         onClick={() => setParsedData(null)}
                       >
                         Change File
                       </button>
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, textAlign: 'center' }}>
-                      <div style={{ background: 'white', padding: 10, borderRadius: 8, border: '1px solid #edf2f7' }}>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Overall FPY</div>
-                        <div style={{ fontWeight: 800, fontSize: '1.25rem', color: '#16a34a' }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(3, 1fr)",
+                        gap: 10,
+                        textAlign: "center",
+                      }}
+                    >
+                      <div
+                        style={{
+                          background: "white",
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #edf2f7",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "var(--gray-500)",
+                          }}
+                        >
+                          Overall FPY
+                        </div>
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            fontSize: "1.25rem",
+                            color: "#16a34a",
+                          }}
+                        >
                           {parsedData.overallFPY?.toFixed(2)}%
                         </div>
                       </div>
-                      <div style={{ background: 'white', padding: 10, borderRadius: 8, border: '1px solid #edf2f7' }}>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Total Boards</div>
-                        <div style={{ fontWeight: 800, fontSize: '1.25rem' }}>
+                      <div
+                        style={{
+                          background: "white",
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #edf2f7",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "var(--gray-500)",
+                          }}
+                        >
+                          Total Boards
+                        </div>
+                        <div style={{ fontWeight: 800, fontSize: "1.25rem" }}>
                           {parsedData.totalBoards}
                         </div>
                       </div>
-                      <div style={{ background: 'white', padding: 10, borderRadius: 8, border: '1px solid #edf2f7' }}>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Final OK Output</div>
-                        <div style={{ fontWeight: 800, fontSize: '1.25rem', color: 'var(--navy)' }}>
+                      <div
+                        style={{
+                          background: "white",
+                          padding: 10,
+                          borderRadius: 8,
+                          border: "1px solid #edf2f7",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "var(--gray-500)",
+                          }}
+                        >
+                          Final OK Output
+                        </div>
+                        <div
+                          style={{
+                            fontWeight: 800,
+                            fontSize: "1.25rem",
+                            color: "var(--navy)",
+                          }}
+                        >
                           {parsedData.achieved}
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 14,
+                    }}
+                  >
                     <div className="form-group">
                       <label>Report Date *</label>
-                      <input 
-                        type="date" 
-                        value={uploadDate} 
-                        onChange={e => {
+                      <input
+                        type="date"
+                        value={uploadDate}
+                        onChange={(e) => {
                           const nd = e.target.value;
                           setUploadDate(nd);
                           syncFwForUpload(nd, uploadShift);
-                        }} 
+                        }}
                         disabled={isSaving}
                       />
                     </div>
                     <div className="form-group">
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
                         <label>Shift Target (Boards) *</label>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>Default 650</span>
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "var(--teal-dark)",
+                            fontWeight: 700,
+                          }}
+                        >
+                          Default 650
+                        </span>
                       </div>
-                      <input 
-                        type="number" 
-                        value={uploadTarget} 
-                        onChange={e => setUploadTarget(e.target.value)} 
+                      <input
+                        type="number"
+                        value={uploadTarget}
+                        onChange={(e) => setUploadTarget(e.target.value)}
                         disabled={isSaving}
                         placeholder="650"
                         style={{ fontWeight: 700 }}
                       />
-                      <span style={{ fontSize: '0.72rem', color: 'var(--gray-500)', marginTop: 2, display: 'block' }}>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          color: "var(--gray-500)",
+                          marginTop: 2,
+                          display: "block",
+                        }}
+                      >
                         Default shift target is 650 boards, adjust if needed
                       </span>
                     </div>
                   </div>
 
                   {/* Shift Selection */}
-                  <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
+                  <div
+                    className="form-group"
+                    style={{
+                      background: "#f8fafc",
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: "1px solid #e2e8f0",
+                      marginBottom: 14,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
+                      }}
+                    >
+                      <label
+                        style={{
+                          fontWeight: 800,
+                          color: "var(--navy)",
+                          margin: 0,
+                          fontSize: "0.88rem",
+                        }}
+                      >
                         Shift Selection *
                       </label>
-                      <span style={{ 
-                        fontSize: '0.75rem', 
-                        fontWeight: 800, 
-                        color: uploadShift === 'Morning' ? '#b45309' : '#6d28d9',
-                        background: uploadShift === 'Morning' ? '#fef3c7' : '#ede9fe',
-                        padding: '2px 8px',
-                        borderRadius: 12
-                      }}>
-                        {uploadShift === 'Morning' ? 'Morning Shift Selected' : 'Evening Shift Selected'}
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          fontWeight: 800,
+                          color:
+                            uploadShift === "Morning" ? "#b45309" : "#6d28d9",
+                          background:
+                            uploadShift === "Morning" ? "#fef3c7" : "#ede9fe",
+                          padding: "2px 8px",
+                          borderRadius: 12,
+                        }}
+                      >
+                        {uploadShift === "Morning"
+                          ? "Morning Shift Selected"
+                          : "Evening Shift Selected"}
                       </span>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 10,
+                      }}
+                    >
                       <button
                         type="button"
                         style={{
-                          padding: '12px 14px',
+                          padding: "12px 14px",
                           borderRadius: 8,
-                          border: uploadShift === 'Morning' ? '2px solid #f59e0b' : '1px solid #cbd5e1',
-                          background: uploadShift === 'Morning' ? '#fffbeb' : '#ffffff',
-                          color: uploadShift === 'Morning' ? '#b45309' : '#475569',
+                          border:
+                            uploadShift === "Morning"
+                              ? "2px solid #f59e0b"
+                              : "1px solid #cbd5e1",
+                          background:
+                            uploadShift === "Morning" ? "#fffbeb" : "#ffffff",
+                          color:
+                            uploadShift === "Morning" ? "#b45309" : "#475569",
                           fontWeight: 800,
-                          fontSize: '0.9rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          fontSize: "0.9rem",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           gap: 8,
-                          boxShadow: uploadShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
-                          transition: 'all 0.15s ease'
+                          boxShadow:
+                            uploadShift === "Morning"
+                              ? "0 2px 8px rgba(245, 158, 11, 0.2)"
+                              : "none",
+                          transition: "all 0.15s ease",
                         }}
                         onClick={() => {
-                          setUploadShift('Morning');
-                          syncFwForUpload(uploadDate, 'Morning');
+                          setUploadShift("Morning");
+                          syncFwForUpload(uploadDate, "Morning");
                         }}
                       >
-                        <span style={{ fontSize: '1.25rem' }}>☀️</span>
+                        <span style={{ fontSize: "1.25rem" }}>☀️</span>
                         <span>Morning Shift</span>
                       </button>
 
                       <button
                         type="button"
                         style={{
-                          padding: '12px 14px',
+                          padding: "12px 14px",
                           borderRadius: 8,
-                          border: uploadShift === 'Evening' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
-                          background: uploadShift === 'Evening' ? '#f5f3ff' : '#ffffff',
-                          color: uploadShift === 'Evening' ? '#6d28d9' : '#475569',
+                          border:
+                            uploadShift === "Evening"
+                              ? "2px solid #7c3aed"
+                              : "1px solid #cbd5e1",
+                          background:
+                            uploadShift === "Evening" ? "#f5f3ff" : "#ffffff",
+                          color:
+                            uploadShift === "Evening" ? "#6d28d9" : "#475569",
                           fontWeight: 800,
-                          fontSize: '0.9rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
+                          fontSize: "0.9rem",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
                           gap: 8,
-                          boxShadow: uploadShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
-                          transition: 'all 0.15s ease'
+                          boxShadow:
+                            uploadShift === "Evening"
+                              ? "0 2px 8px rgba(124, 58, 237, 0.2)"
+                              : "none",
+                          transition: "all 0.15s ease",
                         }}
                         onClick={() => {
-                          setUploadShift('Evening');
-                          syncFwForUpload(uploadDate, 'Evening');
+                          setUploadShift("Evening");
+                          syncFwForUpload(uploadDate, "Evening");
                         }}
                       >
-                        <span style={{ fontSize: '1.25rem' }}>🌙</span>
+                        <span style={{ fontSize: "1.25rem" }}>🌙</span>
                         <span>Evening Shift</span>
                       </button>
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 14,
+                    }}
+                  >
                     <div className="form-group">
                       <label>Entered By</label>
-                      <input 
-                        type="text" 
-                        value={user?.name || 'Admin'} 
-                        disabled 
-                        style={{ background: 'var(--gray-100)' }}
+                      <input
+                        type="text"
+                        value={user?.name || "Admin"}
+                        disabled
+                        style={{ background: "var(--gray-100)" }}
                       />
                     </div>
 
                     <div className="form-group">
                       <label>Team Name *</label>
                       {isSupervisor ? (
-                        <input 
-                          type="text" 
-                          value={user?.team_name?.trim() || 'Team Alpha'} 
-                          disabled 
-                          style={{ background: 'var(--gray-100)', fontWeight: 600 }}
+                        <input
+                          type="text"
+                          value={user?.team_name?.trim() || "Team Alpha"}
+                          disabled
+                          style={{
+                            background: "var(--gray-100)",
+                            fontWeight: 600,
+                          }}
                         />
                       ) : (
-                        <select 
+                        <select
                           className="form-select"
                           value={uploadTeamName}
-                          onChange={e => setUploadTeamName(e.target.value)}
+                          onChange={(e) => setUploadTeamName(e.target.value)}
                           disabled={isSaving}
                         >
-                          {availableTeams.map(t => <option key={t} value={t}>{t}</option>)}
+                          {availableTeams.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
                         </select>
                       )}
                     </div>
                   </div>
 
-                  <div className="form-group" style={{ background: '#f5f3ff', padding: 14, borderRadius: 10, border: '1.5px solid #ddd6fe' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <label style={{ color: '#7c3aed', fontWeight: 800, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                  <div
+                    className="form-group"
+                    style={{
+                      background: "#f5f3ff",
+                      padding: 14,
+                      borderRadius: 10,
+                      border: "1.5px solid #ddd6fe",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <label
+                        style={{
+                          color: "#7c3aed",
+                          fontWeight: 800,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          margin: 0,
+                        }}
+                      >
                         <Cpu size={18} /> Updated FW QTY
                       </label>
                       <button
@@ -1426,59 +2068,91 @@ export default function Production() {
                         onClick={() => syncFwForUpload(uploadDate, uploadShift)}
                         disabled={isSyncingFw}
                         style={{
-                          background: '#7c3aed',
-                          color: '#ffffff',
-                          border: 'none',
-                          padding: '5px 12px',
+                          background: "#7c3aed",
+                          color: "#ffffff",
+                          border: "none",
+                          padding: "5px 12px",
                           borderRadius: 6,
-                          fontSize: '0.8rem',
+                          fontSize: "0.8rem",
                           fontWeight: 700,
-                          cursor: isSyncingFw ? 'not-allowed' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
+                          cursor: isSyncingFw ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
                           gap: 6,
-                          boxShadow: '0 2px 6px rgba(124, 58, 237, 0.25)'
+                          boxShadow: "0 2px 6px rgba(124, 58, 237, 0.25)",
                         }}
                       >
-                        <RefreshCw size={13} className={isSyncingFw ? 'spinner' : ''} />
-                        <span>{isSyncingFw ? 'Syncing...' : 'Sync from Drive Logs 🔄'}</span>
+                        <RefreshCw
+                          size={13}
+                          className={isSyncingFw ? "spinner" : ""}
+                        />
+                        <span>
+                          {isSyncingFw
+                            ? "Syncing..."
+                            : "Sync from Drive Logs 🔄"}
+                        </span>
                       </button>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <input 
-                        type="number" 
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 10 }}
+                    >
+                      <input
+                        type="number"
                         value={uploadFwQty}
                         readOnly
                         disabled
-                        style={{ 
-                          fontWeight: 900, 
-                          fontSize: '1.2rem', 
-                          color: '#7c3aed', 
-                          background: '#ede9fe', 
-                          cursor: 'not-allowed',
-                          flex: 1
+                        style={{
+                          fontWeight: 900,
+                          fontSize: "1.2rem",
+                          color: "#7c3aed",
+                          background: "#ede9fe",
+                          cursor: "not-allowed",
+                          flex: 1,
                         }}
                       />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6d28d9' }}>Meters</span>
+                      <span
+                        style={{
+                          fontSize: "0.85rem",
+                          fontWeight: 700,
+                          color: "#6d28d9",
+                        }}
+                      >
+                        Meters
+                      </span>
                     </div>
 
-                    <span style={{ fontSize: '0.72rem', color: '#6d28d9', marginTop: 4, display: 'block' }}>
-                      ✨ Automatically retrieved from Google Drive update logs for ({uploadShift} Shift) without manual entry.
+                    <span
+                      style={{
+                        fontSize: "0.72rem",
+                        color: "#6d28d9",
+                        marginTop: 4,
+                        display: "block",
+                      }}
+                    >
+                      ✨ Automatically retrieved from Google Drive update logs
+                      for ({uploadShift} Shift) without manual entry.
                     </span>
                   </div>
 
                   <div className="form-group">
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <label
+                      style={{ display: "flex", alignItems: "center", gap: 6 }}
+                    >
                       Notes / Problem Comments (Optional)
                     </label>
-                    <textarea 
+                    <textarea
                       rows={2}
                       className="search-input"
-                      style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
+                      style={{
+                        width: "100%",
+                        resize: "vertical",
+                        fontFamily: "inherit",
+                        padding: "8px 12px",
+                      }}
                       placeholder="e.g. Test bench calibration issue, line stopped for 20 mins due to part shortage, etc..."
                       value={uploadNotes}
-                      onChange={e => setUploadNotes(e.target.value)}
+                      onChange={(e) => setUploadNotes(e.target.value)}
                       disabled={isSaving}
                     />
                   </div>
@@ -1487,17 +2161,26 @@ export default function Production() {
             </div>
 
             <div className="modal-footer">
-              <button type="button" className="btn-secondary" onClick={() => setShowUploadModal(false)} disabled={isSaving}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowUploadModal(false)}
+                disabled={isSaving}
+              >
                 Cancel
               </button>
               {parsedData && (
-                <button 
-                  type="button" 
-                  className="btn-primary" 
+                <button
+                  type="button"
+                  className="btn-primary"
                   disabled={isSaving}
                   onClick={handleSaveUpload}
                 >
-                  {isSaving ? <span className="spinner" /> : 'Save Record to Cloud'}
+                  {isSaving ? (
+                    <span className="spinner" />
+                  ) : (
+                    "Save Record to Cloud"
+                  )}
                 </button>
               )}
             </div>
@@ -1507,16 +2190,27 @@ export default function Production() {
 
       {/* ── MODAL 2: Manual Updated FW QTY ── */}
       {showFwModal && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setShowFwModal(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={(e) => e.target === e.currentTarget && setShowFwModal(false)}
+        >
           <div className="modal" style={{ maxWidth: 460 }}>
             <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Cpu size={20} color="#7c3aed" />
                 <span className="modal-title">
-                  {fwRecordId ? 'Edit Updated FW QTY' : 'Log Updated FW QTY Manually'}
+                  {fwRecordId
+                    ? "Edit Updated FW QTY"
+                    : "Log Updated FW QTY Manually"}
                 </span>
               </div>
-              <button type="button" className="modal-close" onClick={() => setShowFwModal(false)}>×</button>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setShowFwModal(false)}
+              >
+                ×
+              </button>
             </div>
 
             <form onSubmit={handleSaveFwQty}>
@@ -1525,80 +2219,96 @@ export default function Production() {
 
                 <div className="form-group">
                   <label>Date *</label>
-                  <input 
-                    type="date" 
-                    value={fwDate} 
-                    onChange={e => setFwDate(e.target.value)} 
-                    disabled={fwSaving || !!fwRecordId} 
-                    required 
+                  <input
+                    type="date"
+                    value={fwDate}
+                    onChange={(e) => setFwDate(e.target.value)}
+                    disabled={fwSaving || !!fwRecordId}
+                    required
                   />
                 </div>
 
                 <div className="form-group">
                   <label>Product Name *</label>
-                  <input 
-                    type="text" 
-                    placeholder="e.g. G3 Smart Meter" 
-                    value={fwProduct} 
-                    onChange={e => setFwProduct(e.target.value)} 
-                    disabled={fwSaving || !!fwRecordId} 
-                    required 
+                  <input
+                    type="text"
+                    placeholder="e.g. G3 Smart Meter"
+                    value={fwProduct}
+                    onChange={(e) => setFwProduct(e.target.value)}
+                    disabled={fwSaving || !!fwRecordId}
+                    required
                   />
                 </div>
 
                 <div className="form-group">
                   <label>Updated FW QTY *</label>
-                  <input 
-                    type="number" 
-                    placeholder="e.g. 150" 
-                    value={fwQty} 
-                    onChange={e => setFwQty(e.target.value)} 
-                    disabled={fwSaving} 
-                    autoFocus 
+                  <input
+                    type="number"
+                    placeholder="e.g. 150"
+                    value={fwQty}
+                    onChange={(e) => setFwQty(e.target.value)}
+                    disabled={fwSaving}
+                    autoFocus
                     min="0"
-                    required 
+                    required
                   />
-                  <p className="hint">Enter count of meters updated with latest firmware.</p>
+                  <p className="hint">
+                    Enter count of meters updated with latest firmware.
+                  </p>
                 </div>
 
                 <div className="form-group">
                   <label>Team Name *</label>
                   {isSupervisor ? (
-                    <input 
-                      type="text" 
-                      value={user?.team_name?.trim() || 'Team Alpha'} 
-                      disabled 
-                      style={{ background: 'var(--gray-100)', fontWeight: 600 }}
+                    <input
+                      type="text"
+                      value={user?.team_name?.trim() || "Team Alpha"}
+                      disabled
+                      style={{ background: "var(--gray-100)", fontWeight: 600 }}
                     />
                   ) : (
-                    <select 
+                    <select
                       className="form-select"
-                      value={fwTeamName} 
-                      onChange={e => setFwTeamName(e.target.value)}
+                      value={fwTeamName}
+                      onChange={(e) => setFwTeamName(e.target.value)}
                       disabled={fwSaving}
                     >
-                      {availableTeams.map(t => <option key={t} value={t}>{t}</option>)}
+                      {availableTeams.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
                     </select>
                   )}
                 </div>
 
                 <div className="form-group">
                   <label>Entered By</label>
-                  <input 
-                    type="text" 
-                    value={user?.name || 'Admin'} 
-                    disabled 
-                    style={{ background: 'var(--gray-100)' }}
+                  <input
+                    type="text"
+                    value={user?.name || "Admin"}
+                    disabled
+                    style={{ background: "var(--gray-100)" }}
                   />
                 </div>
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn-secondary" onClick={() => setShowFwModal(false)} disabled={fwSaving}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowFwModal(false)}
+                  disabled={fwSaving}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary" style={{ background: '#7c3aed' }} disabled={fwSaving}>
-                  {fwSaving ? <span className="spinner" /> : 'Save Quantity'}
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ background: "#7c3aed" }}
+                  disabled={fwSaving}
+                >
+                  {fwSaving ? <span className="spinner" /> : "Save Quantity"}
                 </button>
               </div>
             </form>
@@ -1608,75 +2318,203 @@ export default function Production() {
 
       {/* ── MODAL 3: Detail View for Selected Record ── */}
       {selectedRecordForDetail && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setSelectedRecordForDetail(null)}>
-          <div className="modal" style={{ maxWidth: 760, maxHeight: '90vh' }}>
+        <div
+          className="modal-backdrop"
+          onClick={(e) =>
+            e.target === e.currentTarget && setSelectedRecordForDetail(null)
+          }
+        >
+          <div className="modal" style={{ maxWidth: 760, maxHeight: "90vh" }}>
             <div className="modal-header">
               <div>
-                <span className="modal-title">Record Details: {selectedRecordForDetail.date} — {selectedRecordForDetail.product}</span>
-                <div style={{ fontSize: '0.78rem', color: 'var(--gray-500)', marginTop: 2 }}>
-                  Team: {selectedRecordForDetail.team_name || '—'} | Entered By: {selectedRecordForDetail.entered_by || '—'}
+                <span className="modal-title">
+                  Record Details: {selectedRecordForDetail.date} —{" "}
+                  {selectedRecordForDetail.product}
+                </span>
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    color: "var(--gray-500)",
+                    marginTop: 2,
+                  }}
+                >
+                  Team: {selectedRecordForDetail.team_name || "—"} | Entered By:{" "}
+                  {selectedRecordForDetail.entered_by || "—"}
                 </div>
               </div>
-              <button type="button" className="modal-close" onClick={() => setSelectedRecordForDetail(null)}>×</button>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setSelectedRecordForDetail(null)}
+              >
+                ×
+              </button>
             </div>
 
             <div className="modal-body">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
-                <div style={{ background: 'var(--gray-100)', padding: 12, borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Overall FPY</div>
-                  <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#16a34a' }}>
-                    {selectedRecordForDetail.overall_fpy != null ? `${selectedRecordForDetail.overall_fpy}%` : 'N/A'}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(4, 1fr)",
+                  gap: 12,
+                  marginBottom: 18,
+                }}
+              >
+                <div
+                  style={{
+                    background: "var(--gray-100)",
+                    padding: 12,
+                    borderRadius: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: "0.72rem", color: "var(--gray-500)" }}
+                  >
+                    Overall FPY
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "1.2rem",
+                      color: "#16a34a",
+                    }}
+                  >
+                    {selectedRecordForDetail.overall_fpy != null
+                      ? `${selectedRecordForDetail.overall_fpy}%`
+                      : "N/A"}
                   </div>
                 </div>
-                <div style={{ background: 'var(--gray-100)', padding: 12, borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Total Boards</div>
-                  <div style={{ fontWeight: 800, fontSize: '1.2rem', color: 'var(--navy)' }}>
-                    {selectedRecordForDetail.total_boards?.toLocaleString() || 0}
+                <div
+                  style={{
+                    background: "var(--gray-100)",
+                    padding: 12,
+                    borderRadius: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: "0.72rem", color: "var(--gray-500)" }}
+                  >
+                    Total Boards
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "1.2rem",
+                      color: "var(--navy)",
+                    }}
+                  >
+                    {selectedRecordForDetail.total_boards?.toLocaleString() ||
+                      0}
                   </div>
                 </div>
-                <div style={{ background: 'var(--gray-100)', padding: 12, borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Final OK</div>
-                  <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#16a34a' }}>
+                <div
+                  style={{
+                    background: "var(--gray-100)",
+                    padding: 12,
+                    borderRadius: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: "0.72rem", color: "var(--gray-500)" }}
+                  >
+                    Final OK
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "1.2rem",
+                      color: "#16a34a",
+                    }}
+                  >
                     {selectedRecordForDetail.achieved?.toLocaleString() || 0}
                   </div>
                 </div>
-                <div style={{ background: 'var(--gray-100)', padding: 12, borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--gray-500)' }}>Updated FW</div>
-                  <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#7c3aed' }}>
-                    {selectedRecordForDetail.updated_fw_qty?.toLocaleString() || 0}
+                <div
+                  style={{
+                    background: "var(--gray-100)",
+                    padding: 12,
+                    borderRadius: 8,
+                    textAlign: "center",
+                  }}
+                >
+                  <div
+                    style={{ fontSize: "0.72rem", color: "var(--gray-500)" }}
+                  >
+                    Updated FW
+                  </div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: "1.2rem",
+                      color: "#7c3aed",
+                    }}
+                  >
+                    {selectedRecordForDetail.updated_fw_qty?.toLocaleString() ||
+                      0}
                   </div>
                 </div>
               </div>
 
               {/* Station Flow Table in Modal */}
               <div style={{ marginBottom: 18 }}>
-                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--navy)', marginBottom: 8 }}>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: "0.88rem",
+                    color: "var(--navy)",
+                    marginBottom: 8,
+                  }}
+                >
                   Workstation Flow Matrix
                 </div>
-                {selectedRecordForDetail.stations && selectedRecordForDetail.stations.length > 0 ? (
+                {selectedRecordForDetail.stations &&
+                selectedRecordForDetail.stations.length > 0 ? (
                   <div className="table-wrap">
-                    <table style={{ fontSize: '0.82rem' }}>
+                    <table style={{ fontSize: "0.82rem" }}>
                       <thead>
                         <tr>
                           <th>Station Name</th>
-                          <th style={{ textAlign: 'center' }}>Bench</th>
-                          <th style={{ textAlign: 'center' }}>Runs</th>
-                          <th style={{ textAlign: 'center' }}>Input</th>
-                          <th style={{ textAlign: 'center' }}>OK</th>
-                          <th style={{ textAlign: 'center' }}>FPY %</th>
+                          <th style={{ textAlign: "center" }}>Bench</th>
+                          <th style={{ textAlign: "center" }}>Runs</th>
+                          <th style={{ textAlign: "center" }}>Input</th>
+                          <th style={{ textAlign: "center" }}>OK</th>
+                          <th style={{ textAlign: "center" }}>FPY %</th>
                         </tr>
                       </thead>
                       <tbody>
                         {selectedRecordForDetail.stations.map((s, idx) => (
                           <tr key={idx}>
                             <td style={{ fontWeight: 600 }}>{s.stationName}</td>
-                            <td style={{ textAlign: 'center', fontFamily: 'monospace', fontSize: '0.75rem' }}>{s.bench || '—'}</td>
-                            <td style={{ textAlign: 'center' }}>{s.nbTestRun || '—'}</td>
-                            <td style={{ textAlign: 'center' }}>{s.nbBoards}</td>
-                            <td style={{ textAlign: 'center', color: '#16a34a', fontWeight: 600 }}>{s.nbBoardsOK}</td>
-                            <td style={{ textAlign: 'center' }}>
+                            <td
+                              style={{
+                                textAlign: "center",
+                                fontFamily: "monospace",
+                                fontSize: "0.75rem",
+                              }}
+                            >
+                              {s.bench || "—"}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {s.nbTestRun || "—"}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              {s.nbBoards}
+                            </td>
+                            <td
+                              style={{
+                                textAlign: "center",
+                                color: "#16a34a",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {s.nbBoardsOK}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
                               <span className={`badge ${fpyBadgeClass(s.fpy)}`}>
-                                {s.fpy != null ? `${s.fpy}%` : '—'}
+                                {s.fpy != null ? `${s.fpy}%` : "—"}
                               </span>
                             </td>
                           </tr>
@@ -1685,47 +2523,120 @@ export default function Production() {
                     </table>
                   </div>
                 ) : (
-                  <div style={{ color: 'var(--gray-500)', fontSize: '0.85rem' }}>No individual station details available.</div>
+                  <div
+                    style={{ color: "var(--gray-500)", fontSize: "0.85rem" }}
+                  >
+                    No individual station details available.
+                  </div>
                 )}
               </div>
 
               {/* Top Defects in Modal */}
-              {selectedRecordForDetail.defects && selectedRecordForDetail.defects.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--navy)', marginBottom: 8 }}>
-                    Top Defect Codes
+              {selectedRecordForDetail.defects &&
+                selectedRecordForDetail.defects.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.88rem",
+                        color: "var(--navy)",
+                        marginBottom: 8,
+                      }}
+                    >
+                      Top Defect Codes
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(140px, 1fr))",
+                        gap: 8,
+                      }}
+                    >
+                      {selectedRecordForDetail.defects.map((d) => (
+                        <div
+                          key={d.code}
+                          style={{
+                            background: "#fef2f2",
+                            border: "1px solid #fee2e2",
+                            borderRadius: 6,
+                            padding: "8px 12px",
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontFamily: "monospace",
+                              fontWeight: 700,
+                              color: "#dc2626",
+                            }}
+                          >
+                            {d.code}
+                          </span>
+                          <span style={{ fontWeight: 800, color: "#991b1b" }}>
+                            {d.qty}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                    {selectedRecordForDetail.defects.map(d => (
-                      <div key={d.code} style={{ background: '#fef2f2', border: '1px solid #fee2e2', borderRadius: 6, padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#dc2626' }}>{d.code}</span>
-                        <span style={{ fontWeight: 800, color: '#991b1b' }}>{d.qty}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
 
               {/* Notes / Issue description in Modal */}
               {selectedRecordForDetail.notes && (
-                <div style={{ background: '#fefce8', border: '1px solid #fef08a', borderRadius: 8, padding: '12px 16px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#854d0e', marginBottom: 4 }}>
+                <div
+                  style={{
+                    background: "#fefce8",
+                    border: "1px solid #fef08a",
+                    borderRadius: 8,
+                    padding: "12px 16px",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontWeight: 700,
+                      fontSize: "0.85rem",
+                      color: "#854d0e",
+                      marginBottom: 4,
+                    }}
+                  >
                     📝 Supervisor Notes & Incident Log:
                   </div>
-                  <div style={{ fontSize: '0.88rem', color: '#713f12', whiteSpace: 'pre-wrap' }}>
+                  <div
+                    style={{
+                      fontSize: "0.88rem",
+                      color: "#713f12",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
                     {selectedRecordForDetail.notes}
                   </div>
                 </div>
               )}
             </div>
 
-            <div className="modal-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div
+              className="modal-footer"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <div>
                 {!isViewer && (
-                  <button 
-                    type="button" 
-                    className="btn-primary" 
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', fontSize: '0.84rem' }}
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "7px 14px",
+                      fontSize: "0.84rem",
+                    }}
                     onClick={() => {
                       const rec = selectedRecordForDetail;
                       setSelectedRecordForDetail(null);
@@ -1737,7 +2648,11 @@ export default function Production() {
                   </button>
                 )}
               </div>
-              <button type="button" className="btn-secondary" onClick={() => setSelectedRecordForDetail(null)}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setSelectedRecordForDetail(null)}
+              >
                 Close
               </button>
             </div>
@@ -1747,14 +2662,25 @@ export default function Production() {
 
       {/* ── MODAL 4: Edit Production Report Modal ── */}
       {editRecordId && (
-        <div className="modal-backdrop" onClick={e => e.target === e.currentTarget && setEditRecordId(null)}>
-          <div className="modal" style={{ maxWidth: 620, maxHeight: '90vh' }}>
+        <div
+          className="modal-backdrop"
+          onClick={(e) => e.target === e.currentTarget && setEditRecordId(null)}
+        >
+          <div className="modal" style={{ maxWidth: 620, maxHeight: "90vh" }}>
             <div className="modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Edit3 size={20} color="var(--teal)" />
-                <span className="modal-title">Edit Production Report & Date</span>
+                <span className="modal-title">
+                  Edit Production Report & Date
+                </span>
               </div>
-              <button type="button" className="modal-close" onClick={() => setEditRecordId(null)}>×</button>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setEditRecordId(null)}
+              >
+                ×
+              </button>
             </div>
 
             <form onSubmit={handleUpdateReport}>
@@ -1762,35 +2688,67 @@ export default function Production() {
                 {editError && <div className="modal-error">{editError}</div>}
 
                 {/* Date & Shift Target */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 14,
+                  }}
+                >
                   <div className="form-group">
-                    <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Report Date *</label>
-                    <input 
-                      type="date" 
-                      value={editDate} 
-                      onChange={e => {
+                    <label style={{ fontWeight: 800, color: "var(--navy)" }}>
+                      Report Date *
+                    </label>
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => {
                         const newD = e.target.value;
                         setEditDate(newD);
                         handleSyncEditFw(newD, editShift);
-                      }} 
+                      }}
                       disabled={isUpdatingRecord}
-                      required 
-                      style={{ fontWeight: 800, fontSize: '0.95rem' }}
+                      required
+                      style={{ fontWeight: 800, fontSize: "0.95rem" }}
                     />
-                    <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 600, marginTop: 2, display: 'block' }}>
+                    <span
+                      style={{
+                        fontSize: "0.72rem",
+                        color: "var(--teal-dark)",
+                        fontWeight: 600,
+                        marginTop: 2,
+                        display: "block",
+                      }}
+                    >
                       Freely editable report date
                     </span>
                   </div>
 
                   <div className="form-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 800, color: 'var(--navy)' }}>Shift Target *</label>
-                      <span style={{ fontSize: '0.72rem', color: 'var(--teal-dark)', fontWeight: 700 }}>Default 650</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <label style={{ fontWeight: 800, color: "var(--navy)" }}>
+                        Shift Target *
+                      </label>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          color: "var(--teal-dark)",
+                          fontWeight: 700,
+                        }}
+                      >
+                        Default 650
+                      </span>
                     </div>
-                    <input 
-                      type="number" 
-                      value={editTarget} 
-                      onChange={e => setEditTarget(e.target.value)} 
+                    <input
+                      type="number"
+                      value={editTarget}
+                      onChange={(e) => setEditTarget(e.target.value)}
                       disabled={isUpdatingRecord}
                       style={{ fontWeight: 800 }}
                       required
@@ -1799,75 +2757,123 @@ export default function Production() {
                 </div>
 
                 {/* Shift Selector */}
-                <div className="form-group" style={{ background: '#f8fafc', padding: '12px 14px', borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                    <label style={{ fontWeight: 800, color: 'var(--navy)', margin: 0, fontSize: '0.88rem' }}>
+                <div
+                  className="form-group"
+                  style={{
+                    background: "#f8fafc",
+                    padding: "12px 14px",
+                    borderRadius: 10,
+                    border: "1px solid #e2e8f0",
+                    marginBottom: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <label
+                      style={{
+                        fontWeight: 800,
+                        color: "var(--navy)",
+                        margin: 0,
+                        fontSize: "0.88rem",
+                      }}
+                    >
                       Shift Selection *
                     </label>
-                    <span style={{ 
-                      fontSize: '0.75rem', 
-                      fontWeight: 800, 
-                      color: editShift === 'Morning' ? '#b45309' : '#6d28d9',
-                      background: editShift === 'Morning' ? '#fef3c7' : '#ede9fe',
-                      padding: '2px 8px',
-                      borderRadius: 12
-                    }}>
-                      {editShift === 'Morning' ? 'Morning Shift Selected' : 'Evening Shift Selected'}
+                    <span
+                      style={{
+                        fontSize: "0.75rem",
+                        fontWeight: 800,
+                        color: editShift === "Morning" ? "#b45309" : "#6d28d9",
+                        background:
+                          editShift === "Morning" ? "#fef3c7" : "#ede9fe",
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                      }}
+                    >
+                      {editShift === "Morning"
+                        ? "Morning Shift Selected"
+                        : "Evening Shift Selected"}
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 10,
+                    }}
+                  >
                     <button
                       type="button"
                       style={{
-                        padding: '12px 14px',
+                        padding: "12px 14px",
                         borderRadius: 8,
-                        border: editShift === 'Morning' ? '2px solid #f59e0b' : '1px solid #cbd5e1',
-                        background: editShift === 'Morning' ? '#fffbeb' : '#ffffff',
-                        color: editShift === 'Morning' ? '#b45309' : '#475569',
+                        border:
+                          editShift === "Morning"
+                            ? "2px solid #f59e0b"
+                            : "1px solid #cbd5e1",
+                        background:
+                          editShift === "Morning" ? "#fffbeb" : "#ffffff",
+                        color: editShift === "Morning" ? "#b45309" : "#475569",
                         fontWeight: 800,
-                        fontSize: '0.9rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        fontSize: "0.9rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                         gap: 8,
-                        boxShadow: editShift === 'Morning' ? '0 2px 8px rgba(245, 158, 11, 0.2)' : 'none',
-                        transition: 'all 0.15s ease'
+                        boxShadow:
+                          editShift === "Morning"
+                            ? "0 2px 8px rgba(245, 158, 11, 0.2)"
+                            : "none",
+                        transition: "all 0.15s ease",
                       }}
                       onClick={() => {
-                        setEditShift('Morning');
-                        handleSyncEditFw(editDate, 'Morning');
+                        setEditShift("Morning");
+                        handleSyncEditFw(editDate, "Morning");
                       }}
                     >
-                      <span style={{ fontSize: '1.25rem' }}>☀️</span>
+                      <span style={{ fontSize: "1.25rem" }}>☀️</span>
                       <span>Morning Shift</span>
                     </button>
 
                     <button
                       type="button"
                       style={{
-                        padding: '12px 14px',
+                        padding: "12px 14px",
                         borderRadius: 8,
-                        border: editShift === 'Evening' ? '2px solid #7c3aed' : '1px solid #cbd5e1',
-                        background: editShift === 'Evening' ? '#f5f3ff' : '#ffffff',
-                        color: editShift === 'Evening' ? '#6d28d9' : '#475569',
+                        border:
+                          editShift === "Evening"
+                            ? "2px solid #7c3aed"
+                            : "1px solid #cbd5e1",
+                        background:
+                          editShift === "Evening" ? "#f5f3ff" : "#ffffff",
+                        color: editShift === "Evening" ? "#6d28d9" : "#475569",
                         fontWeight: 800,
-                        fontSize: '0.9rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        fontSize: "0.9rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
                         gap: 8,
-                        boxShadow: editShift === 'Evening' ? '0 2px 8px rgba(124, 58, 237, 0.2)' : 'none',
-                        transition: 'all 0.15s ease'
+                        boxShadow:
+                          editShift === "Evening"
+                            ? "0 2px 8px rgba(124, 58, 237, 0.2)"
+                            : "none",
+                        transition: "all 0.15s ease",
                       }}
                       onClick={() => {
-                        setEditShift('Evening');
-                        handleSyncEditFw(editDate, 'Evening');
+                        setEditShift("Evening");
+                        handleSyncEditFw(editDate, "Evening");
                       }}
                     >
-                      <span style={{ fontSize: '1.25rem' }}>🌙</span>
+                      <span style={{ fontSize: "1.25rem" }}>🌙</span>
                       <span>Evening Shift</span>
                     </button>
                   </div>
@@ -1876,53 +2882,140 @@ export default function Production() {
                 {/* Product Name */}
                 <div className="form-group">
                   <label style={{ fontWeight: 700 }}>Product Name *</label>
-                  <input 
-                    type="text" 
-                    value={editProduct} 
-                    onChange={e => setEditProduct(e.target.value)} 
+                  <input
+                    type="text"
+                    value={editProduct}
+                    onChange={(e) => setEditProduct(e.target.value)}
                     disabled={isUpdatingRecord}
-                    required 
+                    required
                   />
                 </div>
 
                 {/* Achieved & Total Boards (Locked: Auto-derived from Production Logs) */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 14,
+                  }}
+                >
                   <div className="form-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 700, color: '#16a34a' }}>Final OK Output (Achieved)</label>
-                      <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#166534', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 Auto-Locked</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <label style={{ fontWeight: 700, color: "#16a34a" }}>
+                        Final OK Output (Achieved)
+                      </label>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          background: "#dcfce7",
+                          color: "#166534",
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          fontWeight: 700,
+                        }}
+                      >
+                        🔒 Auto-Locked
+                      </span>
                     </div>
-                    <input 
-                      type="number" 
-                      value={editAchieved} 
+                    <input
+                      type="number"
+                      value={editAchieved}
                       readOnly
                       disabled
-                      style={{ fontWeight: 800, color: '#16a34a', background: '#f1f5f9', cursor: 'not-allowed' }}
+                      style={{
+                        fontWeight: 800,
+                        color: "#16a34a",
+                        background: "#f1f5f9",
+                        cursor: "not-allowed",
+                      }}
                     />
-                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Automatically calculated from production test records</span>
+                    <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                      Automatically calculated from production test records
+                    </span>
                   </div>
 
                   <div className="form-group">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontWeight: 700 }}>Total Boards Tested</label>
-                      <span style={{ fontSize: '0.72rem', background: '#e2e8f0', color: '#334155', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>🔒 Auto-Locked</span>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <label style={{ fontWeight: 700 }}>
+                        Total Boards Tested
+                      </label>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          background: "#e2e8f0",
+                          color: "#334155",
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          fontWeight: 700,
+                        }}
+                      >
+                        🔒 Auto-Locked
+                      </span>
                     </div>
-                    <input 
-                      type="number" 
-                      value={editTotalBoards} 
+                    <input
+                      type="number"
+                      value={editTotalBoards}
                       readOnly
                       disabled
-                      style={{ fontWeight: 800, background: '#f1f5f9', cursor: 'not-allowed' }}
+                      style={{
+                        fontWeight: 800,
+                        background: "#f1f5f9",
+                        cursor: "not-allowed",
+                      }}
                     />
-                    <span style={{ fontSize: '0.7rem', color: '#64748b' }}>Calculated automatically from test logs</span>
+                    <span style={{ fontSize: "0.7rem", color: "#64748b" }}>
+                      Calculated automatically from test logs
+                    </span>
                   </div>
                 </div>
 
                 {/* Updated FW QTY (Live sync from Update PCs) & Team Name */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
-                  <div className="form-group" style={{ background: '#f5f3ff', padding: 12, borderRadius: 8, border: '1px solid #ddd6fe' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <label style={{ color: '#7c3aed', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6, margin: 0 }}>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 14,
+                  }}
+                >
+                  <div
+                    className="form-group"
+                    style={{
+                      background: "#f5f3ff",
+                      padding: 12,
+                      borderRadius: 8,
+                      border: "1px solid #ddd6fe",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 6,
+                      }}
+                    >
+                      <label
+                        style={{
+                          color: "#7c3aed",
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                          margin: 0,
+                        }}
+                      >
                         <Cpu size={16} /> Updated FW QTY
                       </label>
                       <button
@@ -1930,57 +3023,80 @@ export default function Production() {
                         disabled={isSyncingEditFw}
                         onClick={() => handleSyncEditFw(editDate, editShift)}
                         style={{
-                          background: isSyncingEditFw ? '#a78bfa' : '#7c3aed',
-                          color: '#ffffff',
-                          border: 'none',
-                          padding: '4px 10px',
+                          background: isSyncingEditFw ? "#a78bfa" : "#7c3aed",
+                          color: "#ffffff",
+                          border: "none",
+                          padding: "4px 10px",
                           borderRadius: 6,
-                          fontSize: '0.74rem',
+                          fontSize: "0.74rem",
                           fontWeight: 700,
-                          cursor: isSyncingEditFw ? 'not-allowed' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 5
+                          cursor: isSyncingEditFw ? "not-allowed" : "pointer",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 5,
                         }}
                       >
-                        <RefreshCw size={12} className={isSyncingEditFw ? 'animate-spin' : ''} />
-                        {isSyncingEditFw ? 'Syncing...' : 'Sync from Drive 🔄'}
+                        <RefreshCw
+                          size={12}
+                          className={isSyncingEditFw ? "animate-spin" : ""}
+                        />
+                        {isSyncingEditFw ? "Syncing..." : "Sync from Drive 🔄"}
                       </button>
                     </div>
-                    <input 
-                      type="number" 
-                      value={editFwQty} 
-                      onChange={e => setEditFwQty(parseInt(e.target.value, 10) || 0)}
+                    <input
+                      type="number"
+                      value={editFwQty}
+                      onChange={(e) =>
+                        setEditFwQty(parseInt(e.target.value, 10) || 0)
+                      }
                       disabled={isUpdatingRecord}
-                      style={{ fontWeight: 800, color: '#7c3aed', background: '#ede9fe' }}
+                      style={{
+                        fontWeight: 800,
+                        color: "#7c3aed",
+                        background: "#ede9fe",
+                      }}
                     />
                     {syncEditMsg ? (
-                      <span style={{ 
-                        fontSize: '0.72rem', 
-                        fontWeight: 700, 
-                        color: syncEditMsg.startsWith('✓') ? '#15803d' : '#b91c1c', 
-                        marginTop: 4, 
-                        display: 'block' 
-                      }}>
+                      <span
+                        style={{
+                          fontSize: "0.72rem",
+                          fontWeight: 700,
+                          color: syncEditMsg.startsWith("✓")
+                            ? "#15803d"
+                            : "#b91c1c",
+                          marginTop: 4,
+                          display: "block",
+                        }}
+                      >
                         {syncEditMsg}
                       </span>
                     ) : (
-                      <span style={{ fontSize: '0.7rem', color: '#6d28d9', marginTop: 2, display: 'block' }}>
-                        Live sync from Google Drive update logs ({editDate} • {editShift})
+                      <span
+                        style={{
+                          fontSize: "0.7rem",
+                          color: "#6d28d9",
+                          marginTop: 2,
+                          display: "block",
+                        }}
+                      >
+                        Live sync from Google Drive update logs ({editDate} •{" "}
+                        {editShift})
                       </span>
                     )}
                   </div>
 
                   <div className="form-group">
                     <label style={{ fontWeight: 700 }}>Team Name *</label>
-                    <select 
+                    <select
                       className="form-select"
-                      value={editTeamName} 
-                      onChange={e => setEditTeamName(e.target.value)} 
+                      value={editTeamName}
+                      onChange={(e) => setEditTeamName(e.target.value)}
                       disabled={isUpdatingRecord}
                     >
-                      {availableTeams.map(t => (
-                        <option key={t} value={t}>{t}</option>
+                      {availableTeams.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -1988,25 +3104,45 @@ export default function Production() {
 
                 {/* Notes */}
                 <div className="form-group">
-                  <label style={{ fontWeight: 700 }}>Notes / Problem Comments</label>
-                  <textarea 
-                    rows={2} 
-                    className="search-input" 
-                    style={{ width: '100%', resize: 'vertical', fontFamily: 'inherit', padding: '8px 12px' }}
+                  <label style={{ fontWeight: 700 }}>
+                    Notes / Problem Comments
+                  </label>
+                  <textarea
+                    rows={2}
+                    className="search-input"
+                    style={{
+                      width: "100%",
+                      resize: "vertical",
+                      fontFamily: "inherit",
+                      padding: "8px 12px",
+                    }}
                     placeholder="Supervisor notes or issues encountered..."
-                    value={editNotes} 
-                    onChange={e => setEditNotes(e.target.value)} 
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
                     disabled={isUpdatingRecord}
                   />
                 </div>
               </div>
 
               <div className="modal-footer">
-                <button type="button" className="btn-secondary" onClick={() => setEditRecordId(null)} disabled={isUpdatingRecord}>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setEditRecordId(null)}
+                  disabled={isUpdatingRecord}
+                >
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary" disabled={isUpdatingRecord}>
-                  {isUpdatingRecord ? <span className="spinner" /> : 'Save Changes'}
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  disabled={isUpdatingRecord}
+                >
+                  {isUpdatingRecord ? (
+                    <span className="spinner" />
+                  ) : (
+                    "Save Changes"
+                  )}
                 </button>
               </div>
             </form>

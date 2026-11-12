@@ -2,47 +2,52 @@
  * Utility to reliably print printable report documents across all modern browsers
  * without modal clipping, background filter issues, or blank pages.
  */
-export function printReportDocument(targetId = 'report-printable-area', options = {}) {
+export function printReportDocument(
+  targetId = "report-printable-area",
+  options = {},
+) {
   const element = document.getElementById(targetId);
   if (!element) {
     window.print();
     return;
   }
 
-  const orientation = options.orientation || 'landscape';
+  const orientation = options.orientation || "landscape";
 
   // Remove any leftover print iframe
-  const existingFrame = document.getElementById('print-report-iframe');
+  const existingFrame = document.getElementById("print-report-iframe");
   if (existingFrame) {
     existingFrame.remove();
   }
 
   // Create isolated invisible iframe
-  const iframe = document.createElement('iframe');
-  iframe.id = 'print-report-iframe';
-  iframe.style.position = 'fixed';
-  iframe.style.right = '0';
-  iframe.style.bottom = '0';
-  iframe.style.width = '0';
-  iframe.style.height = '0';
-  iframe.style.border = '0';
-  iframe.style.zIndex = '-9999';
+  const iframe = document.createElement("iframe");
+  iframe.id = "print-report-iframe";
+  iframe.style.position = "fixed";
+  iframe.style.right = "0";
+  iframe.style.bottom = "0";
+  iframe.style.width = "0";
+  iframe.style.height = "0";
+  iframe.style.border = "0";
+  iframe.style.zIndex = "-9999";
 
   document.body.appendChild(iframe);
 
   const iframeDoc = iframe.contentWindow.document;
 
   // Gather all style elements and stylesheets
-  const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
-    .map(node => node.outerHTML)
-    .join('\n');
+  const styles = Array.from(
+    document.querySelectorAll('link[rel="stylesheet"], style'),
+  )
+    .map((node) => node.outerHTML)
+    .join("\n");
 
-  const isRtl = document.documentElement.dir === 'rtl';
-  const lang = document.documentElement.lang || 'ar';
+  const isRtl = document.documentElement.dir === "rtl";
+  const lang = document.documentElement.lang || "ar";
 
   iframeDoc.open();
   iframeDoc.write(`<!DOCTYPE html>
-<html dir="${isRtl ? 'rtl' : 'ltr'}" lang="${lang}">
+<html dir="${isRtl ? "rtl" : "ltr"}" lang="${lang}">
   <head>
     <meta charset="utf-8" />
     <title>ECTRON Official Report Print</title>
@@ -50,7 +55,7 @@ export function printReportDocument(targetId = 'report-printable-area', options 
     <style>
       @page {
         size: A4 ${orientation};
-        margin: ${orientation === 'landscape' ? '3mm 5mm' : '6mm 8mm'};
+        margin: ${orientation === "landscape" ? "3mm 5mm" : "6mm 8mm"};
       }
       *, *::before, *::after {
         box-sizing: border-box;
@@ -115,7 +120,7 @@ export function printReportDocument(targetId = 'report-printable-area', options 
       iframe.contentWindow.focus();
       iframe.contentWindow.print();
     } catch (err) {
-      console.warn('Iframe print error, falling back to window.print():', err);
+      console.warn("Iframe print error, falling back to window.print():", err);
       window.print();
     } finally {
       // Clean up iframe after print dialog interaction
