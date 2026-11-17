@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Printer } from "lucide-react";
 import { STAGES, findStage } from "../../constants/defectStages";
 import {
@@ -7,6 +7,7 @@ import {
   getMeterDateStr,
 } from "../../utils/defectDateUtils";
 import { printReportDocument } from "../../utils/printReport";
+import { getTodayString } from "../../utils/date";
 
 export default function DefectiveMetersReportModal({
   isOpen,
@@ -96,7 +97,7 @@ export default function DefectiveMetersReportModal({
     });
   };
 
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = getTodayString();
   const recoveryPct =
     trackerKPIs.total > 0
       ? Math.round((trackerKPIs.returnedToLine / trackerKPIs.total) * 100)

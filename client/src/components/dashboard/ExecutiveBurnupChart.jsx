@@ -1,7 +1,7 @@
-import React, { useState } from "react";
-import { TrendingUp, Award, Layers, Cpu, Info } from "lucide-react";
+import { useState } from "react";
+import { TrendingUp } from "lucide-react";
 
-export default function ExecutiveBurnupChart({ burnupData, targets, overallCompleted, overallTarget }) {
+export default function ExecutiveBurnupChart({ burnupData, overallCompleted, embedded = false }) {
   const [hoveredPoint, setHoveredPoint] = useState(null);
 
   if (!burnupData || burnupData.length === 0) return null;
@@ -14,11 +14,11 @@ export default function ExecutiveBurnupChart({ burnupData, targets, overallCompl
   const innerHeight = height - padding.top - padding.bottom;
 
   // Max value for scaling
+  // Scale to the data shown (not the full contract) so the gap is readable
   const maxVal = Math.max(
-    overallTarget || 300000,
     ...burnupData.map((d) => Math.max(d.actual, d.target, d.fw || 0)),
     1000,
-  );
+  ) * 1.08;
 
   const getX = (idx) => {
     if (burnupData.length <= 1) return padding.left + innerWidth / 2;
@@ -39,17 +39,21 @@ export default function ExecutiveBurnupChart({ burnupData, targets, overallCompl
 
   return (
     <div
-      style={{
-        background: "#ffffff",
-        borderRadius: 16,
-        padding: "24px 28px",
-        border: "1.5px solid #e2e8f0",
-        boxShadow: "0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.03)",
-        position: "relative",
-      }}
+      style={
+        embedded
+          ? { position: "relative" }
+          : {
+              background: "#ffffff",
+              borderRadius: 16,
+              padding: "24px 28px",
+              border: "1.5px solid #e2e8f0",
+              boxShadow: "0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.03)",
+              position: "relative",
+            }
+      }
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: embedded ? "none" : "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 40, height: 40, borderRadius: 10, background: "#f0fdfa", border: "1px solid #99f6e4", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <TrendingUp size={22} color="#00afaa" />
           </div>

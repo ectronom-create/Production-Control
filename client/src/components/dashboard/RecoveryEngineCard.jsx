@@ -1,4 +1,3 @@
-import React from "react";
 import { TrendingUp, Target, AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function RecoveryEngineCard({

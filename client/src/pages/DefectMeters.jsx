@@ -1,23 +1,13 @@
-import React from "react";
-import { CheckCircle2, Printer, RefreshCw, Scan, Sliders } from "lucide-react";
+import {
+  CheckCircle2,
+  Printer,
+  RefreshCw,
+  Scan,
+  Sliders,
+  FileSpreadsheet,
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
-
-// Extracted Domain Constants & Helpers (re-exported for backward compatibility)
-import {
-  STAGES,
-  STAGE_IDS,
-  findStage,
-  DEFAULT_ACTUAL_DEFECTS,
-  STORAGE_ACTUAL_KEY,
-  LOCAL_DEFECTIVE_METERS_KEY,
-  COMMON_DEFECT_CODES,
-} from "../constants/defectStages";
-import {
-  getTodayDateStr,
-  getDaysAgoDateStr,
-  getMeterDateStr,
-} from "../utils/defectDateUtils";
 
 // Extracted Sub-Components
 import TrackerIntakeStepper from "../components/defect-meters/TrackerIntakeStepper";
@@ -31,19 +21,7 @@ import DefectiveMetersReportModal from "../components/defect-meters/DefectiveMet
 
 // Extracted Data & Workflow Custom Hook
 import { useDefectMetersData } from "../hooks/useDefectMetersData";
-
-export {
-  STAGES,
-  STAGE_IDS,
-  findStage,
-  DEFAULT_ACTUAL_DEFECTS,
-  STORAGE_ACTUAL_KEY,
-  LOCAL_DEFECTIVE_METERS_KEY,
-  COMMON_DEFECT_CODES,
-  getTodayDateStr,
-  getDaysAgoDateStr,
-  getMeterDateStr,
-};
+import { exportDefectsToExcel } from "../utils/exportDefectsExcel";
 
 export default function DefectMeters() {
   const { user } = useAuth();
@@ -202,6 +180,38 @@ export default function DefectMeters() {
                 {isArabic
                   ? "🖨️ تقرير العدادات المعطلة"
                   : "🖨️ Defective Meters Report"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                exportDefectsToExcel(data.filteredDefectiveMeters, isArabic)
+              }
+              disabled={data.filteredDefectiveMeters.length === 0}
+              className="btn-outline"
+              title={
+                isArabic
+                  ? "ينزّل العدادات الظاهرة حسب الفلاتر الحالية"
+                  : "Downloads the meters shown with the current filters"
+              }
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 7,
+                padding: "8px 16px",
+                fontWeight: 800,
+                fontSize: "0.84rem",
+                color: "#15803d",
+                borderColor: "#16a34a",
+                background: "#f0fdf4",
+              }}
+            >
+              <FileSpreadsheet size={16} />
+              <span>
+                {isArabic
+                  ? `تنزيل Excel (${data.filteredDefectiveMeters.length})`
+                  : `Download Excel (${data.filteredDefectiveMeters.length})`}
               </span>
             </button>
 

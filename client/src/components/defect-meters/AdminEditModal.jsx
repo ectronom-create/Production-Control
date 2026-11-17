@@ -1,4 +1,3 @@
-import React from "react";
 import { Edit3, Save } from "lucide-react";
 import { STAGES } from "../../constants/defectStages";
 

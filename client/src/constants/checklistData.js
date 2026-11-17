@@ -1,4 +1,35 @@
 export const LOCAL_STORAGE_KEY = "ectron_preproduction_checklists";
+export const CHECKLIST_FORM_NO = "PSM-CHK-06-2026";
+export const CREW_FORM_NO = "CREW-ASSIGN-2026"; // crew snapshots share the same table
+
+// Three plain states shown everywhere. Stored values stay compatible with old records.
+export function getChecklistStatusInfo(status, isArabic) {
+  if (status === "LINE_CLEARED_PASS" || status === "READY_FOR_START") {
+    return {
+      key: "READY",
+      label: isArabic ? "✅ جاهز للتشغيل" : "✅ Ready to start",
+      hint: isArabic ? "كل البنود تمام — الخط جاهز." : "All items OK — the line is ready.",
+      color: "#16a34a",
+      bg: "#f0fdf4",
+    };
+  }
+  if (status === "CRITICAL_BLOCKER" || status === "FAILED_ISSUES") {
+    return {
+      key: "NOT_READY",
+      label: isArabic ? "⛔ غير جاهز" : "⛔ Not ready",
+      hint: isArabic ? "فيه بند عليه مشكلة — عالجها قبل بدء الإنتاج." : "An item has a problem — fix it before starting.",
+      color: "#dc2626",
+      bg: "#fef2f2",
+    };
+  }
+  return {
+    key: "INCOMPLETE",
+    label: isArabic ? "⏳ الفحص لم يكتمل" : "⏳ Not finished",
+    hint: isArabic ? "باقي بنود ما انفحصت." : "Some items are not checked yet.",
+    color: "#d97706",
+    bg: "#fffbeb",
+  };
+}
 
 // Standard 8 Production Stations Sequence
 export const STANDARD_8_STATIONS = [
@@ -18,7 +49,6 @@ export const STANDARD_8_STATIONS = [
 ];
 
 export const ALL_STATION_IDS = STANDARD_8_STATIONS.map((s) => s.id);
-export const ALL_STATIONS = ALL_STATION_IDS;
 
 export function getCategoryInfo(cat, isArabic) {
   switch (cat) {
@@ -338,14 +368,6 @@ export const CHECKLIST_ITEMS = [
     ],
   },
 ];
-
-export function getTodayString() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 export function getInitialShift() {
   const hour = new Date().getHours();

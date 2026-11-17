@@ -1,4 +1,3 @@
-import React from "react";
 import { Scan, Wrench, CheckCircle2, AlertTriangle } from "lucide-react";
 
 export default function TrackerKPICards({ trackerKPIs, isArabic }) {

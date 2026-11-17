@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Sliders, X, RotateCcw, Check, Info } from "lucide-react";
 import { DEFAULT_TARGETS } from "../../hooks/useManagementDashboardData";
 
@@ -10,11 +10,13 @@ export default function ManagementSettingsModal({
 }) {
   const [formData, setFormData] = useState(targets);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [saveError, setSaveError] = useState("");
 
   useEffect(() => {
     if (isOpen) {
       setFormData(targets);
       setSavedSuccess(false);
+      setSaveError("");
     }
   }, [isOpen, targets]);
 
@@ -31,9 +33,11 @@ export default function ManagementSettingsModal({
     setFormData(DEFAULT_TARGETS);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSaveTargets({
+    setSaveError("");
+    const ok = await onSaveTargets({
+      projectStartDate: formData.projectStartDate || "",
       overallProd: Number(formData.overallProd) || DEFAULT_TARGETS.overallProd,
       weeklyProd: (Number(formData.dailyProd) || DEFAULT_TARGETS.dailyProd) * 7,
       dailyProd: Number(formData.dailyProd) || DEFAULT_TARGETS.dailyProd,
@@ -45,6 +49,12 @@ export default function ManagementSettingsModal({
       consumptionRateMode: formData.consumptionRateMode || "adaptive",
       fixedConsumptionRate: Number(formData.fixedConsumptionRate) || DEFAULT_TARGETS.fixedConsumptionRate,
     });
+    if (!ok) {
+      setSaveError(
+        "Saved on this device only — the app_settings table is missing in Supabase. Run app_settings.sql.",
+      );
+      return;
+    }
     setSavedSuccess(true);
     setTimeout(() => {
       onClose();
@@ -81,6 +91,7 @@ export default function ManagementSettingsModal({
         {/* Form Body */}
         <form onSubmit={handleSubmit}>
           <div style={{ padding: "20px 24px", maxHeight: "70vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
+            {saveError && <div className="modal-error" style={{ marginBottom: 12 }}>{saveError}</div>}
             
             {/* Group 1: 3-Phase Assembly Targets */}
             <div style={{ background: "#f8fafc", padding: "16px 18px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
@@ -97,6 +108,16 @@ export default function ManagementSettingsModal({
                     required
                     style={{ fontWeight: 800, fontFamily: "JetBrains Mono, monospace" }}
                   />
+                </div>
+                <div className="form-group">
+                  <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "#475569" }}>Project Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.projectStartDate || ""}
+                    onChange={(e) => handleChange("projectStartDate", e.target.value)}
+                    style={{ fontWeight: 700 }}
+                  />
+                  <span style={{ fontSize: "0.7rem", color: "#64748b" }}>Empty = 17-Aug-2026 (44 days before 30-Sep)</span>
                 </div>
                 <div className="form-group">
                   <label style={{ fontSize: "0.78rem", fontWeight: 700, color: "#475569" }}>Daily Target (Meters / Day)</label>

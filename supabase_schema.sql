@@ -79,6 +79,10 @@ CREATE TABLE IF NOT EXISTS public.shipment_batches (
   destination TEXT NOT NULL DEFAULT 'Nama / Field',
   notes TEXT DEFAULT '',
   uploaded_by TEXT DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'DEFINED',    -- DEFINED, FAT, DELIVERED
+  defined_date TEXT,                         -- تاريخ تحديد الباتش
+  fat_date TEXT,                             -- تاريخ بدء فحص FAT
+  delivered_date TEXT,                       -- تاريخ التسليم لنماء
   created_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT timezone('utc'::text, now()) NOT NULL
 );

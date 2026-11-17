@@ -3,6 +3,7 @@ import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { printReportDocument } from "../utils/printReport";
+import { getTodayString, toLocalDateStr } from "../utils/date";
 
 const STAGES = [
   "Assembly",
@@ -36,22 +37,8 @@ function formatElapsed(seconds) {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-function getTodayString() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function formatLocalDate(d) {
-  if (!d) return getTodayString();
-  const now = new Date(d);
-  if (isNaN(now.getTime())) return getTodayString();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return (d && toLocalDateStr(d)) || getTodayString();
 }
 
 function getCurrentTimeString(dateObj = new Date()) {
@@ -77,7 +64,6 @@ function DowntimeReportModal({
   records,
   selectedDate,
   selectedStage,
-  selectedUser,
   currentUser,
   onClose,
 }) {
@@ -846,6 +832,7 @@ export default function Downtime() {
         .from("stoppages")
         .select("*")
         .order("stopped_at", { ascending: false });
+      if (error) console.warn("Stoppages fetch error:", error);
 
       let cloudList = (data || []).map((s) => {
         const start = s.stopped_at ? new Date(s.stopped_at) : new Date();
@@ -1835,7 +1822,6 @@ export default function Downtime() {
           records={records}
           selectedDate={selectedDate}
           selectedStage={selectedStage}
-          selectedUser={selectedUser}
           currentUser={user}
           onClose={() => setModal(null)}
         />

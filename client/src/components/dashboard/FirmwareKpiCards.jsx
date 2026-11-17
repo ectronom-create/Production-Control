@@ -1,4 +1,3 @@
-import React from "react";
 import { Cpu, Target, Calendar, Clock, Zap } from "lucide-react";
 
 export default function FirmwareKpiCards({

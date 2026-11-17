@@ -19,6 +19,7 @@ import {
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { toLocalDateStr, getTodayString } from "../utils/date";
 
 Chart.register(...registerables);
 
@@ -87,7 +88,6 @@ export default function Dashboard() {
   const [stoppages, setStoppages] = useState([]);
   const [currentReport, setCurrentReport] = useState(null);
   const [target, setTarget] = useState(320);
-  const [loading, setLoading] = useState(true);
 
   // Chart canvas refs & instances
   const fpyBarChartRef = useRef(null);
@@ -107,15 +107,14 @@ export default function Dashboard() {
   const [prodStartDate, setProdStartDate] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 6);
-    return d.toISOString().slice(0, 10);
+    return toLocalDateStr(d);
   });
   const [prodEndDate, setProdEndDate] = useState(() =>
-    new Date().toISOString().slice(0, 10),
+    getTodayString(),
   );
 
   // Load production reports & stoppages from Supabase
   const fetchData = async () => {
-    setLoading(true);
     try {
       // 1. Fetch production records
       const { data: prodData, error: prodErr } = await supabase
@@ -152,13 +151,12 @@ export default function Dashboard() {
       setStoppages(stopData || []);
     } catch (err) {
       console.warn("Dashboard fetch error:", err);
-    } finally {
-      setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Update target when currentReport changes
@@ -171,7 +169,7 @@ export default function Dashboard() {
   // Handle production filter date changes
   useEffect(() => {
     const today = new Date();
-    const todayStr = today.toISOString().slice(0, 10);
+    const todayStr = toLocalDateStr(today);
 
     if (productionFilter === "today") {
       setProdStartDate(todayStr);
@@ -179,12 +177,12 @@ export default function Dashboard() {
     } else if (productionFilter === "week") {
       const d = new Date();
       d.setDate(d.getDate() - 6);
-      setProdStartDate(d.toISOString().slice(0, 10));
+      setProdStartDate(toLocalDateStr(d));
       setProdEndDate(todayStr);
     } else if (productionFilter === "month") {
       const d = new Date();
       d.setDate(d.getDate() - 29);
-      setProdStartDate(d.toISOString().slice(0, 10));
+      setProdStartDate(toLocalDateStr(d));
       setProdEndDate(todayStr);
     } else if (productionFilter === "all") {
       if (reports && reports.length > 0) {

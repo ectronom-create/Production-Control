@@ -23,6 +23,14 @@ import {
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { getTodayString } from "../utils/date";
+import BatchStatusModal from "../components/batches/BatchStatusModal";
+import {
+  BATCH_STAGES,
+  getBatchStage,
+  getBatchDefinedDate,
+  getBatchStageDate,
+} from "../utils/batchStatus";
 
 // Field definitions strictly matching the user's specification and image + actual factory excel headers (13 fields)
 const EXPECTED_FIELDS = [
@@ -186,6 +194,8 @@ export default function Batches() {
   const [searchTerm, setSearchTerm] = useState("");
   const [productFilter, setProductFilter] = useState("ALL");
   const [dateFilter, setDateFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusBatch, setStatusBatch] = useState(null);
 
   // Upload modal states
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -194,7 +204,7 @@ export default function Batches() {
   const [parsedStats, setParsedStats] = useState(null);
   const [batchName, setBatchName] = useState("");
   const [shipmentDate, setShipmentDate] = useState(
-    new Date().toISOString().slice(0, 10),
+    getTodayString(),
   );
   const [productType, setProductType] = useState("Three Phase");
   const [destination, setDestination] = useState("Nama / Field");
@@ -279,6 +289,18 @@ export default function Batches() {
     };
   }, [batches]);
 
+  // Count of batches / meters per stage
+  const stageCounts = useMemo(() => {
+    const out = {};
+    BATCH_STAGES.forEach((st) => (out[st.key] = { batches: 0, meters: 0 }));
+    batches.forEach((b) => {
+      const k = getBatchStage(b).key;
+      out[k].batches += 1;
+      out[k].meters += parseInt(b.total_meters, 10) || 0;
+    });
+    return out;
+  }, [batches]);
+
   // Filtered Batches List
   const filteredBatches = useMemo(() => {
     return batches.filter((b) => {
@@ -293,11 +315,13 @@ export default function Batches() {
 
       const matchesProduct =
         productFilter === "ALL" || b.product_type === productFilter;
-      const matchesDate = !dateFilter || b.shipment_date === dateFilter;
+      const matchesDate = !dateFilter || getBatchDefinedDate(b) === dateFilter;
+      const matchesStatus =
+        statusFilter === "ALL" || getBatchStage(b).key === statusFilter;
 
-      return matchesSearch && matchesProduct && matchesDate;
+      return matchesSearch && matchesProduct && matchesDate && matchesStatus;
     });
-  }, [batches, searchTerm, productFilter, dateFilter]);
+  }, [batches, searchTerm, productFilter, dateFilter, statusFilter]);
 
   // Handle Excel/CSV file selection and parsing
   const handleFileChange = (e) => {
@@ -834,6 +858,27 @@ export default function Batches() {
       </div>
 
       {/* Success Notification */}
+      {statusBatch && (
+        <BatchStatusModal
+          batch={statusBatch}
+          onClose={() => setStatusBatch(null)}
+          onSaved={(updated) => {
+            setBatches((prev) => {
+              const next = prev.map((x) => (x.id === updated.id ? updated : x));
+              localStorage.setItem("ectron_shipment_batches", JSON.stringify(next));
+              return next;
+            });
+            setStatusBatch(null);
+            setSuccessToast(
+              isArabic
+                ? `تم تحديث حالة "${updated.batch_name}"`
+                : `Status of "${updated.batch_name}" updated`,
+            );
+            setTimeout(() => setSuccessToast(""), 4000);
+          }}
+        />
+      )}
+
       {successToast && (
         <div
           style={{
@@ -1194,6 +1239,39 @@ export default function Batches() {
             </div>
           </div>
 
+          {/* Stage counters (click to filter) */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+            {BATCH_STAGES.map((st, i) => {
+              const on = statusFilter === st.key;
+              return (
+                <button
+                  key={st.key}
+                  type="button"
+                  onClick={() => setStatusFilter(on ? "ALL" : st.key)}
+                  style={{
+                    flex: "1 1 200px",
+                    textAlign: "start",
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    cursor: "pointer",
+                    border: `2px solid ${on ? st.color : `${st.color}44`}`,
+                    background: on ? st.bg : "var(--white)",
+                  }}
+                >
+                  <div style={{ fontSize: "0.8rem", fontWeight: 800, color: st.color }}>
+                    {i + 1}. {st.icon} {isArabic ? st.ar : st.en}
+                  </div>
+                  <div style={{ fontSize: "1.4rem", fontWeight: 900, color: "var(--navy)", marginTop: 2 }}>
+                    {stageCounts[st.key].batches}{" "}
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--gray-500)" }}>
+                      {isArabic ? "باتش" : "batches"} · {stageCounts[st.key].meters.toLocaleString()} {isArabic ? "عداد" : "meters"}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
           {/* Batches Table */}
           <div className="table-card">
             <div className="table-wrap">
@@ -1201,11 +1279,12 @@ export default function Batches() {
                 <thead>
                   <tr>
                     <th>{isArabic ? "اسم الدفعة" : "Batch Name"}</th>
-                    <th>{isArabic ? "تاريخ الشحن" : "Shipment Date"}</th>
+                    <th>{isArabic ? "تاريخ التحديد" : "Defined On"}</th>
                     <th>{t("product")}</th>
                     <th style={{ textAlign: "center" }}>
                       {isArabic ? "الكمية المشحونة" : "Shipped Qty"}
                     </th>
+                    <th>{isArabic ? "الحالة" : "Status"}</th>
                     <th>{isArabic ? "الوجهة" : "Destination"}</th>
                     <th>
                       {isArabic ? "اسم الملف الأصلي" : "Original File Name"}
@@ -1218,7 +1297,7 @@ export default function Batches() {
                   {filteredBatches.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         style={{
                           textAlign: "center",
                           padding: "40px 20px",
@@ -1272,7 +1351,7 @@ export default function Batches() {
                             }}
                           >
                             <Calendar size={14} color="var(--gray-400)" />
-                            <span>{b.shipment_date}</span>
+                            <span>{getBatchDefinedDate(b)}</span>
                           </div>
                         </td>
                         <td>
@@ -1310,6 +1389,44 @@ export default function Batches() {
                           >
                             {isArabic ? "عداد" : "Meters"}
                           </span>
+                        </td>
+                        <td>
+                          {(() => {
+                            const st = getBatchStage(b);
+                            const stDate = getBatchStageDate(b, st.key);
+                            return (
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                <div>
+                                  <span
+                                    style={{
+                                      display: "inline-block",
+                                      padding: "3px 10px",
+                                      borderRadius: 20,
+                                      fontSize: "0.76rem",
+                                      fontWeight: 800,
+                                      color: st.color,
+                                      background: st.bg,
+                                      border: `1px solid ${st.color}55`,
+                                      whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    {st.icon} {isArabic ? st.ar : st.en}
+                                  </span>
+                                  {stDate && (
+                                    <div style={{ fontSize: "0.72rem", color: "var(--gray-500)", marginTop: 2 }}>{stDate}</div>
+                                  )}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setStatusBatch(b)}
+                                  className="btn-outline"
+                                  style={{ padding: "4px 10px", fontSize: "0.76rem", fontWeight: 700 }}
+                                >
+                                  {isArabic ? "تغيير" : "Change"}
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td>
                           <div

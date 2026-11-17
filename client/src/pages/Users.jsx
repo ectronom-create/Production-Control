@@ -490,12 +490,15 @@ export default function Users() {
     setLoading(true);
     try {
       let query = supabase.from("users").select("*").order("name");
-      if (q && q.trim()) {
+      // Strip characters that break PostgREST's or() filter syntax
+      const term = (q || "").replace(/[,()%*\\"]/g, " ").trim();
+      if (term) {
         query = query.or(
-          `name.ilike.%${q}%,email.ilike.%${q}%,team_name.ilike.%${q}%`,
+          `name.ilike.%${term}%,email.ilike.%${term}%,team_name.ilike.%${term}%`,
         );
       }
       const { data, error } = await query;
+      if (error) console.warn("Users fetch error:", error);
       if (data && data.length > 0) {
         setUsers(data);
       } else {

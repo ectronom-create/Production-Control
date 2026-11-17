@@ -1,4 +1,3 @@
-import React from "react";
 import { Layers, Target, Calendar, Clock, Zap } from "lucide-react";
 
 export default function ProductionKpiCards({
@@ -322,10 +321,17 @@ export default function ProductionKpiCards({
               marginTop: 10,
             }}
           >
-            Actual per Shift:{" "}
-            <b style={{ color: "#7c3aed" }}>
-              {productionMetrics.shiftActual.toLocaleString()}
-            </b>
+            ☀️ Morning:{" "}
+            <b style={{ color: productionMetrics.morningPct >= 90 ? "#16a34a" : "#d97706" }}>
+              {productionMetrics.morningActual.toLocaleString()}
+            </b>{" "}
+            ({productionMetrics.morningPct.toFixed(0)}%)
+            <br />
+            🌙 Evening:{" "}
+            <b style={{ color: productionMetrics.eveningPct >= 90 ? "#16a34a" : "#d97706" }}>
+              {productionMetrics.eveningActual.toLocaleString()}
+            </b>{" "}
+            ({productionMetrics.eveningPct.toFixed(0)}%)
           </div>
           <div
             style={{

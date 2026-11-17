@@ -1,22 +1,26 @@
+import { lazy } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
-import ManagementDashboard from "./pages/ManagementDashboard";
-import Downtime from "./pages/Downtime";
-import Production from "./pages/Production";
-import DefectMeters from "./pages/DefectMeters";
-import KitMeters from "./pages/KitMeters";
-import Batches from "./pages/Batches";
-import BatchLookup from "./pages/BatchLookup";
-import PreProductionChecklist from "./pages/PreProductionChecklist";
-import CrewManagement from "./pages/CrewManagement";
-import Users from "./pages/Users";
+
+// Pages load on demand so the first screen opens fast on phones
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const ManagementDashboard = lazy(() => import("./pages/ManagementDashboard"));
+const Downtime = lazy(() => import("./pages/Downtime"));
+const Production = lazy(() => import("./pages/Production"));
+const DefectMeters = lazy(() => import("./pages/DefectMeters"));
+const KitMeters = lazy(() => import("./pages/KitMeters"));
+const Batches = lazy(() => import("./pages/Batches"));
+const BatchLookup = lazy(() => import("./pages/BatchLookup"));
+const PreProductionChecklist = lazy(() => import("./pages/PreProductionChecklist"));
+const CrewManagement = lazy(() => import("./pages/CrewManagement"));
+const Users = lazy(() => import("./pages/Users"));
+const EmployeeProfiles = lazy(() => import("./pages/EmployeeProfiles"));
 
 function PrivateRoute({ children }) {
-  const { token } = useAuth();
-  return token ? children : <Navigate to="/login" replace />;
+  const { token, user } = useAuth();
+  return token && user ? children : <Navigate to="/login" replace />;
 }
 
 function IndexRedirect() {
@@ -45,11 +49,15 @@ function RoleRoute({ allowedRoles, children }) {
 }
 
 export default function App() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isLoggedIn = Boolean(token && user);
 
   return (
     <Routes>
-      <Route path="/login" element={token ? <IndexRedirect /> : <Login />} />
+      <Route
+        path="/login"
+        element={isLoggedIn ? <IndexRedirect /> : <Login />}
+      />
       <Route
         path="/"
         element={
@@ -88,6 +96,22 @@ export default function App() {
           element={
             <RoleRoute allowedRoles={["admin", "supervisor"]}>
               <CrewManagement />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="employees"
+          element={
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
+              <EmployeeProfiles />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="employees/:id"
+          element={
+            <RoleRoute allowedRoles={["admin", "supervisor"]}>
+              <EmployeeProfiles />
             </RoleRoute>
           }
         />

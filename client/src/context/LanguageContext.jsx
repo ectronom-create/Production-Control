@@ -551,15 +551,14 @@ export function LanguageProvider({ children }) {
   const { user } = useAuth();
   const userRole = (user?.access || "viewer").toLowerCase();
 
-  // Language can only be switched by admin or supervisor. Viewers are strictly English.
-  const canChangeLanguage = userRole === "admin" || userRole === "supervisor";
+  // Every signed-in role can switch language (management viewers included).
+  const canChangeLanguage = Boolean(userRole);
 
   // Read saved language from localStorage (defaults to 'en')
   const [savedLanguage, setSavedLanguage] = useState(() => {
     return localStorage.getItem(STORAGE_KEY) || "en";
   });
 
-  // Effective language: strictly 'en' for viewer, or savedLanguage for admin/supervisor
   const effectiveLanguage = canChangeLanguage ? savedLanguage : "en";
 
   const isArabic = effectiveLanguage === "ar";

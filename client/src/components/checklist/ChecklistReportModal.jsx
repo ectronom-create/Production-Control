@@ -1,9 +1,9 @@
-import React from "react";
 import { Printer } from "lucide-react";
 import {
   CHECKLIST_ITEMS,
   getCategoryInfo,
   getStationsDisplay,
+  getChecklistStatusInfo,
 } from "../../constants/checklistData";
 import { printReportDocument } from "../../utils/printReport";
 
@@ -34,15 +34,15 @@ export default function ChecklistReportModal({
   const itemStatuses = record
     ? record.item_details || {}
     : activeData.itemStatuses;
-  const attendanceData =
-    record?.item_details?.["chk-0"]?.attendance ||
-    activeData?.standupAttendance ||
-    [];
+  const attendanceData = record
+    ? record.item_details?.attendance ||
+      record.item_details?.["chk-0"]?.attendance ||
+      []
+    : activeData?.standupAttendance || [];
 
-  const isCleared =
-    overallStatus === "LINE_CLEARED_PASS" ||
-    overallStatus === "READY_FOR_START";
-  const isBlocked = overallStatus === "CRITICAL_BLOCKER";
+  const statusInfo = getChecklistStatusInfo(overallStatus, isArabic);
+  const isCleared = statusInfo.key === "READY";
+  const isBlocked = statusInfo.key === "NOT_READY";
 
   const presentCount = attendanceData.filter(
     (a) => a.status === "PRESENT",
@@ -346,17 +346,7 @@ export default function ChecklistReportModal({
                       : "#d97706",
                 }}
               >
-                {isCleared
-                  ? isArabic
-                    ? "✅ مصرح للإنتاج"
-                    : "✅ LINE CLEARED"
-                  : isBlocked
-                    ? isArabic
-                      ? "🛑 مانع حرج"
-                      : "🛑 BLOCKER"
-                    : isArabic
-                      ? "⚠️ قيد التحقق"
-                      : "⚠️ PENDING"}
+                {statusInfo.label}
               </span>
             </div>
           </div>

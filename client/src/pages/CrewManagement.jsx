@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+import { getTodayString } from "../utils/date";
 
 const STAGES = [
   {
@@ -89,16 +90,6 @@ const STAGES = [
     color: "#06b6d4",
   },
 ];
-
-const SHIFT_OPTIONS = ["Morning", "Night"];
-
-function getTodayString() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
 
 function getInitialShift() {
   const h = new Date().getHours();

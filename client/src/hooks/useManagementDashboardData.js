@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { getBatchStatus } from "../utils/kitStatus";
+import { getBatchStage, getBatchStageDate, getBatchDefinedDate } from "../utils/batchStatus";
+import { toLocalDateStr, getTodayString } from "../utils/date";
 
 export const DEFAULT_TARGETS = {
   overallProd: 300000,
-  weeklyProd: 9100,
-  dailyProd: 1300,
-  shiftProd: 650,
+  weeklyProd: 8400,
+  dailyProd: 1200,
+  shiftProd: 600,
   shiftsPerDay: 2,
   overallFw: 70000,
   weeklyFw: 8400,
@@ -15,41 +17,50 @@ export const DEFAULT_TARGETS = {
   baselineDefects: 4250,
   consumptionRateMode: "adaptive", // 'adaptive' or 'fixed'
   fixedConsumptionRate: 1200,
+  projectStartDate: "", // empty = PROJECT_START_DEFAULT
 };
 
-const STORAGE_TARGETS_KEY = "ectron_mgmt_targets_config";
+// v2: daily target moved to 1200 — older locally-saved 1300 configs are ignored
+const STORAGE_TARGETS_KEY = "ectron_mgmt_targets_v2";
+const SETTINGS_TABLE = "app_settings";
 
-/**
- * Helper to determine project health badge based on achievement percentage
- */
-export function getStatusBadge(pct) {
-  if (pct >= 95)
-    return {
-      label: "ON TRACK (Exceeding)",
-      bg: "#dcfce7",
-      color: "#15803d",
-      border: "#bbf7d0",
-    };
-  if (pct >= 75)
-    return {
-      label: "HEALTHY (Near Target)",
-      bg: "#e0f2fe",
-      color: "#0369a1",
-      border: "#bae6fd",
-    };
-  if (pct >= 50)
-    return {
-      label: "ATTENTION (Moderate)",
-      bg: "#fef3c7",
-      color: "#b45309",
-      border: "#fde68a",
-    };
-  return {
-    label: "BEHIND SCHEDULE",
-    bg: "#fee2e2",
-    color: "#b91c1c",
-    border: "#fecaca",
-  };
+// Production started 44 days before 30-Sep-2026. Output from 17-Aug to 30-Sep was
+// uploaded as one total dated 30-Sep; shift-by-shift reports start in October.
+export const PROJECT_START_DEFAULT = "2026-08-17";
+export const DAILY_TRACKING_START = "2026-10-01";
+const SETTINGS_KEY = "mgmt_targets";
+
+const DAY_MS = 86400000;
+function dateToUtc(dStr) {
+  const [y, m, d] = dStr.split("-").map(Number);
+  return Date.UTC(y, m - 1, d);
+}
+function diffDays(fromStr, toStr) {
+  return Math.round((dateToUtc(toStr) - dateToUtc(fromStr)) / DAY_MS);
+}
+function addDays(dStr, n) {
+  const t = new Date(dateToUtc(dStr) + n * DAY_MS);
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
+}
+
+// Shift is stored as a suffix on team_name ("Team A - Morning") or a note tag
+function getRecordShift(r) {
+  const str = `${r?.team_name || ""} ${r?.notes || ""}`.toLowerCase();
+  if (str.includes("evening") || str.includes("\u0645\u0633\u0627")) return "Evening";
+  if (str.includes("morning") || str.includes("\u0635\u0628\u0627\u062d")) return "Morning";
+  return null;
+}
+
+function normalizeTargets(t) {
+  const out = { ...DEFAULT_TARGETS, ...t };
+  const shifts = Number(out.shiftsPerDay) > 0 ? Number(out.shiftsPerDay) : 2;
+  out.dailyProd = Number(out.dailyProd) || DEFAULT_TARGETS.dailyProd;
+  out.weeklyProd = out.dailyProd * 7;
+  out.shiftProd = Math.round(out.dailyProd / shifts);
+  out.dailyFw = Number(out.dailyFw) || DEFAULT_TARGETS.dailyFw;
+  out.weeklyFw = out.dailyFw * 7;
+  out.shiftFw = Math.round(out.dailyFw / shifts);
+  return out;
 }
 
 /**
@@ -60,12 +71,14 @@ export function useManagementDashboardData() {
   const [records, setRecords] = useState([]);
   const [kitRecords, setKitRecords] = useState([]);
   const [shipmentBatches, setShipmentBatches] = useState([]);
+  const [stoppages, setStoppages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isLiveSyncing, setIsLiveSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState(() => new Date());
   const [syncError, setSyncError] = useState(null);
   const [selectedDate, setSelectedDate] = useState("");
-  const [selectedRecoveryMonth, setSelectedRecoveryMonth] = useState("2026-10");
+  const [selectedRecoveryMonth, setSelectedRecoveryMonth] = useState(() =>
+    getTodayString().slice(0, 7),
+  );
   const [recoveryHorizonDays, setRecoveryHorizonDays] = useState("month_end");
 
   // Defective Meters count logged live from the Defect Meters tracking system
@@ -80,57 +93,71 @@ export function useManagementDashboardData() {
     return 0;
   });
 
-  // Configurable targets with localStorage persistence
+  // Targets: shared for everyone via Supabase (app_settings), cached locally
   const [targets, setTargets] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_TARGETS_KEY);
-      if (saved) {
-        return { ...DEFAULT_TARGETS, ...JSON.parse(saved) };
-      }
+      if (saved) return normalizeTargets(JSON.parse(saved));
     } catch (_) {}
-    return DEFAULT_TARGETS;
+    return normalizeTargets(DEFAULT_TARGETS);
   });
+  const [targetsShared, setTargetsShared] = useState(true);
 
-  // Function for Admins/Supervisors to update targets dynamically
-  const updateTargets = useCallback((newPartial) => {
-    setTargets((prev) => {
-      const updated = { ...prev, ...newPartial };
-      // Recalculate shift targets if daily target or shift count changed
-      if (newPartial.dailyProd != null || newPartial.shiftsPerDay != null) {
-        const d = newPartial.dailyProd != null ? Number(newPartial.dailyProd) : updated.dailyProd;
-        const s = newPartial.shiftsPerDay != null ? Number(newPartial.shiftsPerDay) : (updated.shiftsPerDay || 2);
-        updated.shiftProd = Math.round(d / (s > 0 ? s : 2));
-      }
-      if (newPartial.dailyFw != null || newPartial.shiftsPerDay != null) {
-        const df = newPartial.dailyFw != null ? Number(newPartial.dailyFw) : updated.dailyFw;
-        const s = newPartial.shiftsPerDay != null ? Number(newPartial.shiftsPerDay) : (updated.shiftsPerDay || 2);
-        updated.shiftFw = Math.round(df / (s > 0 ? s : 2));
-      }
-      try {
-        localStorage.setItem(STORAGE_TARGETS_KEY, JSON.stringify(updated));
-      } catch (_) {}
-      return updated;
-    });
+  const applyTargets = useCallback((value) => {
+    const t = normalizeTargets(value || {});
+    setTargets(t);
+    try {
+      localStorage.setItem(STORAGE_TARGETS_KEY, JSON.stringify(t));
+    } catch (_) {}
+    return t;
   }, []);
 
-  // Available Recovery Months
+  // Admin only (enforced in the UI). Returns true when saved for everyone.
+  const updateTargets = useCallback(
+    async (newPartial) => {
+      const t = applyTargets({ ...targets, ...newPartial });
+      const { error } = await supabase
+        .from(SETTINGS_TABLE)
+        .upsert(
+          [{ key: SETTINGS_KEY, value: t, updated_at: new Date().toISOString() }],
+          { onConflict: "key" },
+        );
+      setTargetsShared(!error);
+      return !error;
+    },
+    [targets, applyTargets],
+  );
+
+  // First day of production (setting, or 17-Aug-2026)
+  const projectStart = targets.projectStartDate || PROJECT_START_DEFAULT;
+
+  // Recovery months: from the first month with daily reports to this month
+  // (Aug/Sep only have one lump-sum total, so a monthly breakdown is meaningless there)
   const availableRecoveryMonths = useMemo(() => {
-    const monthSet = new Set(["2026-10", "2026-11", "2026-12"]);
-    records.forEach((r) => {
-      if (r.date && r.date.length >= 7) {
-        const ym = r.date.slice(0, 7);
-        if (ym >= "2026-10") monthSet.add(ym);
+    const months = [];
+    const end = getTodayString().slice(0, 7);
+    const from = projectStart > DAILY_TRACKING_START ? projectStart : DAILY_TRACKING_START;
+    let [y, m] = from.slice(0, 7).split("-").map(Number);
+    for (let guard = 0; guard < 60; guard++) {
+      const ym = `${y}-${String(m).padStart(2, "0")}`;
+      months.push(ym);
+      if (ym >= end) break;
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
       }
-    });
-    return Array.from(monthSet).sort();
-  }, [records]);
+    }
+    return months;
+  }, [projectStart]);
 
   // Fetch production records, kit records, defective meters count & shipment batches
   const fetchRecords = useCallback(async () => {
     setLoading(true);
     setSyncError(null);
     try {
-      const [prodRes, kitRes, defectMetersRes, batchesRes] = await Promise.allSettled([
+      const since = new Date(Date.now() - 35 * DAY_MS).toISOString();
+      const [prodRes, kitRes, defectMetersRes, batchesRes, settingsRes, stopRes] = await Promise.allSettled([
         supabase
           .from("production_records")
           .select("*")
@@ -139,15 +166,33 @@ export function useManagementDashboardData() {
           .from("kit_meters")
           .select("*")
           .order("date", { ascending: false }),
-        supabase.from("defective_meters").select("id", { count: "exact" }),
-        supabase.from("shipment_batches").select("*").order("shipment_date", { ascending: false })
+        // Only meters still out of the line count as lost (not ones returned after repair)
+        supabase
+          .from("defective_meters")
+          .select("id", { count: "exact", head: true })
+          .neq("status", "RETURNED_TO_LINE"),
+        supabase.from("shipment_batches").select("*").order("shipment_date", { ascending: false }),
+        supabase.from(SETTINGS_TABLE).select("value").eq("key", SETTINGS_KEY).maybeSingle(),
+        supabase
+          .from("stoppages")
+          .select("stage_id, stopped_at, resumed_at, reason_code")
+          .gte("stopped_at", since),
       ]);
+
+      if (stopRes.status === "fulfilled" && !stopRes.value.error) {
+        setStoppages(stopRes.value.data || []);
+      }
+
+      if (settingsRes.status === "fulfilled") {
+        const { data, error } = settingsRes.value;
+        setTargetsShared(!error);
+        if (!error && data?.value) applyTargets(data.value);
+      } else {
+        setTargetsShared(false);
+      }
 
       if (prodRes.status === "fulfilled" && prodRes.value.data) {
         setRecords(prodRes.value.data);
-        if (prodRes.value.data.length > 0 && !selectedDate) {
-          setSelectedDate(prodRes.value.data[0].date);
-        }
       }
 
       if (
@@ -176,13 +221,9 @@ export function useManagementDashboardData() {
 
       // Update Defect Meters Count from live database
       if (defectMetersRes.status === "fulfilled") {
-        const count =
-          typeof defectMetersRes.value.count === "number"
-            ? defectMetersRes.value.count
-            : defectMetersRes.value.data
-              ? defectMetersRes.value.data.length
-              : 0;
-        setDefectiveMetersCount(count);
+        if (typeof defectMetersRes.value.count === "number") {
+          setDefectiveMetersCount(defectMetersRes.value.count);
+        }
       } else {
         try {
           const cached = localStorage.getItem("ectron_defective_meters_cache");
@@ -194,11 +235,9 @@ export function useManagementDashboardData() {
       }
 
       setLastSyncedAt(new Date());
-      setIsLiveSyncing(true);
     } catch (e) {
       console.warn("Error fetching management dashboard records:", e);
       setSyncError("Failed to fetch live records. Operating with cached data.");
-      setIsLiveSyncing(false);
       try {
         const cached = localStorage.getItem("ectron_kit_meters_records");
         if (cached) setKitRecords(JSON.parse(cached));
@@ -206,7 +245,7 @@ export function useManagementDashboardData() {
     } finally {
       setLoading(false);
     }
-  }, [selectedDate]);
+  }, [applyTargets]);
 
   useEffect(() => {
     fetchRecords();
@@ -246,13 +285,17 @@ export function useManagementDashboardData() {
         { event: "*", schema: "public", table: "shipment_batches" },
         triggerDebouncedFetch,
       )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          setIsLiveSyncing(true);
-        } else if (status === "CHANNEL_ERROR") {
-          setIsLiveSyncing(false);
-        }
-      });
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: SETTINGS_TABLE },
+        triggerDebouncedFetch,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stoppages" },
+        triggerDebouncedFetch,
+      )
+      .subscribe();
 
     // 2. Storage event listener (cross-tab sync)
     const handleStorageChange = (e) => {
@@ -266,10 +309,10 @@ export function useManagementDashboardData() {
     };
     window.addEventListener("storage", handleStorageChange);
 
-    // 3. Fallback Polling every 20 seconds for seamless continuous background update
+    // 3. Light safety refresh every 5 minutes (realtime covers live changes)
     const pollInterval = setInterval(() => {
       fetchRecords();
-    }, 20000);
+    }, 5 * 60 * 1000);
 
     return () => {
       supabase.removeChannel(channel);
@@ -280,14 +323,24 @@ export function useManagementDashboardData() {
   }, [fetchRecords]);
 
   // Dates for Daily and Weekly calculations
-  const todayStr = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayStr = getTodayString();
+
+  // A day counts toward the target once it is over — or today, once both shifts reported.
+  const lastCompleteDate = useMemo(() => {
+    const todayShifts = new Set(
+      records.filter((r) => r.date === todayStr).map((r) => getRecordShift(r)),
+    );
+    return todayShifts.has("Morning") && todayShifts.has("Evening")
+      ? todayStr
+      : addDays(todayStr, -1);
+  }, [records, todayStr]);
   const activeDate =
     selectedDate || (records.length > 0 ? records[0].date : todayStr);
 
   const weekStartDateStr = useMemo(() => {
     const base = activeDate ? new Date(activeDate) : new Date();
     base.setDate(base.getDate() - 6);
-    return base.toISOString().slice(0, 10);
+    return toLocalDateStr(base);
   }, [activeDate]);
 
   const availableDates = useMemo(() => {
@@ -324,8 +377,14 @@ export function useManagementDashboardData() {
     const dailyAchievementPct =
       targets.dailyProd > 0 ? (dailyActual / targets.dailyProd) * 100 : 0;
 
-    const shiftsCount = targets.shiftsPerDay || 2;
-    const shiftActual = Math.round(dailyActual / (shiftsCount > 0 ? shiftsCount : 2));
+    const shiftSum = (shift) =>
+      dailyRecords
+        .filter((r) => getRecordShift(r) === shift)
+        .reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
+    const morningActual = shiftSum("Morning");
+    const eveningActual = shiftSum("Evening");
+    const shiftsReported = [morningActual, eveningActual].filter((v) => v > 0).length || 1;
+    const shiftActual = Math.round(dailyActual / shiftsReported);
     const shiftAchievementPct =
       targets.shiftProd > 0 ? (shiftActual / targets.shiftProd) * 100 : 0;
 
@@ -342,6 +401,10 @@ export function useManagementDashboardData() {
       shiftActual,
       shiftTarget: targets.shiftProd,
       shiftPct: shiftAchievementPct,
+      morningActual,
+      eveningActual,
+      morningPct: targets.shiftProd > 0 ? (morningActual / targets.shiftProd) * 100 : 0,
+      eveningPct: targets.shiftProd > 0 ? (eveningActual / targets.shiftProd) * 100 : 0,
       activeDate,
     };
   }, [records, activeDate, weekStartDateStr, targets]);
@@ -373,8 +436,14 @@ export function useManagementDashboardData() {
     const dailyAchievementPct =
       targets.dailyFw > 0 ? (dailyActual / targets.dailyFw) * 100 : 0;
 
-    const shiftsCount = targets.shiftsPerDay || 2;
-    const shiftActual = Math.round(dailyActual / (shiftsCount > 0 ? shiftsCount : 2));
+    const fwShiftSum = (shift) =>
+      dailyRecords
+        .filter((r) => getRecordShift(r) === shift)
+        .reduce((sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0), 0);
+    const morningActual = fwShiftSum("Morning");
+    const eveningActual = fwShiftSum("Evening");
+    const shiftsReported = [morningActual, eveningActual].filter((v) => v > 0).length || 1;
+    const shiftActual = Math.round(dailyActual / shiftsReported);
     const shiftAchievementPct =
       targets.shiftFw > 0 ? (shiftActual / targets.shiftFw) * 100 : 0;
 
@@ -391,12 +460,14 @@ export function useManagementDashboardData() {
       shiftActual,
       shiftTarget: targets.shiftFw,
       shiftPct: shiftAchievementPct,
+      morningActual,
+      eveningActual,
     };
   }, [records, activeDate, weekStartDateStr, targets]);
 
   // Monthly Dynamic Production Recovery Engine
   const recoveryAnalysis = useMemo(() => {
-    const ym = selectedRecoveryMonth || "2026-10";
+    const ym = selectedRecoveryMonth || getTodayString().slice(0, 7);
     const [yearStr, monthStr] = ym.split("-");
     const year = parseInt(yearStr, 10);
     const month = parseInt(monthStr, 10);
@@ -417,7 +488,9 @@ export function useManagementDashboardData() {
     ];
     const monthName = monthNames[month - 1] || ym;
 
-    const startDay = ym === "2026-10" ? 2 : 1;
+    // Month window starts on the 1st, or on the project start day in its first month
+    const firstDay = projectStart > DAILY_TRACKING_START ? projectStart : DAILY_TRACKING_START;
+    const startDay = firstDay.slice(0, 7) === ym ? parseInt(firstDay.slice(8, 10), 10) : 1;
     const startDate = `${ym}-${String(startDay).padStart(2, "0")}`;
 
     const lastDayOfMonth = new Date(year, month, 0).getDate();
@@ -429,23 +502,20 @@ export function useManagementDashboardData() {
     const monthRecords = records.filter(
       (r) => r.date >= startDate && r.date <= endDate,
     );
-    const uniqueDates = Array.from(new Set(monthRecords.map((r) => r.date))).sort();
+    const windowEnd = lastCompleteDate < endDate ? lastCompleteDate : endDate;
 
-    const actualInPeriod = monthRecords.reduce(
-      (sum, r) => sum + (parseInt(r.achieved, 10) || 0),
-      0,
-    );
+    const actualInPeriod = monthRecords
+      .filter((r) => r.date <= windowEnd)
+      .reduce((sum, r) => sum + (parseInt(r.achieved, 10) || 0), 0);
     const fwInPeriod = monthRecords.reduce(
       (sum, r) => sum + (parseInt(r.updated_fw_qty, 10) || 0),
       0,
     );
 
-    const latestDate =
-      uniqueDates.length > 0
-        ? uniqueDates[uniqueDates.length - 1]
-        : startDate;
-    const elapsedDays = uniqueDates.length;
-
+    // Every calendar day counts (the line works 7 days a week): a day with no
+    // report is lost production, not a skipped day.
+    const latestDate = lastCompleteDate < endDate ? lastCompleteDate : endDate;
+    const elapsedDays = latestDate < startDate ? 0 : diffDays(startDate, latestDate) + 1;
     const targetInPeriod = elapsedDays * targets.dailyProd;
     const missingTarget = Math.max(0, targetInPeriod - actualInPeriod);
     const isTargetAchieved =
@@ -455,11 +525,10 @@ export function useManagementDashboardData() {
     const monthOverallPct =
       monthFullTarget > 0 ? (actualInPeriod / monthFullTarget) * 100 : 0;
 
-    const latestDayNum =
-      uniqueDates.length > 0
-        ? parseInt(latestDate.split("-")[2], 10)
-        : startDay - 1;
-    const remainingDaysInMonth = Math.max(1, lastDayOfMonth - latestDayNum);
+    const remainingDaysInMonth = Math.max(
+      1,
+      diffDays(latestDate < startDate ? addDays(startDate, -1) : latestDate, endDate),
+    );
     const remainingToMonthTarget = Math.max(0, monthFullTarget - actualInPeriod);
 
     let recoveryDays = remainingDaysInMonth;
@@ -487,7 +556,8 @@ export function useManagementDashboardData() {
       return `${parseInt(parts[2], 10)}-${monthNames[mIdx]?.slice(0, 3) || parts[1]}`;
     };
 
-    const periodLabel = `${formatD(startDate)} — ${uniqueDates.length > 0 ? formatD(latestDate) : formatD(startDate)}`;
+    const periodLabel =
+      elapsedDays > 0 ? `${formatD(startDate)} — ${formatD(latestDate)}` : formatD(startDate);
     const fullMonthLabel = `${monthName} ${year} (${formatD(startDate)} to ${formatD(endDate)})`;
 
     return {
@@ -519,61 +589,24 @@ export function useManagementDashboardData() {
       revisedShiftTarget,
       recoveryDays,
     };
-  }, [records, targets, selectedRecoveryMonth, recoveryHorizonDays]);
+  }, [records, targets, selectedRecoveryMonth, recoveryHorizonDays, projectStart, lastCompleteDate]);
 
-  // Nama Dispatch Plan (Dynamic from shipment_batches table if available, with structured fallback)
+  // Nama dispatch plan — real batches with their stage (defined / FAT / delivered)
   const namaDispatchPlan = useMemo(() => {
-    if (shipmentBatches && shipmentBatches.length > 0) {
-      return shipmentBatches.map((sb, idx) => {
-        const isCompleted = sb.status === "Delivered" || (sb.shipment_date && sb.shipment_date < todayStr);
-        return {
-          batch: sb.batch_name || `Batch ${idx + 1}`,
-          date: sb.shipment_date || "Scheduled",
-          qty: sb.total_meters || 0,
-          status: isCompleted ? "Delivered" : (sb.status || "Planned"),
-          statusClass: isCompleted ? "badge-green" : (idx === 1 ? "badge-admin" : "badge-amber"),
-          notes: sb.notes || sb.destination || "Nama / Field",
-          isDatabaseRecord: true
-        };
-      });
-    }
-
-    // Standard fallback roadmap
-    return [
-      {
-        batch: "Batch 1",
-        date: "Completed (1-Oct)",
-        qty: 8480,
-        status: "Delivered",
-        statusClass: "badge-green",
-        notes: "Dispatched to Nama / Field",
-      },
-      {
-        batch: "Batch 2",
-        date: "15-Oct-2026",
-        qty: 12000,
-        status: "Ready / Pending Dispatch",
-        statusClass: "badge-admin",
-        notes: "Scheduled for Nama Field release",
-      },
-      {
-        batch: "Batch 3",
-        date: "22-Oct-2026",
-        qty: 13920,
-        status: "In Production Pipeline",
-        statusClass: "badge-amber",
-        notes: "Next scheduled delivery",
-      },
-      {
-        batch: "Batch 4",
-        date: "29-Oct-2026",
-        qty: 15625,
-        status: "Planned",
-        statusClass: "badge-purple",
-        notes: "Final planned October batch",
-      },
-    ];
-  }, [shipmentBatches, todayStr]);
+    return (shipmentBatches || []).map((sb, idx) => {
+      const stage = getBatchStage(sb);
+      return {
+        id: sb.id ?? idx,
+        batch: sb.batch_name || `Batch ${idx + 1}`,
+        qty: parseInt(sb.total_meters, 10) || 0,
+        stage: stage.key,
+        stageInfo: stage,
+        date: getBatchStageDate(sb, stage.key),
+        definedDate: getBatchDefinedDate(sb),
+        notes: sb.notes || "",
+      };
+    });
+  }, [shipmentBatches]);
 
   // Kit Supply Metrics
   const kitMetrics = useMemo(() => {
@@ -856,47 +889,175 @@ export function useManagementDashboardData() {
     targets.dailyProd
   ]);
 
-  // Executive Burn-up & Cumulative Trajectory Data
-  const burnupData = useMemo(() => {
-    const dateMap = {};
-    records.forEach(r => {
-      if (r.date) {
-        if (!dateMap[r.date]) dateMap[r.date] = { date: r.date, achieved: 0, fw: 0 };
-        dateMap[r.date].achieved += parseInt(r.achieved, 10) || 0;
-        dateMap[r.date].fw += parseInt(r.updated_fw_qty, 10) || 0;
-      }
+  // Daily totals by date
+  const dailyTotals = useMemo(() => {
+    const map = {};
+    records.forEach((r) => {
+      if (!r.date) return;
+      if (!map[r.date]) map[r.date] = { achieved: 0, fw: 0 };
+      map[r.date].achieved += parseInt(r.achieved, 10) || 0;
+      map[r.date].fw += parseInt(r.updated_fw_qty, 10) || 0;
     });
+    return map;
+  }, [records]);
 
-    const sortedDates = Object.keys(dateMap).sort();
+  const lastDataDate = lastCompleteDate < projectStart ? projectStart : lastCompleteDate;
+
+  // Executive Burn-up: every calendar day from project start (days with no report = 0)
+  const burnupData = useMemo(() => {
+    const out = [];
+    const end = lastDataDate > projectStart ? lastDataDate : projectStart;
+    const total = Math.min(diffDays(projectStart, end), 1000);
     let cumActual = 0;
     let cumFw = 0;
-    let cumTarget = 0;
-
-    return sortedDates.map((d, idx) => {
-      cumActual += dateMap[d].achieved;
-      cumFw += dateMap[d].fw;
-      cumTarget += (targets.dailyProd || 1300);
-      return {
+    for (let i = 0; i <= total; i++) {
+      const d = addDays(projectStart, i);
+      const day = dailyTotals[d] || { achieved: 0, fw: 0 };
+      cumActual += day.achieved;
+      cumFw += day.fw;
+      out.push({
         date: d,
         actual: cumActual,
         fw: cumFw,
-        target: Math.min(targets.overallProd, cumTarget),
-        dayActual: dateMap[d].achieved,
-        dayFw: dateMap[d].fw
-      };
-    });
-  }, [records, targets.dailyProd, targets.overallProd]);
+        target: Math.min(targets.overallProd, (i + 1) * targets.dailyProd),
+        dayActual: day.achieved,
+        dayFw: day.fw,
+      });
+    }
+    return out;
+  }, [dailyTotals, projectStart, lastDataDate, targets.dailyProd, targets.overallProd]);
 
-  const projectStatus = useMemo(() => {
-    return getStatusBadge(productionMetrics.weeklyPct);
-  }, [productionMetrics.weeklyPct]);
+
+  // Completion forecast (daily target, 7 days a week, no holidays)
+  const forecast = useMemo(() => {
+    const daily = targets.dailyProd || 1;
+    const total = targets.overallProd || 0;
+    const completed = productionMetrics.overallCompleted;
+    const remaining = Math.max(0, total - completed);
+    const plannedDays = Math.ceil(total / daily);
+    const plannedFinish = addDays(projectStart, plannedDays - 1);
+
+    const elapsed = Math.max(1, diffDays(projectStart, lastDataDate) + 1);
+    const targetToDate = Math.min(total, elapsed * daily);
+    const completedToDate = Object.entries(dailyTotals)
+      .filter(([d]) => d <= lastDataDate)
+      .reduce((sum, [, v]) => sum + v.achieved, 0);
+    const variance = completedToDate - targetToDate; // + ahead / − behind
+    const varianceDays = variance / daily;
+
+    // Last 7 calendar days ending at the last reported day (missing days count as 0)
+    let last7 = 0;
+    for (let i = 0; i < 7; i++) last7 += dailyTotals[addDays(lastDataDate, -i)]?.achieved || 0;
+    const windowDays = Math.min(7, elapsed);
+    const recentRate = windowDays > 0 ? last7 / windowDays : 0;
+    const overallRate = completedToDate / elapsed;
+
+    const projectedDays = recentRate > 0 ? Math.ceil(remaining / recentRate) : null;
+    const projectedFinish =
+      remaining === 0 ? lastDataDate : projectedDays != null ? addDays(lastDataDate, projectedDays) : null;
+    const finishAtTargetRate = addDays(lastDataDate, Math.ceil(remaining / daily));
+    const daysLeftToPlan = diffDays(lastDataDate, plannedFinish);
+    const requiredRate =
+      remaining === 0 ? 0 : daysLeftToPlan > 0 ? Math.ceil(remaining / daysLeftToPlan) : remaining;
+    const slipDays = projectedFinish ? diffDays(plannedFinish, projectedFinish) : null;
+
+    return {
+      projectStart,
+      lastDataDate,
+      dailyTarget: daily,
+      total,
+      completed,
+      remaining,
+      plannedDays,
+      plannedFinish,
+      elapsedDays: elapsed,
+      targetToDate,
+      variance,
+      varianceDays,
+      recentRate: Math.round(recentRate),
+      overallRate: Math.round(overallRate),
+      projectedFinish,
+      finishAtTargetRate,
+      daysLeftToPlan,
+      requiredRate,
+      slipDays,
+      onTrack: slipDays != null && slipDays <= 0,
+      completedToDate,
+      openingLumpDate: projectStart < DAILY_TRACKING_START ? addDays(DAILY_TRACKING_START, -1) : null,
+      scheduleAdherencePct: targetToDate > 0 ? (completedToDate / targetToDate) * 100 : 100,
+    };
+  }, [targets.dailyProd, targets.overallProd, productionMetrics.overallCompleted, projectStart, lastDataDate, dailyTotals]);
+
+  // Per-date, per-shift production (for the daily chart and shift alerts)
+  const shiftTotals = useMemo(() => {
+    const map = {};
+    records.forEach((r) => {
+      if (!r.date) return;
+      if (!map[r.date]) map[r.date] = { Morning: 0, Evening: 0, Unknown: 0, fw: 0 };
+      const sh = getRecordShift(r) || "Unknown";
+      map[r.date][sh] += parseInt(r.achieved, 10) || 0;
+      map[r.date].fw += parseInt(r.updated_fw_qty, 10) || 0;
+    });
+    return map;
+  }, [records]);
+
+  // Last 30 calendar days up to today (today may be partial)
+  const dailySeries = useMemo(() => {
+    const out = [];
+    for (let i = 29; i >= 0; i--) {
+      const d = addDays(todayStr, -i);
+      if (d < projectStart) continue;
+      const t = shiftTotals[d] || { Morning: 0, Evening: 0, Unknown: 0, fw: 0 };
+      out.push({
+        date: d,
+        morning: t.Morning,
+        evening: t.Evening,
+        other: t.Unknown,
+        total: t.Morning + t.Evening + t.Unknown,
+        fw: t.fw,
+        isToday: d === todayStr,
+        isLump: d === addDays(DAILY_TRACKING_START, -1) && projectStart < DAILY_TRACKING_START,
+      });
+    }
+    return out;
+  }, [shiftTotals, todayStr, projectStart]);
+
+  // Downtime minutes per day (last 30 days) and by station for yesterday / last 7 days
+  const downtimeSummary = useMemo(() => {
+    const byDate = {};
+    const byStage7 = {};
+    const weekStart = addDays(lastCompleteDate, -6);
+    stoppages.forEach((st) => {
+      if (!st.stopped_at) return;
+      const start = new Date(st.stopped_at);
+      const end = st.resumed_at ? new Date(st.resumed_at) : new Date();
+      const mins = Math.max(0, Math.round((end - start) / 60000));
+      const d = toLocalDateStr(start);
+      byDate[d] = (byDate[d] || 0) + mins;
+      if (d >= weekStart && d <= lastCompleteDate) {
+        const k = st.stage_id || "Unknown";
+        byStage7[k] = (byStage7[k] || 0) + mins;
+      }
+    });
+    const topStage7 = Object.entries(byStage7).sort((a, b) => b[1] - a[1])[0] || null;
+    const week = Object.entries(byDate)
+      .filter(([d]) => d >= weekStart && d <= lastCompleteDate)
+      .reduce((s2, [, m]) => s2 + m, 0);
+    const ongoing = stoppages.filter((st) => st.stopped_at && !st.resumed_at);
+    return {
+      byDate,
+      lastDayMinutes: byDate[lastCompleteDate] || 0,
+      weekMinutes: week,
+      topStage7: topStage7 ? { stage: topStage7[0], minutes: topStage7[1] } : null,
+      ongoing: ongoing.map((o) => o.stage_id),
+    };
+  }, [stoppages, lastCompleteDate]);
 
   return {
     records,
     kitRecords,
     shipmentBatches,
     loading,
-    isLiveSyncing,
     lastSyncedAt,
     syncError,
     selectedDate,
@@ -922,7 +1083,13 @@ export function useManagementDashboardData() {
     topDefectCodes,
     kitRunwayMetrics,
     burnupData,
-    projectStatus,
+    dailySeries,
+    shiftTotals,
+    downtimeSummary,
+    lastCompleteDate,
+    forecast,
+    projectStart,
+    targetsShared,
     fetchRecords,
   };
 }

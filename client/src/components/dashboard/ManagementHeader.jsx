@@ -1,12 +1,11 @@
-import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useLanguage } from "../../context/LanguageContext";
 import {
   Calendar,
   ArrowLeft,
   RefreshCw,
   Printer,
   Sliders,
-  Wifi,
   WifiOff,
 } from "lucide-react";
 
@@ -16,13 +15,14 @@ export default function ManagementHeader({
   todayStr,
   onDateChange,
   onRefresh,
-  isLiveSyncing,
   lastSyncedAt,
   syncError,
   onOpenReport,
   onOpenSettings,
 }) {
   const navigate = useNavigate();
+  const { isArabic } = useLanguage();
+  const L = (ar, en) => (isArabic ? ar : en);
 
   const formattedTime = lastSyncedAt
     ? new Date(lastSyncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
@@ -53,15 +53,15 @@ export default function ManagementHeader({
               boxShadow: "0 2px 4px rgba(0, 175, 170, 0.25)",
             }}
           >
-            EXECUTIVE
+            {L("الإدارة", "EXECUTIVE")}
           </span>
           <h1 className="page-title" style={{ margin: 0, fontSize: "1.65rem" }}>
-            Management Dashboard
+            {L("لوحة الإدارة", "Management Dashboard")}
           </h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 4 }}>
           <p className="page-subtitle" style={{ margin: 0 }}>
-            3-Phase Production targets, Firmware milestones, and high-level project yield
+            {L("الإنتاج، الفيرموير، الكيت، العيوب والشحنات — في مكان واحد", "Production, firmware, kits, defects and shipments in one place")}
           </p>
           {/* Live Sync Status Pill */}
           <span
@@ -82,7 +82,7 @@ export default function ManagementHeader({
             {syncError ? (
               <>
                 <WifiOff size={11} color="#b91c1c" />
-                <span>Cached Data</span>
+                <span>{L("بيانات محفوظة", "Cached Data")}</span>
               </>
             ) : (
               <>
@@ -96,7 +96,7 @@ export default function ManagementHeader({
                     boxShadow: "0 0 6px #10b981",
                   }}
                 />
-                <span>Live Realtime Sync ({formattedTime})</span>
+                <span>{L(`مباشر (${formattedTime})`, `Live (${formattedTime})`)}</span>
               </>
             )}
           </span>
@@ -133,7 +133,7 @@ export default function ManagementHeader({
                 color: "var(--gray-600)",
               }}
             >
-              Inspect Date:
+              {L("تاريخ التفاصيل:", "Details date:")}
             </label>
             <select
               value={activeDate}
@@ -150,7 +150,7 @@ export default function ManagementHeader({
             >
               {availableDates.map((d) => (
                 <option key={d} value={d}>
-                  {d} {d === todayStr ? "(Today)" : ""}
+                  {d} {d === todayStr ? L("(اليوم)", "(Today)") : ""}
                 </option>
               ))}
             </select>
@@ -179,9 +179,11 @@ export default function ManagementHeader({
           }}
         >
           <Printer size={15} color="var(--teal)" />
-          <span>Executive Report</span>
+          <span>{L("التقرير", "Executive Report")}</span>
         </button>
 
+{onOpenSettings && (
+          <>
         {/* Settings / Edit Targets Modal Trigger */}
         <button
           type="button"
@@ -204,8 +206,10 @@ export default function ManagementHeader({
           }}
         >
           <Sliders size={15} color="#4f46e5" />
-          <span>Baselines</span>
+          <span>{L("الأهداف", "Targets")}</span>
         </button>
+          </>
+        )}
 
         {/* Back to Operations Dashboard */}
         <button

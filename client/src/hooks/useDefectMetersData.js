@@ -85,7 +85,6 @@ export function useDefectMetersData(user, isArabic) {
   const [targetInput, setTargetInput] = useState(String(actualTarget));
 
   const [selectedMonth, setSelectedMonth] = useState("ALL");
-  const [selectedTeam, setSelectedTeam] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
   const [analyticsDateMode, setAnalyticsDateMode] = useState("ALL");
   const [analyticsCustomDate, setAnalyticsCustomDate] = useState(() =>
@@ -797,7 +796,6 @@ export function useDefectMetersData(user, isArabic) {
     return calibratedRecords.filter((r) => {
       const matchMonth =
         selectedMonth === "ALL" || (r.date && r.date.startsWith(selectedMonth));
-      const matchTeam = selectedTeam === "ALL" || r.team_name === selectedTeam;
       const matchSearch =
         searchQuery.trim() === "" ||
         (r.team_name &&
@@ -823,12 +821,11 @@ export function useDefectMetersData(user, isArabic) {
         }
       }
 
-      return matchMonth && matchTeam && matchSearch && matchDate;
+      return matchMonth && matchSearch && matchDate;
     });
   }, [
     calibratedRecords,
     selectedMonth,
-    selectedTeam,
     searchQuery,
     analyticsDateMode,
     analyticsCustomDate,

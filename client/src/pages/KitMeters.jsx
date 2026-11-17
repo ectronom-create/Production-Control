@@ -228,7 +228,7 @@ export default function KitMeters() {
         }
       } else {
         // Insert new record
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from("kit_meters")
           .insert([payload])
           .select();
@@ -291,7 +291,6 @@ export default function KitMeters() {
 
   // Filtered records
   const filteredRecords = useMemo(() => {
-    const today = getTodayString();
     return records.filter((r) => {
       const matchSearch =
         searchTerm === "" ||

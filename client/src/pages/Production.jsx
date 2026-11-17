@@ -18,6 +18,7 @@ import {
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { toLocalDateStr } from "../utils/date";
 
 // Direct Google Cloud Apps Script Web API (accessible globally from any computer/browser)
 const GOOGLE_DRIVE_SYNC_API_URL =
@@ -305,17 +306,56 @@ function parseFPYExcel(arrayBuffer) {
   };
 }
 
+// Shift is stored as a suffix on team_name ("Team A - Morning") or a note tag
+function getRecordShift(r) {
+  const str = `${r?.team_name || ""} ${r?.notes || ""}`.toLowerCase();
+  if (str.includes("evening") || str.includes("\u0645\u0633\u0627")) return "Evening";
+  if (str.includes("morning") || str.includes("\u0635\u0628\u0627\u062d")) return "Morning";
+  return null;
+}
+
+// Rule: max 2 reports per day — one Morning, one Evening
+async function findShiftConflict(date, shift, excludeId, localRecords) {
+  let rows = null;
+  try {
+    const { data, error } = await supabase
+      .from("production_records")
+      .select("id, date, team_name, notes")
+      .eq("date", date);
+    if (!error) rows = data || [];
+  } catch {}
+  if (!rows) rows = (localRecords || []).filter((r) => r.date === date);
+  const sameDay = rows.filter((r) => r.id !== excludeId);
+  const sameShift = sameDay.find((r) => getRecordShift(r) === shift);
+  if (sameShift) return { type: "shift", record: sameShift };
+  if (sameDay.length >= 2) return { type: "day" };
+  return null;
+}
+
+function conflictMessage(conflict, date, shift, isArabic) {
+  if (!conflict) return "";
+  const shiftAr = shift === "Evening" ? "المسائية" : "الصباحية";
+  if (conflict.type === "shift") {
+    return isArabic
+      ? `يوجد تقرير مرفوع مسبقاً للوردية ${shiftAr} بتاريخ ${date}. لا يمكن رفع أكثر من تقرير لنفس الوردية — عدّل التقرير الموجود بدلاً من ذلك.`
+      : `A ${shift} report for ${date} already exists. Only one report per shift is allowed — edit the existing one instead.`;
+  }
+  return isArabic
+    ? `تم رفع تقريرين لتاريخ ${date} (صباحي ومسائي). الحد الأقصى تقريرين في اليوم.`
+    : `Two reports already exist for ${date} (Morning and Evening). Maximum is two per day.`;
+}
+
 function getProductionDateAndShift() {
   const now = new Date();
   const hour = now.getHours();
   if (hour >= 6 && hour < 18) {
     return {
-      date: now.toISOString().slice(0, 10),
+      date: toLocalDateStr(now),
       shift: "Morning",
     };
   } else if (hour >= 18) {
     return {
-      date: now.toISOString().slice(0, 10),
+      date: toLocalDateStr(now),
       shift: "Evening",
     };
   } else {
@@ -356,7 +396,6 @@ export default function Production() {
 
   // Modals state
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showFwModal, setShowFwModal] = useState(false);
   const [selectedRecordForDetail, setSelectedRecordForDetail] = useState(null);
 
   // Filters
@@ -378,15 +417,6 @@ export default function Production() {
   const [uploadError, setUploadError] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState("");
-
-  // Manual FW QTY modal form states
-  const [fwRecordId, setFwRecordId] = useState(null);
-  const [fwDate, setFwDate] = useState(getTodayString());
-  const [fwProduct, setFwProduct] = useState("G3 Smart Meter");
-  const [fwQty, setFwQty] = useState("");
-  const [fwTeamName, setFwTeamName] = useState("");
-  const [fwError, setFwError] = useState("");
-  const [fwSaving, setFwSaving] = useState(false);
 
   // Edit Production Report Modal states
   const [editRecordId, setEditRecordId] = useState(null);
@@ -435,10 +465,8 @@ export default function Production() {
     const userTeam = user?.team_name?.trim() || "Team Alpha";
     if (isSupervisor) {
       setUploadTeamName(userTeam);
-      setFwTeamName(userTeam);
     } else {
       setUploadTeamName(user?.team_name?.trim() || "Management");
-      setFwTeamName(user?.team_name?.trim() || "Management");
     }
   }, [user, isSupervisor]);
 
@@ -446,7 +474,7 @@ export default function Production() {
   useEffect(() => {
     async function fetchTeams() {
       try {
-        const { data, error } = await supabase
+        const { data } = await supabase
           .from("users")
           .select("team_name");
         const teamsSet = new Set(["Management"]);
@@ -593,12 +621,26 @@ export default function Production() {
   };
 
   // Save parsed FPY Report to Supabase
+  const uploadSlotTaken = useMemo(() => {
+    const shift = uploadShift === "Evening" ? "Evening" : "Morning";
+    const sameDay = records.filter((r) => r.date === uploadDate);
+    if (sameDay.some((r) => getRecordShift(r) === shift)) return { type: "shift" };
+    if (sameDay.length >= 2) return { type: "day" };
+    return null;
+  }, [records, uploadDate, uploadShift]);
+
   const handleSaveUpload = async () => {
     if (!parsedData) return;
     setIsSaving(true);
     setUploadError("");
 
     const shiftLabel = uploadShift === "Evening" ? "Evening" : "Morning";
+    const conflict = await findShiftConflict(uploadDate, shiftLabel, null, records);
+    if (conflict) {
+      setUploadError(conflictMessage(conflict, uploadDate, shiftLabel, isArabic));
+      setIsSaving(false);
+      return;
+    }
     const assignedTeamBase = isSupervisor
       ? user?.team_name?.trim() || "Team Alpha"
       : uploadTeamName || "Management";
@@ -622,7 +664,7 @@ export default function Production() {
     };
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("production_records")
         .insert([payload])
         .select();
@@ -652,141 +694,6 @@ export default function Production() {
       setUploadError("Error occurred while saving: " + (err.message || ""));
     } finally {
       setIsSaving(false);
-    }
-  };
-
-  // Open manual FW QTY Modal
-  const openFwModalForRecord = (record = null) => {
-    setFwError("");
-    if (record) {
-      setFwRecordId(record.id);
-      setFwDate(record.date || getTodayString());
-      setFwProduct(record.product || "G3 Smart Meter");
-      setFwQty(record.updated_fw_qty || "");
-      setFwTeamName(
-        record.team_name || user?.team_name?.trim() || "Team Alpha",
-      );
-    } else {
-      setFwRecordId(null);
-      setFwDate(getTodayString());
-      setFwProduct("G3 Smart Meter");
-      setFwQty("");
-      const defaultTeam = isSupervisor
-        ? user?.team_name?.trim() || "Team Alpha"
-        : availableTeams[0] || "Management";
-      setFwTeamName(defaultTeam);
-    }
-    setShowFwModal(true);
-  };
-
-  // Save manual FW QTY to Supabase
-  const handleSaveFwQty = async (e) => {
-    e.preventDefault();
-    const qtyNum = parseInt(fwQty, 10);
-    if (isNaN(qtyNum) || qtyNum < 0) {
-      setFwError("Please enter a valid quantity greater than or equal to 0.");
-      return;
-    }
-
-    setFwSaving(true);
-    setFwError("");
-
-    const assignedTeam = isSupervisor
-      ? user?.team_name?.trim() || "Team Alpha"
-      : fwTeamName || "Management";
-
-    try {
-      if (fwRecordId) {
-        const { error } = await supabase
-          .from("production_records")
-          .update({
-            updated_fw_qty: qtyNum,
-            entered_by: user?.name || "Admin",
-            team_name: assignedTeam,
-          })
-          .eq("id", fwRecordId);
-
-        if (error) {
-          // Update local cache
-          const updated = records.map((r) =>
-            r.id === fwRecordId
-              ? { ...r, updated_fw_qty: qtyNum, team_name: assignedTeam }
-              : r,
-          );
-          setRecords(updated);
-          localStorage.setItem(
-            "ectron_production_records",
-            JSON.stringify(updated),
-          );
-        } else {
-          await loadRecords();
-        }
-      } else {
-        const existing = records.find(
-          (r) =>
-            r.date === fwDate && (r.team_name === assignedTeam || !r.team_name),
-        );
-        if (existing) {
-          const newQty = (existing.updated_fw_qty || 0) + qtyNum;
-          const { error } = await supabase
-            .from("production_records")
-            .update({
-              updated_fw_qty: newQty,
-              entered_by: user?.name || "Admin",
-            })
-            .eq("id", existing.id);
-
-          if (error) {
-            const updated = records.map((r) =>
-              r.id === existing.id ? { ...r, updated_fw_qty: newQty } : r,
-            );
-            setRecords(updated);
-            localStorage.setItem(
-              "ectron_production_records",
-              JSON.stringify(updated),
-            );
-          } else {
-            await loadRecords();
-          }
-        } else {
-          const newRec = {
-            date: fwDate,
-            product: fwProduct || "Smart Meter",
-            target: 320,
-            overall_fpy: 100,
-            total_boards: qtyNum,
-            achieved: qtyNum,
-            updated_fw_qty: qtyNum,
-            entered_by: user?.name || "Admin",
-            team_name: assignedTeam,
-            stations: [],
-            defects: [],
-          };
-          const { error } = await supabase
-            .from("production_records")
-            .insert([newRec]);
-          if (error) {
-            const list = [{ ...newRec, id: Date.now() }, ...records];
-            setRecords(list);
-            localStorage.setItem(
-              "ectron_production_records",
-              JSON.stringify(list),
-            );
-          } else {
-            await loadRecords();
-          }
-        }
-      }
-
-      setShowFwModal(false);
-      setFwQty("");
-      setSaveSuccessMsg("Updated FW QTY saved successfully!");
-      setTimeout(() => setSaveSuccessMsg(""), 4000);
-    } catch (err) {
-      console.error("Error saving FW QTY:", err);
-      setFwError("Failed to save: " + (err.message || ""));
-    } finally {
-      setFwSaving(false);
     }
   };
 
@@ -837,6 +744,12 @@ export default function Production() {
     setEditError("");
 
     const shiftLabel = editShift === "Evening" ? "Evening" : "Morning";
+    const conflict = await findShiftConflict(editDate, shiftLabel, editRecordId, records);
+    if (conflict) {
+      setEditError(conflictMessage(conflict, editDate, shiftLabel, isArabic));
+      setIsUpdatingRecord(false);
+      return;
+    }
     const assignedTeam = `${editTeamName || "Team Alpha"} - ${shiftLabel}`;
     const notesWithShift = editNotes.trim()
       ? `[Shift: ${shiftLabel}] ${editNotes.trim()}`
@@ -873,7 +786,7 @@ export default function Production() {
     };
 
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("production_records")
         .update(updatedFields)
         .eq("id", editRecordId)
@@ -1011,6 +924,23 @@ export default function Production() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* ── Status Banners ── */}
+      {!supabaseConnected && (
+        <div
+          style={{
+            background: "var(--warning-bg)",
+            border: "1px solid #fcd34d",
+            color: "#92400e",
+            borderRadius: 10,
+            padding: "10px 14px",
+            fontSize: "0.85rem",
+            fontWeight: 600,
+          }}
+        >
+          {isArabic
+            ? "⚠️ تعذر الاتصال بقاعدة البيانات — يتم عرض آخر نسخة محفوظة على هذا الجهاز."
+            : "⚠️ Could not reach the database — showing the last copy saved on this device."}
+        </div>
+      )}
       {saveSuccessMsg && (
         <div
           style={{
@@ -1988,6 +1918,18 @@ export default function Production() {
                     </div>
                   </div>
 
+                  {uploadSlotTaken && (
+                    <div className="modal-error">
+                      ⚠️{" "}
+                      {conflictMessage(
+                        uploadSlotTaken,
+                        uploadDate,
+                        uploadShift === "Evening" ? "Evening" : "Morning",
+                        isArabic,
+                      )}
+                    </div>
+                  )}
+
                   <div
                     style={{
                       display: "grid",
@@ -2173,7 +2115,7 @@ export default function Production() {
                 <button
                   type="button"
                   className="btn-primary"
-                  disabled={isSaving}
+                  disabled={isSaving || Boolean(uploadSlotTaken)}
                   onClick={handleSaveUpload}
                 >
                   {isSaving ? (
@@ -2184,134 +2126,6 @@ export default function Production() {
                 </button>
               )}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── MODAL 2: Manual Updated FW QTY ── */}
-      {showFwModal && (
-        <div
-          className="modal-backdrop"
-          onClick={(e) => e.target === e.currentTarget && setShowFwModal(false)}
-        >
-          <div className="modal" style={{ maxWidth: 460 }}>
-            <div className="modal-header">
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <Cpu size={20} color="#7c3aed" />
-                <span className="modal-title">
-                  {fwRecordId
-                    ? "Edit Updated FW QTY"
-                    : "Log Updated FW QTY Manually"}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => setShowFwModal(false)}
-              >
-                ×
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveFwQty}>
-              <div className="modal-body">
-                {fwError && <div className="modal-error">{fwError}</div>}
-
-                <div className="form-group">
-                  <label>Date *</label>
-                  <input
-                    type="date"
-                    value={fwDate}
-                    onChange={(e) => setFwDate(e.target.value)}
-                    disabled={fwSaving || !!fwRecordId}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Product Name *</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. G3 Smart Meter"
-                    value={fwProduct}
-                    onChange={(e) => setFwProduct(e.target.value)}
-                    disabled={fwSaving || !!fwRecordId}
-                    required
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label>Updated FW QTY *</label>
-                  <input
-                    type="number"
-                    placeholder="e.g. 150"
-                    value={fwQty}
-                    onChange={(e) => setFwQty(e.target.value)}
-                    disabled={fwSaving}
-                    autoFocus
-                    min="0"
-                    required
-                  />
-                  <p className="hint">
-                    Enter count of meters updated with latest firmware.
-                  </p>
-                </div>
-
-                <div className="form-group">
-                  <label>Team Name *</label>
-                  {isSupervisor ? (
-                    <input
-                      type="text"
-                      value={user?.team_name?.trim() || "Team Alpha"}
-                      disabled
-                      style={{ background: "var(--gray-100)", fontWeight: 600 }}
-                    />
-                  ) : (
-                    <select
-                      className="form-select"
-                      value={fwTeamName}
-                      onChange={(e) => setFwTeamName(e.target.value)}
-                      disabled={fwSaving}
-                    >
-                      {availableTeams.map((t) => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-
-                <div className="form-group">
-                  <label>Entered By</label>
-                  <input
-                    type="text"
-                    value={user?.name || "Admin"}
-                    disabled
-                    style={{ background: "var(--gray-100)" }}
-                  />
-                </div>
-              </div>
-
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => setShowFwModal(false)}
-                  disabled={fwSaving}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  style={{ background: "#7c3aed" }}
-                  disabled={fwSaving}
-                >
-                  {fwSaving ? <span className="spinner" /> : "Save Quantity"}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

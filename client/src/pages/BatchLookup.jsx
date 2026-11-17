@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Search,
@@ -6,17 +6,12 @@ import {
   ArrowRight,
   Package,
   Boxes,
-  Calendar,
-  MapPin,
-  Cpu,
   Layers,
   Copy,
   Check,
   X,
   RefreshCw,
   AlertCircle,
-  Hash,
-  ShieldCheck,
   CheckCircle2,
 } from "lucide-react";
 import { supabase } from "../supabaseClient";
