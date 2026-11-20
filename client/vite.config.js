@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 import fs from 'fs';
 
 function fwSyncPlugin() {
@@ -218,8 +219,52 @@ function fwSyncPlugin() {
   };
 }
 
+// Installable app (PWA): home-screen icon, full-screen window, instant start.
+// Only the app files are cached — live data (Supabase, /api) always comes
+// from the network so nobody sees stale production numbers.
+const pwa = VitePWA({
+  registerType: 'prompt', // show "new version" banner instead of reloading mid-form
+  injectRegister: false, // registered from src/components/PwaPrompt.jsx
+  includeAssets: ['ectron-logo.png', 'apple-touch-icon.png'],
+  manifest: {
+    id: '/',
+    name: 'ECTRON Production Control',
+    short_name: 'ECTRON',
+    description: 'MT212 production line control — production, downtime, defects, kits and batches.',
+    lang: 'ar',
+    dir: 'auto',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    orientation: 'any',
+    theme_color: '#142547',
+    background_color: '#f8fafc',
+    categories: ['business', 'productivity'],
+    icons: [
+      { src: '/pwa-64x64.png', sizes: '64x64', type: 'image/png' },
+      { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
+      { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/maskable-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+    ],
+    shortcuts: [
+      { name: 'Downtime / التوقفات', short_name: 'Downtime', url: '/downtime', icons: [{ src: '/pwa-192x192.png', sizes: '192x192' }] },
+      { name: 'Production / الإنتاج', short_name: 'Production', url: '/production', icons: [{ src: '/pwa-192x192.png', sizes: '192x192' }] },
+      { name: 'Meter Lookup / البحث عن عداد', short_name: 'Lookup', url: '/batch-lookup', icons: [{ src: '/pwa-192x192.png', sizes: '192x192' }] },
+    ],
+  },
+  workbox: {
+    globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+    maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+    navigateFallback: '/index.html',
+    navigateFallbackDenylist: [/^\/api\//],
+    cleanupOutdatedCaches: true,
+    clientsClaim: true,
+  },
+  devOptions: { enabled: false },
+});
+
 export default defineConfig({
-  plugins: [react(), fwSyncPlugin()],
+  plugins: [react(), fwSyncPlugin(), pwa],
   server: {
     port: 5173,
     proxy: {

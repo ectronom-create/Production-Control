@@ -1344,3 +1344,144 @@ body {
     height: 38px;
   }
 }
+
+/* ==========================================================================
+   Installed app (PWA)
+   ========================================================================== */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+/* Feel like a native app: no rubber-band page bounce, no grey tap flash */
+html {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.shell-sidebar,
+.shell-topbar,
+.shell-bottombar,
+.shell-drawer {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Notch / status bar on phones (iOS draws the app under it) */
+@media (max-width: 768px) {
+  .shell-topbar {
+    height: calc(var(--topbar-h) + var(--safe-top));
+    padding-top: var(--safe-top);
+    padding-inline: max(12px, env(safe-area-inset-left, 0px));
+  }
+  .shell-main {
+    padding-top: calc(var(--topbar-h) + var(--safe-top));
+  }
+  .shell-drawer {
+    padding-top: var(--safe-top);
+  }
+}
+
+/* Install button */
+.shell-side-btn--install {
+  background: rgba(0, 175, 170, 0.18);
+  border-color: rgba(0, 175, 170, 0.55);
+  color: #fff;
+}
+.shell-side-btn--install:hover {
+  background: var(--teal);
+  border-color: var(--teal);
+}
+.shell-drawer-install {
+  padding: 0 14px 8px;
+}
+.shell-drawer-install .shell-side-btn {
+  justify-content: center;
+}
+
+.pwa-ios-steps {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+}
+.pwa-ios-steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.95rem;
+  color: var(--gray-700);
+}
+.pwa-ios-steps li > svg,
+.pwa-ios-steps li > img {
+  flex-shrink: 0;
+  color: var(--teal-dark);
+}
+
+/* "New version" / "ready" bar */
+.pwa-bar {
+  position: fixed;
+  z-index: 10050;
+  bottom: 20px;
+  inset-inline-end: 20px;
+  max-width: min(460px, calc(100vw - 24px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 12px;
+  background: var(--navy);
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+  font-size: 0.88rem;
+  font-weight: 600;
+  animation: sheetUp 0.25s ease;
+}
+[dir="rtl"] .pwa-bar {
+  padding: 10px 16px 10px 10px;
+}
+.pwa-bar-icon {
+  flex-shrink: 0;
+  color: var(--teal);
+}
+.pwa-bar-text {
+  flex: 1;
+  min-width: 0;
+}
+.pwa-bar-btn {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  background: var(--teal);
+  color: #fff;
+  font-weight: 700;
+}
+.pwa-bar-btn:hover {
+  background: var(--teal-dark);
+}
+.pwa-bar-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 768px) {
+  .pwa-bar {
+    inset-inline: 12px;
+    bottom: calc(var(--bottombar-h) + var(--safe-bottom) + 12px);
+    max-width: none;
+  }
+}
+@media print {
+  .pwa-bar {
+    display: none !important;
+  }
+}

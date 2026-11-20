@@ -19,9 +19,13 @@ import {
   Globe,
   PanelLeftClose,
   PanelLeftOpen,
+  Download,
+  Share,
+  SquarePlus,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { usePwaInstall } from "../hooks/usePwaInstall";
 
 function PageLoader() {
   return (
@@ -113,6 +117,9 @@ export default function Layout() {
     }
   });
 
+  const pwa = usePwaInstall();
+  const [iosHelpOpen, setIosHelpOpen] = useState(false);
+
   const L = (ar, en) => (isArabic ? ar : en);
   const userRole = (user?.access || "viewer").toLowerCase();
 
@@ -145,6 +152,17 @@ export default function Layout() {
       return next;
     });
   }
+
+  async function handleInstall() {
+    if (pwa.needsIosInstructions) {
+      setDrawerOpen(false);
+      setIosHelpOpen(true);
+      return;
+    }
+    await pwa.install();
+  }
+
+  const installLabel = L("تثبيت التطبيق", "Install app");
 
   function handleLogout() {
     logout();
@@ -229,6 +247,17 @@ export default function Layout() {
         {navList}
 
         <div className="shell-sidebar-footer">
+          {pwa.available && (
+            <button
+              type="button"
+              className="shell-side-btn shell-side-btn--install"
+              onClick={handleInstall}
+              title={installLabel}
+            >
+              <Download size={17} aria-hidden="true" />
+              <span className="shell-nav-text">{installLabel}</span>
+            </button>
+          )}
           {canChangeLanguage && (
             <button
               type="button"
@@ -293,6 +322,14 @@ export default function Layout() {
           </button>
         </div>
         {navList}
+        {pwa.available && (
+          <div className="shell-drawer-install">
+            <button type="button" className="shell-side-btn shell-side-btn--install" onClick={handleInstall}>
+              <Download size={17} aria-hidden="true" />
+              <span>{installLabel}</span>
+            </button>
+          </div>
+        )}
         <div className="shell-drawer-footer">
           {canChangeLanguage && (
             <button type="button" className="shell-side-btn" onClick={toggleLanguage}>
@@ -338,6 +375,41 @@ export default function Layout() {
           <span>{L("المزيد", "More")}</span>
         </button>
       </nav>
+
+      {/* ── iPhone / iPad: how to add the app to the home screen ── */}
+      {iosHelpOpen && (
+        <div className="modal-backdrop" onClick={() => setIosHelpOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="modal-header">
+              <h2 className="modal-title">{installLabel}</h2>
+              <button type="button" className="modal-close" onClick={() => setIosHelpOpen(false)} aria-label={L("إغلاق", "Close")}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <ol className="pwa-ios-steps">
+                <li>
+                  <Share size={20} aria-hidden="true" />
+                  <span>{L("افتح الموقع في Safari واضغط زر المشاركة تحت.", "Open the site in Safari and tap the Share button.")}</span>
+                </li>
+                <li>
+                  <SquarePlus size={20} aria-hidden="true" />
+                  <span>{L("اختار \"إضافة إلى الشاشة الرئيسية\".", "Choose \"Add to Home Screen\".")}</span>
+                </li>
+                <li>
+                  <img src="/apple-touch-icon.png" alt="" width="20" height="20" style={{ borderRadius: 5 }} />
+                  <span>{L("اضغط \"إضافة\" — بتطلع أيقونة ECTRON وتفتح مثل أي تطبيق.", "Tap \"Add\" — the ECTRON icon opens like any other app.")}</span>
+                </li>
+              </ol>
+            </div>
+            <div className="modal-footer">
+              <button type="button" className="btn-primary" onClick={() => setIosHelpOpen(false)}>
+                {L("تمام", "Got it")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
