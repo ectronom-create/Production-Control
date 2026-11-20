@@ -584,6 +584,7 @@ export default function Dashboard() {
           </button>
 
           <div
+            className="seg-tabs"
             style={{
               display: "flex",
               background: "var(--white)",

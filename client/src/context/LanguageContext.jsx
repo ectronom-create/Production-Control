@@ -137,7 +137,7 @@ const TRANSLATIONS = {
     // ── Downtime ──
     downtimeTitle: "Downtime Management",
     downtimeSubtitle:
-      "Track and record downtime across the 7 production stages",
+      "Track and record downtime across the 8 production stages",
     easyRecorder: "Easy Downtime Recorder",
     selectStageToStart: "Select Stage to Start Downtime:",
     startRecording: "Start Downtime Timer",
@@ -153,7 +153,7 @@ const TRANSLATIONS = {
     showAllDates: "Show All Dates",
     viewPrintReport: "View / Print Report",
     manualEntry: "Manual Entry",
-    allStages: "All Stages (1-7)",
+    allStages: "All Stages (1-8)",
     allUsers: "All Users",
     startTime: "Start Time",
     endTime: "End Time",
@@ -402,7 +402,7 @@ const TRANSLATIONS = {
 
     // ── Downtime ──
     downtimeTitle: "إدارة أوقات التوقف",
-    downtimeSubtitle: "تتبع وتسجيل أوقات توقف الإنتاج عبر محطات التصنيع السبعة",
+    downtimeSubtitle: "تتبع وتسجيل أوقات توقف الإنتاج عبر محطات التصنيع الثمانية",
     easyRecorder: "مسجل أوقات التوقف السريع",
     selectStageToStart: "اختر المحطة لبدء تسجيل التوقف:",
     startRecording: "بدء عداد التوقف",
@@ -418,7 +418,7 @@ const TRANSLATIONS = {
     showAllDates: "عرض جميع التواريخ",
     viewPrintReport: "عرض / طباعة التقرير",
     manualEntry: "إدخال يدوي",
-    allStages: "جميع المراحل (1-7)",
+    allStages: "جميع المراحل (1-8)",
     allUsers: "جميع المستخدمين",
     startTime: "وقت البدء",
     endTime: "وقت الانتهاء",

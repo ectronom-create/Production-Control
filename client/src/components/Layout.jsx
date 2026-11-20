@@ -1,8 +1,27 @@
-import { useState, Suspense } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { useEffect, useState, Suspense } from "react";
+import { Outlet, NavLink, useLocation, useNavigate } from "react-router-dom";
+import {
+  LayoutGrid,
+  Target,
+  Factory,
+  Users as UsersIcon,
+  IdCard,
+  ClipboardCheck,
+  Timer,
+  CircleAlert,
+  Package,
+  Truck,
+  ScanSearch,
+  UserCog,
+  LogOut,
+  Menu,
+  X,
+  Globe,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
-import { Globe } from "lucide-react";
 
 function PageLoader() {
   return (
@@ -15,347 +34,121 @@ function PageLoader() {
   );
 }
 
-const NAV_ITEMS = [
+/*
+ * Navigation map — one source of truth for the sidebar, the phone drawer,
+ * the phone bottom bar and the page title shown in the phone top bar.
+ * `short` labels are used where space is tight (bottom bar).
+ */
+const NAV_GROUPS = [
   {
-    to: "/dashboard",
-    label: "Dashboard",
-    labelAr: "لوحة التحكم",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-      </svg>
-    ),
+    id: "overview",
+    ar: "نظرة عامة",
+    en: "Overview",
+    items: [
+      { to: "/dashboard", ar: "لوحة التحكم", en: "Dashboard", shortAr: "الرئيسية", shortEn: "Home", Icon: LayoutGrid, roles: ["admin", "supervisor"] },
+      { to: "/management-dashboard", ar: "لوحة الإدارة", en: "Management", shortAr: "الإدارة", shortEn: "Management", Icon: Target, roles: ["admin", "viewer"] },
+    ],
   },
   {
-    to: "/management-dashboard",
-    label: "Management",
-    labelAr: "لوحة الإدارة",
-    roles: ["admin", "viewer"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <circle cx="12" cy="12" r="6" />
-        <circle cx="12" cy="12" r="2" />
-      </svg>
-    ),
+    id: "line",
+    ar: "خط الإنتاج",
+    en: "Production line",
+    items: [
+      { to: "/production", ar: "الإنتاج", en: "Production", shortAr: "الإنتاج", shortEn: "Production", Icon: Factory, roles: ["admin", "supervisor"] },
+      { to: "/pre-production-checklist", ar: "فحص ما قبل الوردية", en: "Pre-Shift Checklist", shortAr: "الفحص", shortEn: "Checklist", Icon: ClipboardCheck, roles: ["admin", "supervisor"] },
+      { to: "/downtime", ar: "أوقات التوقف", en: "Downtime", shortAr: "التوقفات", shortEn: "Downtime", Icon: Timer, roles: ["admin", "supervisor"] },
+      { to: "/defect-meters", ar: "عدادات العيوب", en: "Defect Meters", shortAr: "العيوب", shortEn: "Defects", Icon: CircleAlert, roles: ["admin", "supervisor"] },
+    ],
   },
   {
-    to: "/production",
-    label: "Production",
-    labelAr: "الإنتاج",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M2 20h20M5 20V10l7-7 7 7v10" />
-        <path d="M9 20v-5h6v5" />
-      </svg>
-    ),
+    id: "team",
+    ar: "الفريق",
+    en: "Team",
+    items: [
+      { to: "/crew", ar: "طاقم العمل والمحطات", en: "Line Crew", shortAr: "الطاقم", shortEn: "Crew", Icon: UsersIcon, roles: ["admin", "supervisor"] },
+      { to: "/employees", ar: "بروفايل الموظفين", en: "Employee Profiles", shortAr: "الموظفين", shortEn: "Employees", Icon: IdCard, roles: ["admin", "supervisor"] },
+    ],
   },
   {
-    to: "/crew",
-    label: "Line Crew",
-    labelAr: "طاقم العمل والمحطات",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
+    id: "supply",
+    ar: "المخزون والشحن",
+    en: "Supply & shipping",
+    items: [
+      { to: "/kit-meters", ar: "عدادات الكيت", en: "Kit Meters", shortAr: "الكيت", shortEn: "Kits", Icon: Package, roles: ["admin"] },
+      { to: "/batches", ar: "دفعات الإنتاج", en: "Batches", shortAr: "الدفعات", shortEn: "Batches", Icon: Truck, roles: ["admin"] },
+      { to: "/batch-lookup", ar: "البحث عن عداد", en: "Meter Lookup", shortAr: "بحث", shortEn: "Lookup", Icon: ScanSearch, roles: ["admin", "supervisor", "viewer"] },
+    ],
   },
   {
-    to: "/employees",
-    label: "Employee Profiles",
-    labelAr: "بروفايل الموظفين",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <circle cx="9" cy="10" r="2.5" />
-        <path d="M5.5 16.5c.6-1.8 2-2.8 3.5-2.8s2.9 1 3.5 2.8" />
-        <line x1="15" y1="9" x2="18" y2="9" />
-        <line x1="15" y1="13" x2="18" y2="13" />
-      </svg>
-    ),
-  },
-  {
-    to: "/pre-production-checklist",
-    label: "Pre-Shift Checklist",
-    labelAr: "مهام التحقق قبل الإنتاج",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M9 11l3 3L22 4" />
-        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-      </svg>
-    ),
-  },
-  {
-    to: "/downtime",
-    label: "Downtime",
-    labelAr: "أوقات التوقف",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
-  {
-    to: "/defect-meters",
-    label: "Defect Meters",
-    labelAr: "عدادات العيوب",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="8" x2="12" y2="12" />
-        <line x1="12" y1="16" x2="12.01" y2="16" />
-      </svg>
-    ),
-  },
-  {
-    to: "/kit-meters",
-    label: "Kit Meters",
-    labelAr: "عدادات الكيت",
-    roles: ["admin"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-        <line x1="12" y1="22.08" x2="12" y2="12" />
-      </svg>
-    ),
-  },
-  {
-    to: "/batches",
-    label: "Batches",
-    labelAr: "دفعات الإنتاج",
-    roles: ["admin"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="1" y="3" width="15" height="13" />
-        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-        <circle cx="5.5" cy="18.5" r="2.5" />
-        <circle cx="18.5" cy="18.5" r="2.5" />
-      </svg>
-    ),
-  },
-  {
-    to: "/users",
-    label: "Users",
-    labelAr: "المستخدمين",
-    roles: ["admin"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
+    id: "admin",
+    ar: "الإدارة",
+    en: "Administration",
+    items: [
+      { to: "/users", ar: "المستخدمين", en: "Users", shortAr: "المستخدمين", shortEn: "Users", Icon: UserCog, roles: ["admin"] },
+    ],
   },
 ];
 
-const MOBILE_BOTTOM_ITEMS = [
-  {
-    to: "/dashboard",
-    labelAr: "الرئيسية",
-    labelEn: "Home",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <rect x="3" y="3" width="7" height="7" />
-        <rect x="14" y="3" width="7" height="7" />
-        <rect x="14" y="14" width="7" height="7" />
-        <rect x="3" y="14" width="7" height="7" />
-      </svg>
-    ),
-  },
-  {
-    to: "/production",
-    labelAr: "الإنتاج",
-    labelEn: "Production",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M2 20h20M5 20V10l7-7 7 7v10" />
-        <path d="M9 20v-5h6v5" />
-      </svg>
-    ),
-  },
-  {
-    to: "/crew",
-    labelAr: "طاقم العمل",
-    labelEn: "Crew",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
-  {
-    to: "/pre-production-checklist",
-    labelAr: "التحقق",
-    labelEn: "Checklist",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M9 11l3 3L22 4" />
-        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-      </svg>
-    ),
-  },
-  {
-    to: "/downtime",
-    labelAr: "التوقفات",
-    labelEn: "Downtime",
-    roles: ["admin", "supervisor"],
-    icon: (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
-];
+/* Bottom bar on phones: the 4 most-used pages for each role, then "More". */
+const BOTTOM_BAR = {
+  admin: ["/dashboard", "/production", "/defect-meters", "/management-dashboard"],
+  supervisor: ["/dashboard", "/production", "/pre-production-checklist", "/downtime"],
+  viewer: ["/management-dashboard", "/batch-lookup"],
+};
+
+const ALL_ITEMS = NAV_GROUPS.flatMap((g) => g.items);
+const RAIL_KEY = "ectron_sidebar_collapsed";
 
 export default function Layout() {
   const { user, logout } = useAuth();
   const { isArabic, canChangeLanguage, toggleLanguage, t } = useLanguage();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const location = useLocation();
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(RAIL_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  const L = (ar, en) => (isArabic ? ar : en);
+  const userRole = (user?.access || "viewer").toLowerCase();
+
+  // Close the phone drawer whenever the route changes.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [location.pathname]);
+
+  // Lock page scroll behind the open drawer and close it on Escape.
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e) => e.key === "Escape" && setDrawerOpen(false);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [drawerOpen]);
+
+  function toggleCollapsed() {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(RAIL_KEY, next ? "1" : "0");
+      } catch {
+        /* storage unavailable — keep in memory only */
+      }
+      return next;
+    });
+  }
 
   function handleLogout() {
     logout();
     navigate("/login", { replace: true });
-  }
-
-  function closeSidebar() {
-    setSidebarOpen(false);
   }
 
   const initials = user?.name
@@ -367,133 +160,155 @@ export default function Layout() {
         .toUpperCase()
     : "?";
 
-  const userRole = (user?.access || "viewer").toLowerCase();
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) => !item.roles || item.roles.includes(userRole),
+  const groups = NAV_GROUPS.map((g) => ({
+    ...g,
+    items: g.items.filter((it) => it.roles.includes(userRole)),
+  })).filter((g) => g.items.length > 0);
+
+  const bottomItems = (BOTTOM_BAR[userRole] || BOTTOM_BAR.viewer)
+    .map((to) => ALL_ITEMS.find((it) => it.to === to))
+    .filter((it) => it && it.roles.includes(userRole));
+
+  const current =
+    ALL_ITEMS.find((it) => location.pathname === it.to || location.pathname.startsWith(`${it.to}/`)) || null;
+  const currentTitle = current ? L(current.ar, current.en) : "ECTRON";
+
+  // "More" is highlighted when the current page is not one of the bottom-bar shortcuts.
+  const moreActive = drawerOpen || (current && !bottomItems.some((it) => it.to === current.to));
+
+  const navList = (
+    <nav className="shell-nav" aria-label={L("القائمة الرئيسية", "Main navigation")}>
+      {groups.map((g) => (
+        <div key={g.id} className="shell-nav-group">
+          <div className="shell-nav-group-label">{L(g.ar, g.en)}</div>
+          {g.items.map((it) => (
+            <NavLink
+              key={it.to}
+              to={it.to}
+              title={L(it.ar, it.en)}
+              className={({ isActive }) => `shell-nav-item${isActive ? " active" : ""}`}
+            >
+              <it.Icon className="shell-nav-icon" size={19} strokeWidth={2} aria-hidden="true" />
+              <span className="shell-nav-text">{L(it.ar, it.en)}</span>
+            </NavLink>
+          ))}
+        </div>
+      ))}
+    </nav>
+  );
+
+  const userBlock = (
+    <div className="shell-user">
+      <div className="shell-avatar" aria-hidden="true">{initials}</div>
+      <div className="shell-user-text">
+        <div className="shell-user-name">{user?.name}</div>
+        <div className="shell-user-role">{user?.access}</div>
+      </div>
+    </div>
   );
 
   return (
-    <div className="app-shell">
-      {/* ── Mobile topbar ── */}
-      <header className="topbar">
-        <button
-          className="hamburger"
-          onClick={() => setSidebarOpen((o) => !o)}
-          aria-label="Toggle menu"
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-        <div className="topbar-logo-badge">
-          <img src="/ectron-logo.png" alt="ECTRON" className="topbar-logo" />
-        </div>
-
-        {/* Mobile Language Switcher (Admin and Supervisor ONLY) */}
-        {canChangeLanguage && (
+    <div className={`shell${collapsed ? " shell--collapsed" : ""}`}>
+      {/* ── Desktop / tablet sidebar ── */}
+      <aside className="shell-sidebar" aria-label="Sidebar">
+        <div className="shell-brand">
+          <div className="shell-logo-badge">
+            <img src="/ectron-logo.png" alt="ECTRON" className="shell-logo" />
+          </div>
           <button
             type="button"
-            className="topbar-lang-toggle"
-            onClick={toggleLanguage}
-            title={isArabic ? "Switch to English" : "التحويل إلى العربية"}
-            style={{
-              marginLeft: isArabic ? 0 : "auto",
-              marginRight: isArabic ? "auto" : 0,
-              background: "rgba(255,255,255,0.12)",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#ffffff",
-              padding: "5px 10px",
-              borderRadius: 6,
-              fontSize: "0.78rem",
-              fontWeight: 800,
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              cursor: "pointer",
-            }}
+            className="shell-collapse-btn"
+            onClick={toggleCollapsed}
+            title={collapsed ? L("توسيع القائمة", "Expand menu") : L("تصغير القائمة", "Collapse menu")}
+            aria-label={collapsed ? L("توسيع القائمة", "Expand menu") : L("تصغير القائمة", "Collapse menu")}
           >
-            <Globe size={14} />
-            <span>{isArabic ? "English" : "العربية"}</span>
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </button>
-        )}
-      </header>
-
-      {/* ── Overlay ── */}
-      <div
-        className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`}
-        onClick={closeSidebar}
-      />
-
-      {/* ── Sidebar ── */}
-      <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
-        <div className="sidebar-logo-wrap">
-          <div className="logo-badge">
-            <img src="/ectron-logo.png" alt="ECTRON" className="sidebar-logo" />
-          </div>
         </div>
 
-        {/* Navigation links */}
-        <nav className="sidebar-nav">
-          {visibleNavItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `nav-item ${isActive ? "active" : ""}`
-              }
-              onClick={closeSidebar}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {isArabic ? item.labelAr : item.label}
-            </NavLink>
-          ))}
-        </nav>
+        {navList}
 
-        {/* Language Switcher in Sidebar (Admin and Supervisor ONLY) */}
-        {canChangeLanguage && (
-          <div style={{ padding: "0 16px 12px" }}>
+        <div className="shell-sidebar-footer">
+          {canChangeLanguage && (
             <button
               type="button"
-              className="btn-lang-toggle"
+              className="shell-side-btn"
               onClick={toggleLanguage}
               title={isArabic ? "Switch to English" : "التحويل إلى العربية"}
             >
-              <Globe size={15} />
-              <span>{isArabic ? "English" : "العربية"}</span>
+              <Globe size={17} aria-hidden="true" />
+              <span className="shell-nav-text">{isArabic ? "English" : "العربية"}</span>
             </button>
-          </div>
-        )}
-
-        <div className="sidebar-footer">
-          <div className="user-info">
-            <div className="user-avatar">{initials}</div>
-            <div className="user-details">
-              <div className="user-name">{user?.name}</div>
-              <div className="user-role">{user?.access}</div>
-            </div>
-          </div>
-          <button className="btn-logout" onClick={handleLogout}>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-            {t("logout", "Logout")}
+          )}
+          {userBlock}
+          <button type="button" className="shell-side-btn shell-side-btn--logout" onClick={handleLogout} title={t("logout", "Logout")}>
+            <LogOut size={17} aria-hidden="true" />
+            <span className="shell-nav-text">{t("logout", "Logout")}</span>
           </button>
         </div>
       </aside>
 
-      {/* ── Main ── */}
-      <main className="main-content">
+      {/* ── Phone top bar ── */}
+      <header className="shell-topbar">
+        <div className="shell-topbar-logo">
+          <img src="/ectron-logo.png" alt="ECTRON" />
+        </div>
+        <div className="shell-topbar-title" title={currentTitle}>
+          {currentTitle}
+        </div>
+        {canChangeLanguage && (
+          <button
+            type="button"
+            className="shell-topbar-btn"
+            onClick={toggleLanguage}
+            title={isArabic ? "Switch to English" : "التحويل إلى العربية"}
+            aria-label={isArabic ? "Switch to English" : "التحويل إلى العربية"}
+          >
+            <Globe size={16} aria-hidden="true" />
+            <span>{isArabic ? "EN" : "ع"}</span>
+          </button>
+        )}
+      </header>
+
+      {/* ── Phone drawer ("More") ── */}
+      <div
+        className={`shell-drawer-backdrop${drawerOpen ? " open" : ""}`}
+        onClick={() => setDrawerOpen(false)}
+        aria-hidden="true"
+      />
+      <aside
+        className={`shell-drawer${drawerOpen ? " open" : ""}`}
+        aria-label={L("كل الصفحات", "All pages")}
+        aria-hidden={!drawerOpen}
+      >
+        <div className="shell-drawer-head">
+          {userBlock}
+          <button
+            type="button"
+            className="shell-drawer-close"
+            onClick={() => setDrawerOpen(false)}
+            aria-label={L("إغلاق", "Close")}
+          >
+            <X size={20} />
+          </button>
+        </div>
+        {navList}
+        <div className="shell-drawer-footer">
+          {canChangeLanguage && (
+            <button type="button" className="shell-side-btn" onClick={toggleLanguage}>
+              <Globe size={17} aria-hidden="true" />
+              <span>{isArabic ? "English" : "العربية"}</span>
+            </button>
+          )}
+          <button type="button" className="shell-side-btn shell-side-btn--logout" onClick={handleLogout}>
+            <LogOut size={17} aria-hidden="true" />
+            <span>{t("logout", "Logout")}</span>
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Page ── */}
+      <main className="shell-main">
         <div className="page-container">
           <Suspense fallback={<PageLoader />}>
             <Outlet />
@@ -501,50 +316,26 @@ export default function Layout() {
         </div>
       </main>
 
-      {/* ── Mobile Bottom Navigation Bar (Phone Experience) ── */}
-      <nav className="mobile-bottom-nav">
-        {MOBILE_BOTTOM_ITEMS.filter(
-          (it) => !it.roles || it.roles.includes(userRole),
-        ).map((item) => (
+      {/* ── Phone bottom bar ── */}
+      <nav className="shell-bottombar" aria-label={L("اختصارات", "Shortcuts")}>
+        {bottomItems.map((it) => (
           <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) =>
-              `mobile-nav-btn ${isActive ? "active" : ""}`
-            }
-            onClick={closeSidebar}
+            key={it.to}
+            to={it.to}
+            className={({ isActive }) => `shell-bottombar-btn${isActive ? " active" : ""}`}
           >
-            <span className="mobile-nav-icon">{item.icon}</span>
-            <span className="mobile-nav-label">
-              {isArabic ? item.labelAr : item.labelEn}
-            </span>
+            <it.Icon size={21} strokeWidth={2.1} aria-hidden="true" />
+            <span>{L(it.shortAr, it.shortEn)}</span>
           </NavLink>
         ))}
-
-        {/* More / Menu Drawer Toggle */}
         <button
           type="button"
-          className={`mobile-nav-btn ${sidebarOpen ? "active" : ""}`}
-          onClick={() => setSidebarOpen((o) => !o)}
-          aria-label="Toggle Navigation Menu"
+          className={`shell-bottombar-btn${moreActive ? " active" : ""}`}
+          onClick={() => setDrawerOpen((o) => !o)}
+          aria-expanded={drawerOpen}
         >
-          <span className="mobile-nav-icon">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </span>
-          <span className="mobile-nav-label">
-            {isArabic ? "المزيد" : "More"}
-          </span>
+          <Menu size={21} strokeWidth={2.1} aria-hidden="true" />
+          <span>{L("المزيد", "More")}</span>
         </button>
       </nav>
     </div>

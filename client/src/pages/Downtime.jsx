@@ -1,32 +1,103 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { printReportDocument } from "../utils/printReport";
 import { getTodayString, toLocalDateStr } from "../utils/date";
+import { STANDARD_8_STATIONS } from "../constants/checklistData";
+import {
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Clock,
+  CloudOff,
+  FileText,
+  ListChecks,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Square,
+  Timer,
+  Trash2,
+} from "lucide-react";
 
-const STAGES = [
-  "Assembly",
-  "Insulation",
-  "RF",
-  "Calibration",
-  "Multin test",
-  "Perso",
-  "Packaging",
-  "Firmware update",
-];
+// Stage ids stay in English (that is what is stored in `stoppages.stage_id`);
+// only the label shown to the user is translated.
+const STAGES = STANDARD_8_STATIONS.map((s) => s.id);
+const STAGE_INFO = Object.fromEntries(STANDARD_8_STATIONS.map((s) => [s.id, s]));
+
+function stageLabel(id, isArabic) {
+  const info = STAGE_INFO[id];
+  if (!info) return id || "—";
+  return isArabic ? info.nameAr : info.nameEn;
+}
 
 const getStorageKey = (userName) =>
   `ectron_live_downtime_${userName || "default"}`;
 const LOCAL_STOPPAGES_KEY = "ectron_downtime_local_records";
+const LIVE_NOTE = "LIVE_ACTIVE";
 
-function formatMinutes(minutes) {
-  if (minutes == null || isNaN(minutes)) return "0m";
+// ─── Offline cache ────────────────────────────────────────────────────────────
+// Only records that could NOT be saved to the database are kept here
+// (`pending: true`). They are shown in the list with a "not synced" badge and
+// uploaded automatically the next time the page loads online.
+// Older versions of the page copied every saved record here, which made deleted
+// records come back. Legacy entries count as pending only when their id is a
+// Date.now() value (i.e. the database never gave them an id).
+const recordKey = (r) => `${r.stage}_${r.date}_${r.start_time}`;
+
+function isPendingLocal(r) {
+  if (r.pending === true) return true;
+  if (r.pending === undefined) return Number(r.id) > 1e12;
+  return false;
+}
+
+function readLocalRecords() {
+  try {
+    const list = JSON.parse(localStorage.getItem(LOCAL_STOPPAGES_KEY) || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalRecords(list) {
+  try {
+    localStorage.setItem(LOCAL_STOPPAGES_KEY, JSON.stringify(list.slice(0, 200)));
+  } catch {
+    /* storage full or blocked — nothing else we can do */
+  }
+}
+
+function addPendingLocal(record) {
+  writeLocalRecords([{ ...record, pending: true }, ...readLocalRecords()]);
+}
+
+function removeLocalRecord(record) {
+  const key = recordKey(record);
+  writeLocalRecords(
+    readLocalRecords().filter((l) => l.id !== record.id && recordKey(l) !== key),
+  );
+}
+
+// Start / end instants for a stoppage. The end is derived from the duration so
+// a stoppage that crosses midnight (e.g. 23:40 → 00:15) ends on the next day.
+function toStoppageRange(date, startTime, minutes) {
+  const start = new Date(`${date}T${startTime}:00`);
+  const end = new Date(start.getTime() + Math.max(0, minutes) * 60000);
+  return { stopped_at: start.toISOString(), resumed_at: end.toISOString() };
+}
+
+function formatMinutes(minutes, isArabic = false) {
+  const h = isArabic ? "س" : "h";
+  const m = isArabic ? "د" : "m";
+  if (minutes == null || isNaN(minutes)) return `0${m}`;
   const hrs = Math.floor(minutes / 60);
   const mins = minutes % 60;
-  if (hrs > 0 && mins > 0) return `${hrs}h ${mins}m`;
-  if (hrs > 0) return `${hrs}h`;
-  return `${mins}m`;
+  if (hrs > 0 && mins > 0) return `${hrs}${h} ${mins}${m}`;
+  if (hrs > 0) return `${hrs}${h}`;
+  return `${mins}${m}`;
 }
 
 function formatElapsed(seconds) {
@@ -198,7 +269,7 @@ function DowntimeReportModal({
                 className="report-meta-value"
                 style={{ color: "var(--teal-dark)" }}
               >
-                {formatMinutes(totalMinutes)}
+                {formatMinutes(totalMinutes, isArabic)}
               </span>
             </div>
           </div>
@@ -227,10 +298,10 @@ function DowntimeReportModal({
                 <tbody>
                   {stageBreakdown.map((s) => (
                     <tr key={s.stage}>
-                      <td style={{ fontWeight: 600 }}>{s.stage}</td>
+                      <td style={{ fontWeight: 600 }}>{stageLabel(s.stage, isArabic)}</td>
                       <td style={{ textAlign: "center" }}>{s.count}</td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>
-                        {formatMinutes(s.mins)}
+                        {formatMinutes(s.mins, isArabic)}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         {totalMinutes > 0
@@ -284,9 +355,9 @@ function DowntimeReportModal({
                     <td style={{ fontWeight: 700, color: "var(--navy)" }}>
                       {r.user_name}
                     </td>
-                    <td>{r.stage}</td>
+                    <td>{stageLabel(r.stage, isArabic)}</td>
                     <td>{r.start_time}</td>
-                    <td>{r.end_time}</td>
+                    <td>{r.end_time || (isArabic ? "جارٍ" : "Running")}</td>
                     <td
                       style={{
                         textAlign: "right",
@@ -294,7 +365,7 @@ function DowntimeReportModal({
                         color: "var(--teal-dark)",
                       }}
                     >
-                      {formatMinutes(r.total_minutes)}
+                      {formatMinutes(r.total_minutes, isArabic)}
                     </td>
                   </tr>
                 ))}
@@ -400,9 +471,26 @@ function DowntimeModal({
       return;
     }
 
+    const durationMins = computeDurationMinutes(start_time, end_time);
+    if (durationMins <= 0) {
+      setError(
+        isArabic
+          ? "وقت النهاية لازم يكون بعد وقت البداية."
+          : "End time must be after the start time.",
+      );
+      return;
+    }
+    if (durationMins > 12 * 60) {
+      setError(
+        isArabic
+          ? "المدة أكثر من 12 ساعة — تأكد من الأوقات."
+          : "Duration is over 12 hours — please check the times.",
+      );
+      return;
+    }
+
     setLoading(true);
     try {
-      const durationMins = computeDurationMinutes(start_time, end_time);
       const payload = {
         id: isEdit ? initial.id : Date.now(),
         user_name,
@@ -412,33 +500,43 @@ function DowntimeModal({
         end_time,
         total_minutes: durationMins,
       };
+      const row = {
+        stage_id: stage,
+        supervisor_id: user_name,
+        ...toStoppageRange(date, start_time, durationMins),
+        notes: `Downtime: ${durationMins}m`,
+      };
 
-      try {
-        if (isEdit) {
-          await supabase
-            .from("stoppages")
-            .update({
-              stage_id: stage,
-              supervisor_id: user_name,
-              notes: `${date} ${start_time} - ${end_time}`,
-            })
-            .eq("id", initial.id);
-        } else {
-          await supabase.from("stoppages").insert([
-            {
-              stage_id: stage,
-              supervisor_id: user_name,
-              stopped_at: new Date(`${date}T${start_time}:00`).toISOString(),
-              resumed_at: new Date(`${date}T${end_time}:00`).toISOString(),
-              notes: `Downtime: ${durationMins}m`,
-            },
-          ]);
-        }
-      } catch (e) {
-        console.warn("Supabase stoppage sync:", e);
+      // A record that only exists in the offline cache is edited there.
+      if (isEdit && initial.pending) {
+        removeLocalRecord(initial);
+        addPendingLocal(payload);
+        onSaved(payload, isEdit, { offline: true });
+        return;
       }
 
-      onSaved(payload, isEdit);
+      let offline = false;
+      try {
+        const { error: dbError } = isEdit
+          ? await supabase.from("stoppages").update(row).eq("id", initial.id)
+          : await supabase.from("stoppages").insert([row]);
+        if (dbError) throw dbError;
+      } catch (e) {
+        console.warn("Supabase stoppage save failed:", e);
+        if (isEdit) {
+          // Editing a database record offline would silently lose the change.
+          setError(
+            isArabic
+              ? "تعذر حفظ التعديل — تأكد من الاتصال وحاول مرة ثانية."
+              : "Could not save the change — check the connection and try again.",
+          );
+          return;
+        }
+        addPendingLocal(payload);
+        offline = true;
+      }
+
+      onSaved(payload, isEdit, { offline });
     } catch (err) {
       setError(
         err?.message ||
@@ -508,7 +606,7 @@ function DowntimeModal({
               >
                 {STAGES.map((s, idx) => (
                   <option key={s} value={s}>
-                    {idx + 1}. {s}
+                    {idx + 1}. {stageLabel(s, isArabic)}
                   </option>
                 ))}
               </select>
@@ -576,7 +674,12 @@ function DowntimeModal({
                   color: "var(--teal-dark)",
                 }}
               >
-                {formatMinutes(durationMins)}
+                {formatMinutes(durationMins, isArabic)}
+                {end_time && start_time && end_time < start_time && (
+                  <span style={{ fontSize: "0.75rem", fontWeight: 600, color: "var(--gray-500)", marginInlineStart: 6 }}>
+                    {isArabic ? "(ينتهي اليوم التالي)" : "(ends next day)"}
+                  </span>
+                )}
               </span>
             </div>
           </div>
@@ -624,7 +727,15 @@ function DeleteModal({ record, onClose, onDeleted }) {
     }
     setLoading(true);
     try {
-      await supabase.from("stoppages").delete().eq("id", record.id);
+      if (!record.pending) {
+        const { error: dbError } = await supabase
+          .from("stoppages")
+          .delete()
+          .eq("id", record.id);
+        if (dbError) throw dbError;
+      }
+      // Also drop any offline copy so the record can't reappear.
+      removeLocalRecord(record);
       onDeleted(record.id);
     } catch (err) {
       setError(
@@ -674,13 +785,13 @@ function DeleteModal({ record, onClose, onDeleted }) {
             {isArabic ? (
               <>
                 هل أنت متأكد من حذف سجل التوقف لمرحلة{" "}
-                <span className="confirm-name">{record.stage}</span> بتاريخ{" "}
+                <span className="confirm-name">{stageLabel(record.stage, true)}</span> بتاريخ{" "}
                 {record.date}؟
               </>
             ) : (
               <>
                 Delete downtime record for{" "}
-                <span className="confirm-name">{record.stage}</span> on{" "}
+                <span className="confirm-name">{stageLabel(record.stage, false)}</span> on{" "}
                 {record.date}?
               </>
             )}
@@ -731,7 +842,10 @@ export default function Downtime() {
   const [selectedUser, setSelectedUser] = useState("");
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null); // null | { type: 'add'|'edit'|'delete'|'report', record? }
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState(null); // { msg, tone: "ok" | "warn" }
+  const [loadError, setLoadError] = useState(false);
+  const syncAttemptedRef = useRef(false);
+  const toastTimerRef = useRef(null);
 
   // ─── Easy Live Recording State ──────────────────────────────────────────────
   const [selectedPillStage, setSelectedPillStage] = useState(STAGES[0]);
@@ -775,7 +889,7 @@ export default function Downtime() {
             user_name: row.supervisor_id || currentUserName,
             startTimestamp: startMs,
             date: row.stopped_at
-              ? row.stopped_at.split("T")[0]
+              ? formatLocalDate(new Date(row.stopped_at))
               : getTodayString(),
             start_time: new Date(row.stopped_at).toLocaleTimeString("en-GB", {
               hour: "2-digit",
@@ -824,91 +938,138 @@ export default function Downtime() {
       .catch(() => {});
   }, []);
 
-  // Fetch downtime records
+  // Fetch downtime records (database + any records still waiting to sync)
   const fetchRecords = useCallback(async () => {
     setLoading(true);
+    const applyFilters = (list) => {
+      let out = list;
+      if (selectedDate) out = out.filter((r) => r.date === selectedDate);
+      if (selectedStage) out = out.filter((r) => r.stage === selectedStage);
+      if (selectedUser) out = out.filter((r) => r.user_name === selectedUser);
+      return out.sort((a, b) =>
+        `${b.date} ${b.start_time}`.localeCompare(`${a.date} ${a.start_time}`),
+      );
+    };
+
     try {
       const { data, error } = await supabase
         .from("stoppages")
         .select("*")
         .order("stopped_at", { ascending: false });
-      if (error) console.warn("Stoppages fetch error:", error);
+      if (error) throw error;
 
-      let cloudList = (data || []).map((s) => {
+      const cloudList = (data || []).map((s) => {
         const start = s.stopped_at ? new Date(s.stopped_at) : new Date();
-        const end = s.resumed_at ? new Date(s.resumed_at) : new Date();
-        const dateStr = formatLocalDate(start);
-        const startTimeStr = `${String(start.getHours()).padStart(2, "0")}:${String(start.getMinutes()).padStart(2, "0")}`;
-        const endTimeStr = `${String(end.getHours()).padStart(2, "0")}:${String(end.getMinutes()).padStart(2, "0")}`;
-        const diffMins = Math.max(
-          1,
-          Math.round((end.getTime() - start.getTime()) / 60000),
-        );
+        const live = !s.resumed_at;
+        const end = live ? new Date() : new Date(s.resumed_at);
         return {
           id: s.id,
           user_name: s.supervisor_id || "Supervisor",
           stage: s.stage_id,
-          date: dateStr,
-          start_time: startTimeStr,
-          end_time: endTimeStr,
-          total_minutes: diffMins,
+          date: formatLocalDate(start),
+          start_time: getCurrentTimeString(start),
+          end_time: live ? "" : getCurrentTimeString(end),
+          total_minutes: Math.max(
+            live ? 0 : 1,
+            Math.round((end.getTime() - start.getTime()) / 60000),
+          ),
+          startTimestamp: start.getTime(),
+          live,
           notes: s.notes || "",
         };
       });
 
-      // Merge local fallback records (ensures zero data loss)
-      let localList = [];
-      try {
-        localList = JSON.parse(
-          localStorage.getItem(LOCAL_STOPPAGES_KEY) || "[]",
-        );
-      } catch {}
+      // Keep only genuinely unsynced local records; anything already in the
+      // database (or legacy copies of saved records) is dropped from the cache.
+      const cloudKeys = new Set(cloudList.map(recordKey));
+      const pending = readLocalRecords()
+        .filter(isPendingLocal)
+        .filter((l) => !cloudKeys.has(recordKey(l)))
+        .map((l) => ({ ...l, pending: true }));
+      writeLocalRecords(pending);
 
-      const cloudKeys = new Set(
-        cloudList.map((r) => `${r.stage}_${r.date}_${r.start_time}`),
-      );
-      const unsynced = localList.filter(
-        (l) => !cloudKeys.has(`${l.stage}_${l.date}_${l.start_time}`),
-      );
+      // Upload them once per page visit.
+      if (pending.length > 0 && !syncAttemptedRef.current) {
+        syncAttemptedRef.current = true;
+        let uploaded = 0;
+        for (const rec of pending) {
+          const { error: insErr } = await supabase.from("stoppages").insert([
+            {
+              stage_id: rec.stage,
+              supervisor_id: rec.user_name,
+              ...toStoppageRange(rec.date, rec.start_time, rec.total_minutes),
+              notes: `Downtime: ${rec.total_minutes}m (synced)`,
+            },
+          ]);
+          if (!insErr) {
+            removeLocalRecord(rec);
+            uploaded += 1;
+          }
+        }
+        if (uploaded > 0) {
+          showToast(
+            isArabic
+              ? `تمت مزامنة ${uploaded} سجل محفوظ على الجهاز.`
+              : `Synced ${uploaded} record(s) saved on this device.`,
+          );
+          setLoading(false);
+          fetchRecords();
+          return;
+        }
+      }
 
-      let list = [...unsynced, ...cloudList];
-
-      if (selectedDate) list = list.filter((r) => r.date === selectedDate);
-      if (selectedStage) list = list.filter((r) => r.stage === selectedStage);
-      if (selectedUser) list = list.filter((r) => r.user_name === selectedUser);
-      setRecords(list);
+      setLoadError(false);
+      setRecords(applyFilters([...pending, ...cloudList]));
     } catch (e) {
       console.warn("fetchRecords error:", e);
-      let localList = [];
-      try {
-        localList = JSON.parse(
-          localStorage.getItem(LOCAL_STOPPAGES_KEY) || "[]",
-        );
-      } catch {}
-      if (selectedDate)
-        localList = localList.filter((r) => r.date === selectedDate);
-      if (selectedStage)
-        localList = localList.filter((r) => r.stage === selectedStage);
-      if (selectedUser)
-        localList = localList.filter((r) => r.user_name === selectedUser);
-      setRecords(localList);
+      setLoadError(true);
+      setRecords(
+        applyFilters(
+          readLocalRecords()
+            .filter(isPendingLocal)
+            .map((l) => ({ ...l, pending: true })),
+        ),
+      );
     } finally {
       setLoading(false);
     }
+    // showToast only sets state; isArabic just changes the toast wording.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate, selectedStage, selectedUser]);
 
   useEffect(() => {
     fetchRecords();
   }, [fetchRecords]);
 
-  // Total downtime in selected day
-  const totalMinutesInDay = records.reduce(
-    (acc, curr) => acc + (curr.total_minutes || 0),
-    0,
-  );
+  // Running stoppages keep growing while the page is open.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const hasLiveRows = records.some((r) => r.live);
+  useEffect(() => {
+    if (!hasLiveRows) return undefined;
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, [hasLiveRows]);
+
+  const rowMinutes = (r) =>
+    r.live
+      ? Math.max(0, Math.round((nowTick - r.startTimestamp) / 60000))
+      : r.total_minutes || 0;
+
+  // Totals for the current filter
+  const totalMinutesInDay = records.reduce((acc, r) => acc + rowMinutes(r), 0);
+  const stageTotals = STAGES.map((stage) => ({
+    stage,
+    mins: records.filter((r) => r.stage === stage).reduce((a, r) => a + rowMinutes(r), 0),
+    count: records.filter((r) => r.stage === stage).length,
+  }))
+    .filter((s) => s.count > 0)
+    .sort((a, b) => b.mins - a.mins);
+  const pendingCount = records.filter((r) => r.pending).length;
 
   // ─── Start Live Downtime ────────────────────────────────────────────────────
   async function handleStartLiveDowntime() {
+    if (activeSession || isSavingLive) return;
+    setIsSavingLive(true);
     const now = new Date();
     const session = {
       stage: selectedPillStage,
@@ -927,129 +1088,104 @@ export default function Downtime() {
             supervisor_id: user?.name || "Supervisor",
             stopped_at: now.toISOString(),
             resumed_at: null,
-            notes: "LIVE_ACTIVE",
+            notes: LIVE_NOTE,
           },
         ])
         .select();
-
-      if (!error && data && data[0]?.id) {
-        session.id = data[0].id;
-      }
+      if (error) throw error;
+      if (data?.[0]?.id) session.id = data[0].id;
     } catch (e) {
+      // Offline: the timer still runs on this device and is saved on stop.
       console.warn("Could not register active live stoppage in Supabase:", e);
     }
 
     localStorage.setItem(getStorageKey(user?.name), JSON.stringify(session));
     setActiveSession(session);
-    showToast(`Downtime recording started for "${selectedPillStage}"`);
+    setIsSavingLive(false);
+    showToast(
+      isArabic
+        ? `بدأ تسجيل التوقف لمحطة "${stageLabel(selectedPillStage, true)}"`
+        : `Downtime recording started for "${selectedPillStage}"`,
+    );
+    fetchRecords();
   }
 
   // ─── Stop & Save Live Downtime ──────────────────────────────────────────────
   async function handleStopAndSaveLiveDowntime() {
-    if (!activeSession) return;
+    if (!activeSession || isSavingLive) return;
     setIsSavingLive(true);
 
     try {
       const now = new Date();
-      let end_time = getCurrentTimeString(now);
-
-      const computedElapsedSecs = Math.max(
-        elapsedSeconds,
+      const elapsedSecs = Math.max(
+        0,
         Math.floor((now.getTime() - activeSession.startTimestamp) / 1000),
       );
-
-      if (end_time === activeSession.start_time && computedElapsedSecs >= 30) {
-        const nextMin = new Date(now.getTime() + 60000);
-        end_time = getCurrentTimeString(nextMin);
-      }
-
-      const durationMins = Math.max(1, Math.ceil(computedElapsedSecs / 60));
+      const durationMins = Math.max(1, Math.round(elapsedSecs / 60));
+      const endDate = new Date(activeSession.startTimestamp + durationMins * 60000);
       const payload = {
         id: activeSession.id || Date.now(),
         user_name: activeSession.user_name || user?.name || "Supervisor",
         stage: activeSession.stage,
         date: activeSession.date || formatLocalDate(now),
         start_time: activeSession.start_time,
-        end_time: end_time,
+        end_time: getCurrentTimeString(endDate),
         total_minutes: durationMins,
-        notes: `Live session: ${durationMins}m`,
       };
+      const range = {
+        stopped_at: new Date(activeSession.startTimestamp).toISOString(),
+        resumed_at: now.toISOString(),
+      };
+      const notes = `Live session: ${durationMins}m`;
 
+      let saved = false;
       try {
         if (activeSession.id) {
-          const { error } = await supabase
-            .from("stoppages")
-            .update({
-              resumed_at: now.toISOString(),
-              notes: `Live session: ${durationMins}m`,
-            })
-            .eq("id", activeSession.id);
-
-          if (error) {
-            console.warn(
-              "Supabase update returned error, trying fallback insert:",
-              error,
-            );
-            await supabase.from("stoppages").insert([
-              {
-                stage_id: activeSession.stage,
-                supervisor_id: activeSession.user_name,
-                stopped_at: new Date(
-                  activeSession.startTimestamp,
-                ).toISOString(),
-                resumed_at: now.toISOString(),
-                notes: `Live session: ${durationMins}m`,
-              },
-            ]);
-          } else {
-            payload.id = activeSession.id;
-          }
-        } else {
           const { data, error } = await supabase
             .from("stoppages")
-            .insert([
-              {
-                stage_id: activeSession.stage,
-                supervisor_id: activeSession.user_name,
-                stopped_at: new Date(
-                  activeSession.startTimestamp,
-                ).toISOString(),
-                resumed_at: now.toISOString(),
-                notes: `Live session: ${durationMins}m`,
-              },
-            ])
+            .update({ resumed_at: range.resumed_at, notes })
+            .eq("id", activeSession.id)
             .select();
-
-          if (!error && data && data[0]?.id) {
-            payload.id = data[0].id;
-          }
+          if (!error && data && data.length > 0) saved = true;
+        }
+        if (!saved) {
+          // No database row yet (started offline) or the row was removed.
+          const { error } = await supabase.from("stoppages").insert([
+            {
+              stage_id: activeSession.stage,
+              supervisor_id: payload.user_name,
+              ...range,
+              notes,
+            },
+          ]);
+          if (!error) saved = true;
         }
       } catch (e) {
         console.warn("Supabase live save network error:", e);
       }
 
-      // Always save to persistent local cache so record is never lost
-      try {
-        const storedList = JSON.parse(
-          localStorage.getItem(LOCAL_STOPPAGES_KEY) || "[]",
-        );
-        storedList.unshift(payload);
-        localStorage.setItem(
-          LOCAL_STOPPAGES_KEY,
-          JSON.stringify(storedList.slice(0, 100)),
-        );
-      } catch {}
+      if (!saved) addPendingLocal(payload);
 
       localStorage.removeItem(getStorageKey(user?.name));
       setActiveSession(null);
       setElapsedSeconds(0);
-      showToast(
-        `Saved downtime for "${payload.stage}" (${durationMins}m, ${payload.start_time} - ${payload.end_time})!`,
-      );
+      const label = stageLabel(payload.stage, isArabic);
+      const span = `${payload.start_time} – ${payload.end_time}`;
+      if (saved) {
+        showToast(
+          isArabic
+            ? `تم حفظ توقف "${label}" (${formatMinutes(durationMins, true)}، ${span})`
+            : `Saved downtime for "${label}" (${formatMinutes(durationMins)}, ${span})`,
+        );
+      } else {
+        showToast(
+          isArabic
+            ? "ما في اتصال — انحفظ السجل على الجهاز وبيتزامن تلقائياً."
+            : "No connection — saved on this device, it will sync automatically.",
+          "warn",
+        );
+      }
       await fetchRecords();
-    } catch (err) {
-      console.error("Error saving downtime:", err);
-      alert(err?.message || "Error saving downtime record.");
     } finally {
       setIsSavingLive(false);
     }
@@ -1057,769 +1193,503 @@ export default function Downtime() {
 
   // ─── Cancel Live Session ────────────────────────────────────────────────────
   async function handleCancelLiveDowntime() {
-    if (window.confirm("Cancel this recording without saving?")) {
-      if (activeSession?.id) {
-        try {
-          await supabase.from("stoppages").delete().eq("id", activeSession.id);
-        } catch (e) {
-          console.warn("Could not delete canceled stoppage from Supabase:", e);
-        }
+    const ok = window.confirm(
+      isArabic
+        ? "إلغاء هذا التسجيل بدون حفظ؟"
+        : "Cancel this recording without saving?",
+    );
+    if (!ok) return;
+    if (activeSession?.id) {
+      try {
+        await supabase.from("stoppages").delete().eq("id", activeSession.id);
+      } catch (e) {
+        console.warn("Could not delete canceled stoppage from Supabase:", e);
       }
-      localStorage.removeItem(getStorageKey(user?.name));
-      setActiveSession(null);
-      setElapsedSeconds(0);
-      showToast("Recording cancelled.");
     }
+    localStorage.removeItem(getStorageKey(user?.name));
+    setActiveSession(null);
+    setElapsedSeconds(0);
+    showToast(isArabic ? "تم إلغاء التسجيل." : "Recording cancelled.");
+    fetchRecords();
   }
 
-  function showToast(msg) {
-    setToast(msg);
-    setTimeout(() => setToast(""), 4000);
+  function showToast(msg, tone = "ok") {
+    setToast({ msg, tone });
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 4500);
   }
 
-  function onSaved() {
+  useEffect(() => () => clearTimeout(toastTimerRef.current), []);
+
+  function onSaved(_payload, _isEdit, opts = {}) {
     setModal(null);
     fetchRecords();
-    showToast("Record saved successfully.");
+    if (opts.offline) {
+      showToast(
+        isArabic
+          ? "ما في اتصال — انحفظ السجل على الجهاز وبيتزامن تلقائياً."
+          : "No connection — saved on this device, it will sync automatically.",
+        "warn",
+      );
+    } else {
+      showToast(isArabic ? "تم حفظ السجل." : "Record saved successfully.");
+    }
   }
 
   function onDeleted(id) {
     setRecords((prev) => prev.filter((r) => r.id !== id));
     setModal(null);
     fetchRecords();
-    showToast("Record deleted.");
+    showToast(isArabic ? "تم حذف السجل." : "Record deleted.");
   }
 
-  return (
-    <div>
-      {/* Toast Alert */}
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            top: "24px",
-            right: "24px",
-            background: "var(--navy)",
-            color: "var(--white)",
-            padding: "12px 20px",
-            borderRadius: "8px",
-            boxShadow: "var(--shadow-lg)",
-            zIndex: 9999,
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            fontSize: "0.9rem",
-            fontWeight: 600,
-            animation: "fadeIn 0.2s ease",
-          }}
+  const L = (ar, en) => (isArabic ? ar : en);
+  const maxStageMins = stageTotals.length > 0 ? stageTotals[0].mins : 0;
+  const today = getTodayString();
+
+  function shiftDate(days) {
+    const base = new Date(`${selectedDate || today}T12:00:00`);
+    base.setDate(base.getDate() + days);
+    setSelectedDate(formatLocalDate(base));
+  }
+
+  const rowActions = (r) => {
+    if (isViewer) {
+      return <span className="dt-muted">{L("للقراءة فقط", "Read only")}</span>;
+    }
+    if (r.live) {
+      return <span className="dt-muted" style={{ display: "block", textAlign: "center" }}>—</span>;
+    }
+    return (
+      <div className="action-btns" style={{ justifyContent: "center" }}>
+        <button
+          className="btn-icon btn-edit"
+          title={t("edit")}
+          aria-label={t("edit")}
+          onClick={() => setModal({ type: "edit", record: r })}
         >
-          <span style={{ color: "var(--teal)" }}>✔</span>
-          {toast}
+          <Pencil size={15} />
+        </button>
+        {isAdmin && (
+          <button
+            className="btn-icon btn-delete"
+            title={L("حذف (للأدمن فقط)", "Delete (Admin only)")}
+            aria-label={L("حذف", "Delete")}
+            onClick={() => setModal({ type: "delete", record: r })}
+          >
+            <Trash2 size={15} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const statusBadge = (r) => {
+    if (r.live) {
+      return (
+        <span className="dt-badge dt-badge--live">
+          <span className="pulse-dot" />
+          {L("جارٍ", "Running")}
+        </span>
+      );
+    }
+    if (r.pending) {
+      return (
+        <span className="dt-badge dt-badge--pending" title={L("محفوظ على هذا الجهاز فقط", "Saved on this device only")}>
+          <CloudOff size={12} />
+          {L("غير متزامن", "Not synced")}
+        </span>
+      );
+    }
+    return null;
+  };
+
+  return (
+    <div className="dt-page">
+      {/* Toast */}
+      {toast && (
+        <div className={`dt-toast${toast.tone === "warn" ? " dt-toast--warn" : ""}`} role="status">
+          {toast.tone === "warn" ? <CloudOff size={16} /> : <CheckCircle2 size={16} />}
+          <span>{toast.msg}</span>
         </div>
       )}
 
       {/* Page Header */}
-      <div className="page-header">
-        <h1 className="page-title">{t("downtimeTitle")}</h1>
-        <p className="page-subtitle">{t("downtimeSubtitle")}</p>
-      </div>
-
-      {/* ─── VIEWER READ-ONLY NOTICE OR LIVE TRACKER ─── */}
-      {isViewer ? (
-        <div
-          style={{
-            background: "var(--white)",
-            border: "1.5px solid var(--gray-200)",
-            borderRadius: "12px",
-            padding: "16px 20px",
-            marginBottom: "24px",
-            display: "flex",
-            alignItems: "center",
-            gap: "12px",
-            boxShadow: "var(--shadow-sm)",
-          }}
-        >
-          <span
-            className="badge badge-viewer"
-            style={{ padding: "5px 12px", fontSize: "0.8rem" }}
-          >
-            {isArabic ? "وضع المشاهد" : "Viewer Mode"}
-          </span>
-          <span style={{ fontSize: "0.875rem", color: "var(--gray-700)" }}>
-            {isArabic ? (
-              <>
-                مسجل الدخول كـ <strong>{user?.name}</strong> (للقراءة فقط).
-                يمكنك استعراض سجلات التوقف وطباعة التقارير. تسجيل التوقفات متاح
-                للمشرفين والمدراء فقط.
-              </>
-            ) : (
-              <>
-                Signed in as <strong>{user?.name}</strong> (Read-Only). You can
-                view all downtime records and generate reports. Downtime
-                recording is restricted to Supervisors and Admins.
-              </>
-            )}
-          </span>
+      <div className="page-header dt-header">
+        <div>
+          <h1 className="page-title">{t("downtimeTitle")}</h1>
+          <p className="page-subtitle">{t("downtimeSubtitle")}</p>
         </div>
-      ) : (
-        <div className={`tracker-card ${activeSession ? "active" : ""}`}>
-          <div className="tracker-header">
-            <div className="tracker-title">
-              <svg
-                width="20"
-                height="20"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ color: "var(--teal)" }}
-              >
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <span>{t("easyRecorder")}</span>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <div style={{ fontSize: "0.85rem", color: "var(--gray-500)" }}>
-                {isArabic ? "مسجل الدخول كـ: " : "Logged in as: "}
-                <strong style={{ color: "var(--navy)" }}>
-                  {user?.name || "Admin"}
-                </strong>
-              </div>
-            </div>
-          </div>
-
-          {!activeSession ? (
-            <div>
-              <div
-                style={{
-                  fontSize: "0.875rem",
-                  fontWeight: 600,
-                  color: "var(--gray-700)",
-                  marginBottom: "10px",
-                }}
-              >
-                {t("selectStageToStart")}
-              </div>
-
-              <div className="stage-pills">
-                {STAGES.map((s, idx) => (
-                  <button
-                    key={s}
-                    type="button"
-                    className={`stage-pill ${selectedPillStage === s ? "selected" : ""}`}
-                    onClick={() => setSelectedPillStage(s)}
-                  >
-                    <span className="stage-pill-num">{idx + 1}</span>
-                    <span>{s}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "14px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  type="button"
-                  className="btn-start-downtime"
-                  onClick={handleStartLiveDowntime}
-                >
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="currentColor"
-                  >
-                    <polygon points="5 3 19 12 5 21 5 3" />
-                  </svg>
-                  <span>
-                    {isArabic
-                      ? `بدء التوقف (${selectedPillStage})`
-                      : `Start Downtime (${selectedPillStage})`}
-                  </span>
-                </button>
-
-                <span
-                  style={{ fontSize: "0.825rem", color: "var(--gray-500)" }}
-                >
-                  {isArabic
-                    ? "اضغط للبدء الفوري في تشغيل عداد وقت التوقف."
-                    : "Click to start recording timer immediately."}
-                </span>
-              </div>
-            </div>
-          ) : (
-            <div className="tracker-running-box">
-              <div className="tracker-running-info">
-                <div className="live-pulse">
-                  <span className="pulse-dot" />
-                  <span>{t("recordingInProgress")}</span>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    marginTop: "4px",
-                  }}
-                >
-                  <span
-                    style={{
-                      background: "var(--navy)",
-                      color: "var(--white)",
-                      padding: "4px 12px",
-                      borderRadius: "16px",
-                      fontSize: "0.85rem",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {activeSession.stage}
-                  </span>
-                  <span
-                    style={{ fontSize: "0.85rem", color: "var(--gray-500)" }}
-                  >
-                    {isArabic ? (
-                      <>
-                        بدأ في الساعة{" "}
-                        <strong>{activeSession.start_time}</strong> بواسطة{" "}
-                        <strong style={{ color: "var(--navy)" }}>
-                          {activeSession.user_name}
-                        </strong>
-                      </>
-                    ) : (
-                      <>
-                        Started at <strong>{activeSession.start_time}</strong>{" "}
-                        by{" "}
-                        <strong style={{ color: "var(--navy)" }}>
-                          {activeSession.user_name}
-                        </strong>
-                      </>
-                    )}
-                  </span>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "20px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div className="stopwatch-display">
-                  {formatElapsed(elapsedSeconds)}
-                </div>
-
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
-                >
-                  <button
-                    type="button"
-                    className="btn-stop-downtime"
-                    onClick={handleStopAndSaveLiveDowntime}
-                    disabled={isSavingLive}
-                  >
-                    {isSavingLive ? (
-                      <span className="spinner" />
-                    ) : (
-                      <>
-                        <svg
-                          width="16"
-                          height="16"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                        >
-                          <rect x="4" y="4" width="16" height="16" rx="2" />
-                        </svg>
-                        <span>{t("stopAndSave")}</span>
-                      </>
-                    )}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ padding: "12px 16px" }}
-                    onClick={handleCancelLiveDowntime}
-                    disabled={isSavingLive}
-                    title={isArabic ? "إلغاء دون حفظ" : "Cancel without saving"}
-                  >
-                    {t("cancel")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Summary Cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: "16px",
-          marginBottom: "24px",
-        }}
-      >
-        <div
-          style={{
-            background: "var(--white)",
-            padding: "20px",
-            borderRadius: "12px",
-            border: "1px solid var(--gray-200)",
-            boxShadow: "var(--shadow-sm)",
-            display: "flex",
-            alignItems: "center",
-            gap: "16px",
-          }}
-        >
-          <div
-            style={{
-              width: "48px",
-              height: "48px",
-              borderRadius: "10px",
-              background: "rgba(0, 175, 170, 0.12)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--teal)",
-            }}
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-          </div>
-          <div>
-            <div
-              style={{
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "var(--gray-500)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-              }}
-            >
-              {t("totalDowntimeRecorded")} (
-              {selectedDate || (isArabic ? "جميع التواريخ" : "All Dates")})
-            </div>
-            <div
-              style={{
-                fontSize: "1.6rem",
-                fontWeight: 800,
-                color: "var(--navy)",
-                marginTop: "2px",
-              }}
-            >
-              {formatMinutes(totalMinutesInDay)}
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            background: "var(--white)",
-            padding: "20px",
-            borderRadius: "12px",
-            border: "1px solid var(--gray-200)",
-            boxShadow: "var(--shadow-sm)",
-            display: "flex",
-            alignItems: "center",
-            gap: "16px",
-          }}
-        >
-          <div
-            style={{
-              width: "48px",
-              height: "48px",
-              borderRadius: "10px",
-              background: "rgba(35, 63, 121, 0.1)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "var(--navy)",
-            }}
-          >
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-              <line x1="16" y1="2" x2="16" y2="6" />
-              <line x1="8" y1="2" x2="8" y2="6" />
-              <line x1="3" y1="10" x2="21" y2="10" />
-            </svg>
-          </div>
-          <div>
-            <div
-              style={{
-                fontSize: "0.8rem",
-                fontWeight: 600,
-                color: "var(--gray-500)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-              }}
-            >
-              {t("recordsCount")}
-            </div>
-            <div
-              style={{
-                fontSize: "1.6rem",
-                fontWeight: 800,
-                color: "var(--navy)",
-                marginTop: "2px",
-              }}
-            >
-              {records.length}{" "}
-              {isArabic ? "سجل" : records.length === 1 ? "event" : "events"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Toolbar / Filters + Report Button */}
-      <div className="users-toolbar">
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            flexWrap: "wrap",
-          }}
-        >
-          <div className="form-group" style={{ margin: 0 }}>
-            <input
-              type="date"
-              className="search-input"
-              style={{ padding: "8px 12px", minWidth: "150px" }}
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
-          </div>
-
-          <div className="form-group" style={{ margin: 0 }}>
-            <select
-              className="form-select"
-              style={{ padding: "8px 32px 8px 12px", minWidth: "150px" }}
-              value={selectedStage}
-              onChange={(e) => setSelectedStage(e.target.value)}
-            >
-              <option value="">{t("allStages")}</option>
-              {STAGES.map((s, idx) => (
-                <option key={s} value={s}>
-                  {idx + 1}. {s}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-group" style={{ margin: 0 }}>
-            <select
-              className="form-select"
-              style={{ padding: "8px 32px 8px 12px", minWidth: "140px" }}
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-            >
-              <option value="">{t("allUsers")}</option>
-              {users.map((u) => (
-                <option key={u.id || u.name} value={u.name}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {selectedDate && (
-            <button
-              className="btn-secondary"
-              style={{ padding: "8px 12px", fontSize: "0.8125rem" }}
-              onClick={() => setSelectedDate("")}
-            >
-              {t("showAllDates")}
-            </button>
-          )}
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            marginLeft: "auto",
-          }}
-        >
-          {/* Report Button */}
+        <div className="dt-header-actions">
           <button
             type="button"
             className="btn-primary"
-            style={{
-              background: "var(--navy)",
-              display: "flex",
-              alignItems: "center",
-              gap: "7px",
-            }}
+            style={{ background: "var(--navy)" }}
             onClick={() => setModal({ type: "report" })}
           >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="16" y1="13" x2="8" y2="13" />
-              <line x1="16" y1="17" x2="8" y2="17" />
-              <polyline points="10 9 9 9 8 9" />
-            </svg>
+            <FileText size={16} />
             <span>{t("viewPrintReport")}</span>
           </button>
-
-          {/* Manual Entry (hidden for Viewers) */}
           {!isViewer && (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => setModal({ type: "add" })}
-              style={{ display: "flex", alignItems: "center", gap: "6px" }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
+            <button type="button" className="btn-secondary dt-btn-icon-text" onClick={() => setModal({ type: "add" })}>
+              <Plus size={16} />
               <span>{t("manualEntry")}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Table */}
-      <div className="table-card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>{t("date")}</th>
-                <th>{t("user")}</th>
-                <th>{t("stage")}</th>
-                <th>{t("startTime")}</th>
-                <th>{t("endTime")}</th>
-                <th>{t("totalTime")}</th>
-                <th style={{ width: 80, textAlign: "center" }}>
-                  {t("actions")}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan="7" className="table-empty">
-                    <span
-                      className="spinner"
-                      style={{
-                        borderColor: "rgba(0,175,170,.2)",
-                        borderTopColor: "var(--teal)",
-                      }}
-                    />
-                  </td>
-                </tr>
-              ) : records.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="table-empty">
-                    {isArabic
-                      ? selectedDate
-                        ? `لا توجد أوقات توقف مسجلة لتاريخ ${selectedDate}.`
-                        : "لا توجد أوقات توقف مسجلة."
-                      : selectedDate
-                        ? `No downtime recorded for ${selectedDate}.`
-                        : "No downtime recorded."}
-                  </td>
-                </tr>
-              ) : (
-                records.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ fontWeight: 500 }}>{r.date}</td>
-                    <td style={{ fontWeight: 700, color: "var(--navy)" }}>
-                      <span
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "5px",
-                        }}
-                      >
-                        <svg
-                          width="13"
-                          height="13"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          style={{ opacity: 0.6 }}
-                        >
-                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                          <circle cx="12" cy="7" r="4" />
-                        </svg>
-                        {r.user_name}
-                      </span>
-                    </td>
-                    <td>
-                      <span
-                        className="badge badge-user"
-                        style={{
-                          background: "rgba(35, 63, 121, 0.1)",
-                          color: "var(--navy)",
-                        }}
-                      >
-                        {r.stage}
-                      </span>
-                    </td>
-                    <td>{r.start_time}</td>
-                    <td>{r.end_time}</td>
-                    <td>
-                      <strong style={{ color: "var(--teal-dark)" }}>
-                        {formatMinutes(r.total_minutes)}
-                      </strong>
-                    </td>
-                    <td>
-                      {!isViewer ? (
-                        <div
-                          className="action-btns"
-                          style={{ justifyContent: "center" }}
-                        >
-                          <button
-                            className="btn-icon btn-edit"
-                            title={t("edit")}
-                            onClick={() =>
-                              setModal({ type: "edit", record: r })
-                            }
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                            </svg>
-                          </button>
-                          {isAdmin && (
-                            <button
-                              className="btn-icon btn-delete"
-                              title={
-                                isArabic
-                                  ? "حذف (للأدمن فقط)"
-                                  : "Delete (Admin only)"
-                              }
-                              onClick={() =>
-                                setModal({ type: "delete", record: r })
-                              }
-                            >
-                              <svg
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6l-1 14H6L5 6" />
-                                <path d="M10 11v6" />
-                                <path d="M14 11v6" />
-                                <path d="M9 6V4h6v2" />
-                              </svg>
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        <div
-                          style={{
-                            textAlign: "center",
-                            fontSize: "0.75rem",
-                            color: "var(--gray-500)",
-                          }}
-                        >
-                          {isArabic ? "للقراءة فقط" : "Read only"}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+      {loadError && (
+        <div className="dt-banner dt-banner--warn">
+          <CloudOff size={18} />
+          <span>
+            {L(
+              "تعذر الاتصال بقاعدة البيانات — تظهر فقط السجلات المحفوظة على هذا الجهاز.",
+              "Could not reach the database — only records saved on this device are shown.",
+            )}
+          </span>
+          <button type="button" className="btn-secondary" onClick={fetchRecords}>
+            <RefreshCw size={14} />
+            <span>{L("إعادة المحاولة", "Retry")}</span>
+          </button>
         </div>
-        {!loading && records.length > 0 && (
-          <div
-            className="table-count"
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span>
-              {records.length}{" "}
-              {isArabic ? "سجل" : records.length === 1 ? "record" : "records"}
-            </span>
-            <span>
-              {isArabic ? "إجمالي الوقت في اليوم: " : "Total time in day: "}
-              <strong style={{ color: "var(--navy)", marginLeft: "4px" }}>
-                {formatMinutes(totalMinutesInDay)}
-              </strong>
-            </span>
+      )}
+      {!loadError && pendingCount > 0 && (
+        <div className="dt-banner dt-banner--warn">
+          <CloudOff size={18} />
+          <span>
+            {L(
+              `${pendingCount} سجل محفوظ على هذا الجهاز ولم يتزامن بعد.`,
+              `${pendingCount} record(s) are saved on this device and not synced yet.`,
+            )}
+          </span>
+        </div>
+      )}
+
+      {/* ─── LIVE TRACKER ─── */}
+      {isViewer ? (
+        <div className="dt-banner">
+          <span className="badge badge-viewer">{L("وضع المشاهد", "Viewer Mode")}</span>
+          <span>
+            {L(
+              "للقراءة فقط — تقدر تستعرض السجلات وتطبع التقارير. التسجيل للمشرفين والمدراء.",
+              "Read-only — you can view records and print reports. Recording is for supervisors and admins.",
+            )}
+          </span>
+        </div>
+      ) : (
+        <div className={`tracker-card dt-tracker ${activeSession ? "active" : ""}`}>
+          <div className="tracker-header">
+            <div className="tracker-title">
+              <Timer size={20} color={activeSession ? "var(--danger)" : "var(--teal)"} />
+              <span>{t("easyRecorder")}</span>
+            </div>
+            <div className="dt-muted">
+              {L("مسجل الدخول كـ: ", "Logged in as: ")}
+              <strong style={{ color: "var(--navy)" }}>{user?.name || "Admin"}</strong>
+            </div>
           </div>
+
+          {!activeSession ? (
+            <>
+              <div className="dt-label">{t("selectStageToStart")}</div>
+              <div className="dt-stage-grid" role="radiogroup" aria-label={t("stage")}>
+                {STAGES.map((s, idx) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedPillStage === s}
+                    className={`stage-pill ${selectedPillStage === s ? "selected" : ""}`}
+                    onClick={() => setSelectedPillStage(s)}
+                  >
+                    <span className="stage-pill-num">{idx + 1}</span>
+                    <span className="dt-stage-name">{stageLabel(s, isArabic)}</span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                className="btn-start-downtime dt-start-btn"
+                onClick={handleStartLiveDowntime}
+                disabled={isSavingLive}
+              >
+                {isSavingLive ? <span className="spinner" /> : <Play size={18} fill="currentColor" />}
+                <span>
+                  {L("بدء التوقف", "Start Downtime")} — {stageLabel(selectedPillStage, isArabic)}
+                </span>
+              </button>
+            </>
+          ) : (
+            <div className="dt-running">
+              <div className="dt-running-info">
+                <div className="live-pulse">
+                  <span className="pulse-dot" />
+                  <span>{t("recordingInProgress")}</span>
+                </div>
+                <div className="dt-running-stage">{stageLabel(activeSession.stage, isArabic)}</div>
+                <div className="dt-muted">
+                  {L("بدأ الساعة ", "Started at ")}
+                  <strong>{activeSession.start_time}</strong>
+                  {L(" بواسطة ", " by ")}
+                  <strong style={{ color: "var(--navy)" }}>{activeSession.user_name}</strong>
+                </div>
+              </div>
+
+              <div className="stopwatch-display dt-stopwatch" dir="ltr">
+                {formatElapsed(elapsedSeconds)}
+              </div>
+
+              <div className="dt-running-actions">
+                <button
+                  type="button"
+                  className="btn-stop-downtime"
+                  onClick={handleStopAndSaveLiveDowntime}
+                  disabled={isSavingLive}
+                >
+                  {isSavingLive ? <span className="spinner" /> : <Square size={16} fill="currentColor" />}
+                  <span>{t("stopAndSave")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleCancelLiveDowntime}
+                  disabled={isSavingLive}
+                  title={L("إلغاء دون حفظ", "Cancel without saving")}
+                >
+                  {t("cancel")}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Summary ─── */}
+      <div className="dt-summary">
+        <div className="dt-stat">
+          <div className="dt-stat-icon" style={{ background: "rgba(0,175,170,.12)", color: "var(--teal)" }}>
+            <Clock size={22} />
+          </div>
+          <div>
+            <div className="dt-stat-label">
+              {L("إجمالي التوقف", "Total downtime")}
+              <span className="dt-stat-scope">
+                {" "}· {selectedDate ? (selectedDate === today ? L("اليوم", "today") : selectedDate) : L("كل التواريخ", "all dates")}
+              </span>
+            </div>
+            <div className="dt-stat-value">{formatMinutes(totalMinutesInDay, isArabic)}</div>
+          </div>
+        </div>
+
+        <div className="dt-stat">
+          <div className="dt-stat-icon" style={{ background: "rgba(20,37,71,.08)", color: "var(--navy)" }}>
+            <ListChecks size={22} />
+          </div>
+          <div>
+            <div className="dt-stat-label">{L("عدد التوقفات", "Stoppages")}</div>
+            <div className="dt-stat-value">{records.length}</div>
+          </div>
+        </div>
+
+        <div className="dt-stat dt-stat--wide">
+          <div style={{ width: "100%" }}>
+            <div className="dt-stat-label" style={{ marginBottom: 8 }}>
+              {L("حسب المحطة", "By station")}
+            </div>
+            {stageTotals.length === 0 ? (
+              <div className="dt-muted">{L("لا توجد توقفات.", "No stoppages.")}</div>
+            ) : (
+              <div className="dt-bars">
+                {stageTotals.slice(0, 4).map((st) => (
+                  <div key={st.stage} className="dt-bar-row">
+                    <span className="dt-bar-name">{stageLabel(st.stage, isArabic)}</span>
+                    <span className="dt-bar-track">
+                      <span
+                        className="dt-bar-fill"
+                        style={{ width: `${maxStageMins > 0 ? Math.max(4, (st.mins / maxStageMins) * 100) : 0}%` }}
+                      />
+                    </span>
+                    <span className="dt-bar-val">{formatMinutes(st.mins, isArabic)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ─── Filters ─── */}
+      <div className="dt-filters">
+        <div className="dt-date-nav">
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => shiftDate(-1)}
+            title={L("اليوم السابق", "Previous day")}
+            aria-label={L("اليوم السابق", "Previous day")}
+          >
+            {isArabic ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
+          <input
+            type="date"
+            className="search-input dt-date-input"
+            value={selectedDate}
+            max={today}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            aria-label={t("date")}
+          />
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => shiftDate(1)}
+            disabled={!selectedDate || selectedDate >= today}
+            title={L("اليوم التالي", "Next day")}
+            aria-label={L("اليوم التالي", "Next day")}
+          >
+            {isArabic ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+          </button>
+        </div>
+
+        <select
+          className="form-select"
+          value={selectedStage}
+          onChange={(e) => setSelectedStage(e.target.value)}
+          aria-label={t("stage")}
+        >
+          <option value="">{t("allStages")}</option>
+          {STAGES.map((s, idx) => (
+            <option key={s} value={s}>
+              {idx + 1}. {stageLabel(s, isArabic)}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="form-select"
+          value={selectedUser}
+          onChange={(e) => setSelectedUser(e.target.value)}
+          aria-label={t("user")}
+        >
+          <option value="">{t("allUsers")}</option>
+          {users.map((u) => (
+            <option key={u.id || u.name} value={u.name}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+
+        <div className="dt-chip-row">
+          {selectedDate !== today && (
+            <button type="button" className="btn-secondary dt-chip" onClick={() => setSelectedDate(today)}>
+              {L("اليوم", "Today")}
+            </button>
+          )}
+          {selectedDate && (
+            <button type="button" className="btn-secondary dt-chip" onClick={() => setSelectedDate("")}>
+              {t("showAllDates")}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Records ─── */}
+      <div className="table-card">
+        {loading ? (
+          <div className="table-empty">
+            <span className="spinner" style={{ borderColor: "rgba(0,175,170,.2)", borderTopColor: "var(--teal)" }} />
+          </div>
+        ) : records.length === 0 ? (
+          <div className="table-empty">
+            {selectedDate
+              ? L(`لا توجد أوقات توقف مسجلة لتاريخ ${selectedDate}.`, `No downtime recorded for ${selectedDate}.`)
+              : L("لا توجد أوقات توقف مسجلة.", "No downtime recorded.")}
+          </div>
+        ) : (
+          <>
+            {/* Desktop / tablet: table */}
+            <div className="table-wrap dt-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>{t("date")}</th>
+                    <th>{t("user")}</th>
+                    <th>{t("stage")}</th>
+                    <th>{t("startTime")}</th>
+                    <th>{t("endTime")}</th>
+                    <th>{t("totalTime")}</th>
+                    <th style={{ width: 90, textAlign: "center" }}>{t("actions")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((r) => (
+                    <tr key={`${r.pending ? "p" : "c"}-${r.id}`} className={r.live ? "dt-row-live" : undefined}>
+                      <td style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{r.date}</td>
+                      <td style={{ fontWeight: 700, color: "var(--navy)" }}>{r.user_name}</td>
+                      <td>
+                        <span className="dt-stage-badge">{stageLabel(r.stage, isArabic)}</span>
+                      </td>
+                      <td dir="ltr" className="dt-time">{r.start_time}</td>
+                      <td dir="ltr" className="dt-time">{r.live ? "—" : r.end_time}</td>
+                      <td>
+                        <div className="dt-total-cell">
+                          <strong style={{ color: r.live ? "var(--danger)" : "var(--teal-dark)" }}>
+                            {formatMinutes(rowMinutes(r), isArabic)}
+                          </strong>
+                          {statusBadge(r)}
+                        </div>
+                      </td>
+                      <td>{rowActions(r)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Phone: cards */}
+            <ul className="dt-cards">
+              {records.map((r) => (
+                <li key={`${r.pending ? "p" : "c"}-${r.id}`} className={`dt-card${r.live ? " dt-card--live" : ""}`}>
+                  <div className="dt-card-top">
+                    <span className="dt-stage-badge">{stageLabel(r.stage, isArabic)}</span>
+                    <strong className="dt-card-mins" style={{ color: r.live ? "var(--danger)" : "var(--teal-dark)" }}>
+                      {formatMinutes(rowMinutes(r), isArabic)}
+                    </strong>
+                  </div>
+                  <div className="dt-card-meta">
+                    <span dir="ltr" className="dt-time">
+                      {r.start_time} → {r.live ? "…" : r.end_time}
+                    </span>
+                    <span>·</span>
+                    <span>{r.date}</span>
+                  </div>
+                  <div className="dt-card-bottom">
+                    <span className="dt-card-user">{r.user_name}</span>
+                    {statusBadge(r)}
+                    <span className="dt-card-actions">{rowActions(r)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <div className="table-count dt-count">
+              <span>
+                {records.length} {L("سجل", records.length === 1 ? "record" : "records")}
+              </span>
+              <span>
+                {L("إجمالي الوقت: ", "Total time: ")}
+                <strong style={{ color: "var(--navy)" }}>{formatMinutes(totalMinutesInDay, isArabic)}</strong>
+              </span>
+            </div>
+          </>
         )}
       </div>
 
       {/* Modals */}
       {modal?.type === "report" && (
         <DowntimeReportModal
-          records={records}
+          records={records.map((r) => ({ ...r, total_minutes: rowMinutes(r) }))}
           selectedDate={selectedDate}
           selectedStage={selectedStage}
           currentUser={user}
