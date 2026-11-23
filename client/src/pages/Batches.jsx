@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import * as XLSX from "xlsx";
+import { SAFE_READ_OPTIONS, spreadsheetFileProblem } from "../utils/safeExcel";
 import {
   Package,
   Upload,
@@ -328,6 +329,13 @@ export default function Batches() {
     const file = e.target.files[0];
     if (!file) return;
 
+    const fileProblem = spreadsheetFileProblem(file, isArabic);
+    if (fileProblem) {
+      setUploadError(fileProblem);
+      e.target.value = "";
+      return;
+    }
+
     setUploadFile(file);
     setUploadError("");
     setParsedRows([]);
@@ -343,7 +351,7 @@ export default function Batches() {
     reader.onload = (evt) => {
       try {
         const data = new Uint8Array(evt.target.result);
-        const workbook = XLSX.read(data, { type: "array" });
+        const workbook = XLSX.read(data, SAFE_READ_OPTIONS);
         const firstSheetName = workbook.SheetNames[0];
         const worksheet = workbook.Sheets[firstSheetName];
         const rawJson = XLSX.utils.sheet_to_json(worksheet, {

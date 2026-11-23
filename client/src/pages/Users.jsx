@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../supabaseClient";
+import {
+  USER_COLUMNS,
+  cleanUserPayload,
+  generatePassword,
+  passwordProblem,
+  MIN_PASSWORD_LENGTH,
+} from "../utils/userSecurity";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 
@@ -76,6 +83,7 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
   const [form, setForm] = useState(initial || emptyForm());
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // If operator, extract supervisor and station from JSON team_name
   const parsedMeta = parseTeamMeta(initial?.team_name);
@@ -98,14 +106,27 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
       setError(isArabic ? "الاسم مطلوب." : "Name is required.");
       return;
     }
-    if (!isEdit && !form.password.trim() && form.access !== "operator") {
-      setError(isArabic ? "كلمة المرور مطلوبة." : "Password is required.");
-      return;
+    const canLogIn = form.access !== "operator";
+    const newPassword = (form.password || "").trim();
+    if (canLogIn && (!isEdit || newPassword)) {
+      if (!newPassword) {
+        setError(isArabic ? "كلمة المرور مطلوبة." : "Password is required.");
+        return;
+      }
+      const problem = passwordProblem(newPassword, {
+        companyId: form.company_id,
+        name: form.name,
+        isArabic,
+      });
+      if (problem) {
+        setError(problem);
+        return;
+      }
     }
 
     setLoading(true);
     try {
-      const payload = { ...form };
+      const payload = cleanUserPayload(form);
       if (form.access === "operator") {
         payload.team_name = JSON.stringify({
           supervisor:
@@ -113,9 +134,8 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
           station: operatorStation,
           status: "active",
         });
-        if (!payload.password) {
-          payload.password = payload.company_id || "1234";
-        }
+        // Operators can't log in; give them an unguessable password anyway.
+        if (!isEdit && !payload.password) payload.password = generatePassword(16);
       }
 
       let savedUser;
@@ -124,16 +144,20 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
           .from("users")
           .update(payload)
           .eq("id", initial.id)
-          .select();
+          .select(USER_COLUMNS);
         if (err) throw err;
-        savedUser = data?.[0] || { ...initial, ...payload };
+        const rest = { ...payload };
+        delete rest.password;
+        savedUser = data?.[0] || { ...initial, ...rest };
       } else {
         const { data, error: err } = await supabase
           .from("users")
           .insert([payload])
-          .select();
+          .select(USER_COLUMNS);
         if (err) throw err;
-        savedUser = data?.[0] || { ...payload, id: Date.now() };
+        const rest = { ...payload };
+        delete rest.password;
+        savedUser = data?.[0] || { ...rest, id: Date.now() };
       }
       onSaved(savedUser, isEdit);
     } catch (err) {
@@ -195,28 +219,56 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
                     ? "كلمة المرور *"
                     : "Password *"}
               </label>
-              <input
-                type="password"
-                placeholder={
-                  isEdit
-                    ? isArabic
-                      ? "اتركه فارغاً للحفاظ على كلمة المرور الحالية"
-                      : "Leave blank to keep current password"
-                    : isArabic
-                      ? "تعيين كلمة مرور"
-                      : "Set a password"
-                }
-                value={form.password}
-                onChange={set("password")}
-                disabled={loading}
-              />
-              {isEdit && (
-                <p className="hint">
-                  {isArabic
-                    ? "اتركه فارغاً للحفاظ على كلمة المرور الحالية."
-                    : "Leave blank to keep the existing password."}
-                </p>
-              )}
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder={
+                    isEdit
+                      ? isArabic
+                        ? "اتركه فارغاً للحفاظ على كلمة المرور الحالية"
+                        : "Leave blank to keep current password"
+                      : isArabic
+                        ? "تعيين كلمة مرور"
+                        : "Set a password"
+                  }
+                  value={form.password}
+                  onChange={set("password")}
+                  disabled={loading}
+                  style={{ flex: 1, minWidth: 0 }}
+                />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setShowPassword((v) => !v)}
+                  disabled={loading}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  {showPassword ? (isArabic ? "إخفاء" : "Hide") : isArabic ? "إظهار" : "Show"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => {
+                    setForm((f) => ({ ...f, password: generatePassword() }));
+                    setShowPassword(true);
+                  }}
+                  disabled={loading}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  {isArabic ? "توليد" : "Generate"}
+                </button>
+              </div>
+              <p className="hint">
+                {isEdit
+                  ? isArabic
+                    ? "اتركه فارغاً للحفاظ على كلمة المرور الحالية. "
+                    : "Leave blank to keep the existing password. "
+                  : ""}
+                {isArabic
+                  ? `${MIN_PASSWORD_LENGTH} أحرف على الأقل، حروف وأرقام، ومب نفس الرقم الوظيفي.`
+                  : `At least ${MIN_PASSWORD_LENGTH} characters, letters and numbers, not the company ID.`}
+              </p>
             </div>
 
             <div className="form-group">
@@ -373,7 +425,8 @@ function DeleteModal({ user, onClose, onDeleted }) {
     }
     setLoading(true);
     try {
-      await supabase.from("users").delete().eq("id", user.id);
+      const { error: delErr } = await supabase.from("users").delete().eq("id", user.id);
+      if (delErr) throw delErr;
       onDeleted(user.id);
     } catch (err) {
       setError(
@@ -489,7 +542,7 @@ export default function Users() {
   const fetchUsers = useCallback(async (q = "") => {
     setLoading(true);
     try {
-      let query = supabase.from("users").select("*").order("name");
+      let query = supabase.from("users").select(USER_COLUMNS).order("name");
       // Strip characters that break PostgREST's or() filter syntax
       const term = (q || "").replace(/[,()%*\\"]/g, " ").trim();
       if (term) {

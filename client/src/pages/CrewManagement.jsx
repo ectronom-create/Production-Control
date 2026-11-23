@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
+import { USER_COLUMNS, generatePassword } from "../utils/userSecurity";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import {
@@ -589,7 +590,6 @@ function OperatorModal({
       const payload = {
         name: name.trim(),
         company_id: companyId.trim(),
-        password: companyId.trim() || "1234",
         access: "operator",
         team_name: teamData,
       };
@@ -600,16 +600,18 @@ function OperatorModal({
           .from("users")
           .update(payload)
           .eq("id", initial.id)
-          .select();
+          .select(USER_COLUMNS);
         if (err) throw err;
         result = data?.[0] || { ...initial, ...payload };
       } else {
+        // Operators can't log in; store an unguessable password, never the company ID.
+        payload.password = generatePassword(16);
         const { data, error: err } = await supabase
           .from("users")
           .insert([payload])
-          .select();
+          .select(USER_COLUMNS);
         if (err) throw err;
-        result = data?.[0] || { ...payload, id: Date.now() };
+        result = data?.[0] || { ...payload, password: undefined, id: Date.now() };
       }
 
       onSaved(result, isEdit);
@@ -742,7 +744,8 @@ function DeleteOperatorModal({ operator, onClose, onDeleted }) {
     }
     setLoading(true);
     try {
-      await supabase.from("users").delete().eq("id", operator.id);
+      const { error: delErr } = await supabase.from("users").delete().eq("id", operator.id);
+      if (delErr) throw delErr;
       onDeleted(operator.id);
     } catch (e) {
       alert(e?.message || "Error deleting operator");
@@ -846,7 +849,7 @@ export default function CrewManagement() {
     try {
       const { data: allUsers, error } = await supabase
         .from("users")
-        .select("*")
+        .select(USER_COLUMNS)
         .order("name");
       if (error) throw error;
 
@@ -1083,7 +1086,9 @@ export default function CrewManagement() {
         .from("users")
         .update({ team_name: updatedMeta })
         .eq("id", operatorId)
-        .catch(console.warn);
+        .then(({ error }) => {
+          if (error) console.warn("Station update failed:", error);
+        });
     }
   }
 
@@ -1117,7 +1122,9 @@ export default function CrewManagement() {
         .from("users")
         .update({ team_name: updatedMeta })
         .eq("id", operatorId)
-        .catch(console.warn);
+        .then(({ error }) => {
+          if (error) console.warn("Station update failed:", error);
+        });
     }
   }
 
@@ -1150,7 +1157,9 @@ export default function CrewManagement() {
           .eq("id", op.id);
       });
 
-      await Promise.all(updatePromises);
+      const updateResults = await Promise.all(updatePromises);
+      const failedUpdate = updateResults.find((r) => r?.error);
+      if (failedUpdate) throw failedUpdate.error;
 
       // 3. Save Shift History snapshot to pre_production_checklists in Supabase
       const historyPayload = {
@@ -1247,7 +1256,9 @@ export default function CrewManagement() {
           .update({ team_name: updatedMeta })
           .eq("id", op.id);
       });
-      await Promise.all(updatePromises);
+      const updateResults = await Promise.all(updatePromises);
+      const failedUpdate = updateResults.find((r) => r?.error);
+      if (failedUpdate) throw failedUpdate.error;
       fetchData();
       showToast(isArabic ? "تم تفريغ جميع المحطات." : "All stations cleared.");
     }

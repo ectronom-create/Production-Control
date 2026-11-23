@@ -236,9 +236,10 @@ GRANT ALL ON TABLE public.batch_meter_records TO anon, authenticated, service_ro
 GRANT ALL ON TABLE public.batch_fw_targets TO anon, authenticated, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO anon, authenticated, service_role;
 
--- 8. INITIAL DEFAULT ADMIN USER (إذا لم يكن موجوداً)
-INSERT INTO public.users (name, password, company_id, email, phone, access, team_name)
-VALUES ('Admin', 'Admin@1234', 'ECTRON-001', 'admin@ectron.com', '', 'admin', 'Management')
-ON CONFLICT (name) DO NOTHING;
+-- 8. INITIAL ADMIN USER
+-- No default admin account is created here (a known default password is a
+-- security risk). Create the first admin from the Supabase Table Editor with a
+-- strong password, then run security/01_login_function.sql and
+-- security/02_lock_passwords.sql.
 
 

@@ -4,18 +4,49 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+// Listen on this computer only — not reachable from other devices on the network.
+const HOST = process.env.HOST || "127.0.0.1";
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ||
+  "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",")
+  .map((o) => o.trim());
 
-app.use(cors());
-app.use(express.json());
+const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+const SHIFTS = new Set(["Morning", "Evening"]);
+const MAX_TARGETS = 100000;
+
+app.disable("x-powered-by");
+app.use(
+  cors({
+    origin: (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.includes(origin)),
+  }),
+);
+app.use(express.json({ limit: "5mb" }));
+
+// Read LOG.csv only when it changed (the files are large and read per request).
+const logCache = new Map(); // path -> { mtimeMs, lines }
+function readLogLines(file) {
+  const { mtimeMs } = fs.statSync(file);
+  const cached = logCache.get(file);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.lines;
+  const lines = fs.readFileSync(file, "utf8").split("\n");
+  logCache.set(file, { mtimeMs, lines });
+  return lines;
+}
+
+function sendServerError(res, err) {
+  console.error(err);
+  return res.status(500).json({ error: "Internal server error" });
+}
 
 // Endpoint to sync FW count directly from master LOG.csv files on Google Drive
 app.get("/api/sync-fw", (req, res) => {
   try {
-    const targetDate = req.query.date; // YYYY-MM-DD
-    const targetShift = req.query.shift; // Morning or Evening
+    const targetDate = String(req.query.date || ""); // YYYY-MM-DD
+    const targetShift = String(req.query.shift || ""); // Morning or Evening
 
-    if (!targetDate || !targetShift) {
-      return res.status(400).json({ error: "Missing date or shift parameter" });
+    if (!DATE_RE.test(targetDate) || !SHIFTS.has(targetShift)) {
+      return res.status(400).json({ error: "Invalid date or shift" });
     }
 
     const [yStr, mStr, dStr] = targetDate.split("-");
@@ -49,7 +80,7 @@ app.get("/api/sync-fw", (req, res) => {
       fetch(cloudUrl)
         .then((cr) => cr.json())
         .then((data) => res.json(data))
-        .catch((e) => res.status(500).json({ error: e.message }));
+        .catch((e) => sendServerError(res, e));
       return;
     }
 
@@ -58,8 +89,7 @@ app.get("/api/sync-fw", (req, res) => {
 
     files.forEach((f) => {
       if (!fs.existsSync(f)) return;
-      const content = fs.readFileSync(f, "utf8");
-      const lines = content.split("\n");
+      const lines = readLogLines(f);
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
@@ -98,7 +128,7 @@ app.get("/api/sync-fw", (req, res) => {
       pcStats,
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return sendServerError(res, err);
   }
 });
 
@@ -106,8 +136,11 @@ app.get("/api/sync-fw", (req, res) => {
 app.post("/api/batch-fw-reconciliation", (req, res) => {
   try {
     // targets: Array of { batch_name, serial_number, sn_suffix }
-    const targets = req.body.targets || [];
-    if (!Array.isArray(targets) || targets.length === 0) {
+    const targets = req.body?.targets || [];
+    if (!Array.isArray(targets) || targets.length > MAX_TARGETS) {
+      return res.status(400).json({ error: "Invalid targets" });
+    }
+    if (targets.length === 0) {
       return res.json({
         success: true,
         batches: {},
@@ -127,8 +160,7 @@ app.post("/api/batch-fw-reconciliation", (req, res) => {
 
     files.forEach((f) => {
       if (!fs.existsSync(f)) return;
-      const content = fs.readFileSync(f, "utf8");
-      const lines = content.split("\n");
+      const lines = readLogLines(f);
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
@@ -220,14 +252,14 @@ app.post("/api/batch-fw-reconciliation", (req, res) => {
           : 0,
     });
   } catch (err) {
-    return res.status(500).json({ error: err.message });
+    return sendServerError(res, err);
   }
 });
 
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
+  res.json({ status: "ok" });
 });
 
-app.listen(PORT, () => {
-  console.log(`ECTRON API Server running on port ${PORT}`);
+app.listen(PORT, HOST, () => {
+  console.log(`ECTRON API Server running on http://${HOST}:${PORT}`);
 });

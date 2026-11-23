@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import * as XLSX from "xlsx";
+import { SAFE_READ_OPTIONS, spreadsheetFileProblem } from "../utils/safeExcel";
 import {
   Upload,
   FileSpreadsheet,
@@ -84,7 +85,7 @@ async function fetchFwSyncCount(date, shift) {
 
 // ===================== EXCEL PARSER =====================
 function parseFPYExcel(arrayBuffer) {
-  const wb = XLSX.read(arrayBuffer, { type: "array" });
+  const wb = XLSX.read(arrayBuffer, SAFE_READ_OPTIONS);
   const sheetName =
     wb.SheetNames.find((n) => n.toLowerCase().includes("product")) ||
     wb.SheetNames[0];
@@ -548,6 +549,11 @@ export default function Production() {
   // Handle File Upload & Parse
   const handleFileUpload = (file) => {
     if (!file) return;
+    const fileProblem = spreadsheetFileProblem(file, isArabic);
+    if (fileProblem) {
+      setUploadError(fileProblem);
+      return;
+    }
     setIsParsing(true);
     setUploadError("");
     setSaveSuccessMsg("");

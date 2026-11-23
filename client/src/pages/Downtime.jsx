@@ -933,7 +933,9 @@ export default function Downtime() {
   useEffect(() => {
     supabase
       .from("users")
-      .select("*")
+      .select("id,name,access")
+      .in("access", ["admin", "supervisor"])
+      .order("name")
       .then((res) => setUsers(res.data || []))
       .catch(() => {});
   }, []);

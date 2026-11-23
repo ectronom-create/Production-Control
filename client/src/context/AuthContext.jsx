@@ -129,6 +129,10 @@ export function AuthProvider({ children }) {
     return { user: userData, token: sessionToken };
   }, []);
 
+  // Login is checked inside the database (RPC `app_login`): the browser sends
+  // the password and gets back the user row WITHOUT any password field.
+  // There is no offline / emergency login — if the database can't be reached,
+  // nobody can sign in (a fallback login can be forced by blocking the network).
   const login = useCallback(
     async (companyIdOrName, password) => {
       const trimmed = (companyIdOrName || "").trim();
@@ -137,73 +141,80 @@ export function AuthProvider({ children }) {
         throw new Error("Company ID or password is incorrect.");
       }
 
-      // 1. Look the user up in Supabase (by company ID first, then by name)
-      let dbReachable = false;
-      let found = null;
-      try {
-        const byId = await supabase
-          .from("users")
-          .select("*")
-          .eq("company_id", trimmed)
-          .limit(1);
-        if (byId.error) throw byId.error;
-        found = byId.data?.[0] || null;
-        if (!found) {
-          const byName = await supabase
-            .from("users")
-            .select("*")
-            .eq("name", trimmed)
-            .limit(1);
-          if (byName.error) throw byName.error;
-          found = byName.data?.[0] || null;
+      const { data, error } = await supabase.rpc("app_login", {
+        p_login: trimmed,
+        p_password: password,
+      });
+      if (error) {
+        if (String(error.message || "").includes("too_many_attempts")) {
+          throw new Error(
+            "Too many wrong attempts for this account. Try again in 15 minutes.",
+          );
         }
-        dbReachable = true;
-      } catch (e) {
-        console.warn("Supabase auth check:", e);
-      }
-
-      if (found && found.password && found.password === password) {
-        const access = (found.access || "").toLowerCase();
-        if (!ALLOWED_ROLES.includes(access)) {
-          throw new Error("This account does not have access to the system.");
-        }
-        return startSession(
-          {
-            id: found.id,
-            name: found.name,
-            access,
-            team_name: found.team_name || "",
-            company_id: found.company_id || "",
-            email: found.email || "",
-          },
-          `supabase_${found.id}_${Date.now()}`,
+        console.warn("Login RPC failed:", error);
+        throw new Error(
+          "Cannot reach the server right now. Check the connection and try again.",
         );
       }
 
-      // 2. Emergency admin login — only when the database cannot be reached
-      if (
-        !dbReachable &&
-        (trimmed.toUpperCase() === "ECTRON-001" ||
-          trimmed.toLowerCase() === "admin") &&
-        password === "Admin@1234"
-      ) {
-        return startSession(
-          {
-            id: 1,
-            name: "Admin",
-            access: "admin",
-            team_name: "Management",
-            company_id: "ECTRON-001",
-            email: "admin@ectron.com",
-          },
-          `admin_session_${Date.now()}`,
-        );
+      const found = Array.isArray(data) ? data[0] : data;
+      if (!found) {
+        throw new Error("Company ID or password is incorrect.");
+      }
+      const access = (found.access || "").toLowerCase();
+      if (!ALLOWED_ROLES.includes(access)) {
+        throw new Error("This account does not have access to the system.");
       }
 
-      throw new Error("Company ID or password is incorrect.");
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      const sessionToken = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+
+      return startSession(
+        {
+          id: found.id,
+          name: found.name,
+          access,
+          team_name: found.team_name || "",
+          company_id: found.company_id || "",
+          email: found.email || "",
+        },
+        sessionToken,
+      );
     },
     [startSession],
   );
+
+  // Re-check the signed-in account against the database when the app opens:
+  // a deleted user, or a changed role, takes effect immediately instead of
+  // living on in localStorage.
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let cancelled = false;
+    supabase
+      .from("users")
+      .select("id,name,access,team_name,company_id,email")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled || error) return; // offline: keep the session for now
+        const access = (data?.access || "").toLowerCase();
+        if (!data || !ALLOWED_ROLES.includes(access) || data.name !== user.name) {
+          logout(true);
+          return;
+        }
+        if (access !== user.access || data.team_name !== user.team_name) {
+          const next = { ...user, access, team_name: data.team_name || "" };
+          localStorage.setItem("ectron_user", JSON.stringify(next));
+          setUser(next);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // run once per signed-in account
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   return (
     <AuthContext.Provider

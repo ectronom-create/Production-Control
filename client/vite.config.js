@@ -13,10 +13,13 @@ function fwSyncPlugin() {
           const targetDate = url.searchParams.get('date'); // YYYY-MM-DD
           const targetShift = url.searchParams.get('shift'); // Morning or Evening
 
-          if (!targetDate || !targetShift) {
+          if (
+            !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(targetDate || '') ||
+            !['Morning', 'Evening'].includes(targetShift)
+          ) {
             res.statusCode = 400;
             res.setHeader('Content-Type', 'application/json');
-            return res.end(JSON.stringify({ error: 'Missing date or shift parameter' }));
+            return res.end(JSON.stringify({ error: 'Invalid date or shift' }));
           }
 
           const [yStr, mStr, dStr] = targetDate.split('-');
@@ -49,7 +52,7 @@ function fwSyncPlugin() {
               .catch(e => {
                 res.statusCode = 500;
                 res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ error: e.message }));
+                console.error(e); res.end(JSON.stringify({ error: 'Internal server error' }));
               });
             return;
           }
@@ -103,7 +106,7 @@ function fwSyncPlugin() {
         } catch (err) {
           res.statusCode = 500;
           res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ error: err.message }));
+          console.error(err); res.end(JSON.stringify({ error: 'Internal server error' }));
         }
       });
 
@@ -211,7 +214,7 @@ function fwSyncPlugin() {
           } catch (err) {
             res.statusCode = 500;
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify({ error: err.message }));
+            console.error(err); res.end(JSON.stringify({ error: 'Internal server error' }));
           }
         });
       });
