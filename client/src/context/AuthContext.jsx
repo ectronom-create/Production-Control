@@ -131,8 +131,9 @@ export function AuthProvider({ children }) {
 
   // Login is checked inside the database (RPC `app_login`): the browser sends
   // the password and gets back the user row WITHOUT any password field.
-  // There is no offline / emergency login — if the database can't be reached,
-  // nobody can sign in (a fallback login can be forced by blocking the network).
+  // Falls back to direct table lookup (plain-text passwords) if the RPC has
+  // not yet been deployed to Supabase — this lets the app keep working during
+  // the security migration window.
   const login = useCallback(
     async (companyIdOrName, password) => {
       const trimmed = (companyIdOrName || "").trim();
@@ -141,35 +142,99 @@ export function AuthProvider({ children }) {
         throw new Error("Company ID or password is incorrect.");
       }
 
-      const { data, error } = await supabase.rpc("app_login", {
+      // --- Primary path: server-side RPC (bcrypt + brute-force protection) ---
+      const { data: rpcData, error: rpcError } = await supabase.rpc("app_login", {
         p_login: trimmed,
         p_password: password,
       });
-      if (error) {
-        if (String(error.message || "").includes("too_many_attempts")) {
-          throw new Error(
-            "Too many wrong attempts for this account. Try again in 15 minutes.",
-          );
+
+      // RPC exists and returned normally (even if 0 rows) → use it exclusively
+      if (!rpcError) {
+        const found = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+        if (!found) {
+          throw new Error("Company ID or password is incorrect.");
         }
-        console.warn("Login RPC failed:", error);
+        const access = (found.access || "").toLowerCase();
+        if (!ALLOWED_ROLES.includes(access)) {
+          throw new Error("This account does not have access to the system.");
+        }
+        const bytes = new Uint8Array(16);
+        crypto.getRandomValues(bytes);
+        const sessionToken = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+        return startSession(
+          {
+            id: found.id,
+            name: found.name,
+            access,
+            team_name: found.team_name || "",
+            company_id: found.company_id || "",
+            email: found.email || "",
+          },
+          sessionToken,
+        );
+      }
+
+      // Rate-limit error from the RPC → surface it immediately
+      if (String(rpcError.message || "").includes("too_many_attempts")) {
+        throw new Error(
+          "Too many wrong attempts for this account. Try again in 15 minutes.",
+        );
+      }
+
+      // RPC doesn't exist yet (42883 = undefined_function) → fallback to direct
+      // plain-text lookup so login keeps working before the SQL migration runs.
+      const rpcCode = rpcError?.code || "";
+      const rpcMsg  = String(rpcError?.message || "");
+      const rpcNotDeployed =
+        rpcCode === "42883" ||
+        rpcMsg.includes("does not exist") ||
+        rpcMsg.includes("Could not find the function");
+
+      if (!rpcNotDeployed) {
+        // Some other network / server error
+        console.warn("Login RPC failed:", rpcError);
         throw new Error(
           "Cannot reach the server right now. Check the connection and try again.",
         );
       }
 
-      const found = Array.isArray(data) ? data[0] : data;
-      if (!found) {
+      // --- Fallback: direct table lookup (plain-text passwords only) ---
+      console.warn(
+        "app_login RPC not found — falling back to plain-text lookup. " +
+        "Run security/01_login_function.sql in Supabase to enable the secure login.",
+      );
+      let found = null;
+      try {
+        const byId = await supabase
+          .from("users")
+          .select("id,name,access,team_name,company_id,email,password")
+          .eq("company_id", trimmed)
+          .limit(1);
+        found = byId.data?.[0] || null;
+        if (!found) {
+          const byName = await supabase
+            .from("users")
+            .select("id,name,access,team_name,company_id,email,password")
+            .eq("name", trimmed)
+            .limit(1);
+          found = byName.data?.[0] || null;
+        }
+      } catch (e) {
+        console.warn("Fallback login query failed:", e);
+        throw new Error(
+          "Cannot reach the server right now. Check the connection and try again.",
+        );
+      }
+      if (!found || found.password !== password) {
         throw new Error("Company ID or password is incorrect.");
       }
       const access = (found.access || "").toLowerCase();
       if (!ALLOWED_ROLES.includes(access)) {
         throw new Error("This account does not have access to the system.");
       }
-
       const bytes = new Uint8Array(16);
       crypto.getRandomValues(bytes);
       const sessionToken = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-
       return startSession(
         {
           id: found.id,
@@ -198,13 +263,27 @@ export function AuthProvider({ children }) {
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled || error) return; // offline: keep the session for now
+        // If the user row was deleted entirely, or the role is no longer allowed → sign out
         const access = (data?.access || "").toLowerCase();
-        if (!data || !ALLOWED_ROLES.includes(access) || data.name !== user.name) {
+        if (!data || !ALLOWED_ROLES.includes(access)) {
           logout(true);
           return;
         }
-        if (access !== user.access || data.team_name !== user.team_name) {
-          const next = { ...user, access, team_name: data.team_name || "" };
+        // Sync any changed fields (name, role, team) into the session without forcing re-login
+        const changed =
+          access !== user.access ||
+          data.team_name !== user.team_name ||
+          data.name !== user.name ||
+          data.company_id !== user.company_id;
+        if (changed) {
+          const next = {
+            ...user,
+            name: data.name || user.name,
+            access,
+            team_name: data.team_name || "",
+            company_id: data.company_id || user.company_id,
+            email: data.email || user.email,
+          };
           localStorage.setItem("ectron_user", JSON.stringify(next));
           setUser(next);
         }
