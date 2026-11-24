@@ -185,9 +185,14 @@ export default function DefectMeters() {
 
             <button
               type="button"
-              onClick={() =>
-                exportDefectsToExcel(data.filteredDefectiveMeters, isArabic)
-              }
+              onClick={() => {
+                try {
+                  exportDefectsToExcel(data.filteredDefectiveMeters, isArabic);
+                } catch (err) {
+                  console.error("Excel export failed:", err);
+                  alert(isArabic ? "فشل التنزيل. حاول مرة أخرى." : "Download failed. Please try again.");
+                }
+              }}
               disabled={data.filteredDefectiveMeters.length === 0}
               className="btn-outline"
               title={

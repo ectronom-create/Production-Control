@@ -73,9 +73,10 @@ export function exportDefectsToExcel(meters, isArabic) {
 
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.json_to_sheet(rows.length ? rows : [{ [L("لا توجد بيانات", "No data")]: "" }]);
-  ws["!cols"] = Object.keys(rows[0] || { a: 1 }).map((k) => ({
-    wch: Math.max(12, Math.min(40, k.length + 4, ...rows.map((r) => String(r[k] ?? "").length + 2))),
-  }));
+  ws["!cols"] = Object.keys(rows[0] || { a: 1 }).map((k) => {
+    const maxLen = rows.reduce((max, r) => Math.max(max, String(r[k] ?? "").length + 2), k.length + 4);
+    return { wch: Math.max(12, Math.min(40, maxLen)) };
+  });
   XLSX.utils.book_append_sheet(wb, ws, L("العدادات المعطلة", "Defective Meters"));
 
   if (historyRows.length) {
@@ -85,5 +86,25 @@ export function exportDefectsToExcel(meters, isArabic) {
   }
 
   if (isArabic) wb.Workbook = { Views: [{ RTL: true }] };
-  XLSX.writeFile(wb, `Defective_Meters_${getTodayString()}.xlsx`);
+
+  const filename = `Defective_Meters_${getTodayString()}.xlsx`;
+
+  // Use writeFile which handles the browser download internally.
+  // If that fails (e.g. strict CSP on some browsers), fall back to manual blob download.
+  try {
+    XLSX.writeFile(wb, filename);
+  } catch (_e) {
+    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 1000);
+  }
 }
