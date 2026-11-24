@@ -96,7 +96,8 @@ export function exportDefectsToExcel(meters = [], isArabic = false) {
   if (historyRows.length) {
     const wsH = XLSX.utils.json_to_sheet(historyRows);
     wsH["!cols"] = Object.keys(historyRows[0] || {}).map(() => ({ wch: 20 }));
-    XLSX.utils.book_append_sheet(wb, wsH, L("سجل الحركات", "History"));
+    // "History" is a reserved sheet name in Excel — SheetJS 0.20+ rejects it.
+    XLSX.utils.book_append_sheet(wb, wsH, L("سجل الحركات", "Movement Log"));
   }
 
   const filename = `Defective_Meters_${getTodayString()}.xlsx`;

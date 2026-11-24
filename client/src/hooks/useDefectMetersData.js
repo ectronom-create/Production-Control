@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../supabaseClient";
+import { fetchAllRows } from "../utils/fetchAllRows";
 import {
   DEFAULT_ACTUAL_DEFECTS,
   STORAGE_ACTUAL_KEY,
@@ -10,6 +11,16 @@ import {
   getDaysAgoDateStr,
   getMeterDateStr,
 } from "../utils/defectDateUtils";
+
+// Offline copy of the list. Best-effort only: a full or blocked storage must
+// never break a save or replace fresh data.
+function cacheDefectsLocally(list) {
+  try {
+    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.warn("Could not cache defective meters locally:", err);
+  }
+}
 
 export function useDefectMetersData(user, isArabic) {
   const isAdmin = user?.access === "admin";
@@ -109,29 +120,35 @@ export function useDefectMetersData(user, isArabic) {
   // ── Load Defective Meters ─────────────────────────────────────────────────
   const fetchDefectiveMeters = useCallback(async () => {
     setLoadingDefects(true);
+
+    const readLocalCache = () => {
+      try {
+        const local = JSON.parse(localStorage.getItem(LOCAL_DEFECTIVE_METERS_KEY) || "[]");
+        return Array.isArray(local) ? local : [];
+      } catch {
+        return [];
+      }
+    };
+
     try {
-      const { data, error } = await supabase
-        .from("defective_meters")
-        .select("*")
-        .order("id", { ascending: false });
+      // Load ALL rows — a plain select stops at Supabase's 1,000-row limit.
+      const { data, error } = await fetchAllRows(() =>
+        supabase.from("defective_meters").select("*").order("id", { ascending: false }),
+      );
 
       if (error) {
-        const local = JSON.parse(
-          localStorage.getItem(LOCAL_DEFECTIVE_METERS_KEY) || "[]",
-        );
-        setDefectiveMeters(local);
-      } else {
-        setDefectiveMeters(data || []);
-        localStorage.setItem(
-          LOCAL_DEFECTIVE_METERS_KEY,
-          JSON.stringify(data || []),
-        );
+        console.warn("Defective meters load failed, using cached copy:", error);
+        setDefectiveMeters(readLocalCache());
+        return;
       }
-    } catch {
-      const local = JSON.parse(
-        localStorage.getItem(LOCAL_DEFECTIVE_METERS_KEY) || "[]",
-      );
-      setDefectiveMeters(local);
+
+      setDefectiveMeters(data);
+      // Offline copy is best-effort: a full / blocked storage must never
+      // replace the fresh data we just loaded.
+      cacheDefectsLocally(data);
+    } catch (e) {
+      console.warn("Defective meters load error, using cached copy:", e);
+      setDefectiveMeters(readLocalCache());
     } finally {
       setLoadingDefects(false);
     }
@@ -355,10 +372,7 @@ export function useDefectMetersData(user, isArabic) {
         : [finalLocalRecord, ...defectiveMeters];
 
       setDefectiveMeters(nextList);
-      localStorage.setItem(
-        LOCAL_DEFECTIVE_METERS_KEY,
-        JSON.stringify(nextList),
-      );
+      cacheDefectsLocally(nextList);
     } finally {
       setIsSubmittingDefect(false);
       setScanSerial("");
@@ -442,10 +456,7 @@ export function useDefectMetersData(user, isArabic) {
         m.id === repairModalMeter.id ? updated : m,
       );
       setDefectiveMeters(nextList);
-      localStorage.setItem(
-        LOCAL_DEFECTIVE_METERS_KEY,
-        JSON.stringify(nextList),
-      );
+      cacheDefectsLocally(nextList);
     } finally {
       setIsSubmittingRepair(false);
       setRepairModalMeter(null);
@@ -496,7 +507,7 @@ export function useDefectMetersData(user, isArabic) {
       m.id === meter.id ? updated : m,
     );
     setDefectiveMeters(nextList);
-    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
+    cacheDefectsLocally(nextList);
   };
 
   // ── Delete Defect Record ──────────────────────────────────────────────────
@@ -513,7 +524,7 @@ export function useDefectMetersData(user, isArabic) {
 
     const nextList = defectiveMeters.filter((m) => m.id !== id);
     setDefectiveMeters(nextList);
-    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(nextList));
+    cacheDefectsLocally(nextList);
   };
 
   // ── Admin Edit Modal Functions ────────────────────────────────────────────
@@ -586,10 +597,7 @@ export function useDefectMetersData(user, isArabic) {
         m.id === adminEditModalMeter.id ? updatedRecord : m,
       );
       setDefectiveMeters(nextList);
-      localStorage.setItem(
-        LOCAL_DEFECTIVE_METERS_KEY,
-        JSON.stringify(nextList),
-      );
+      cacheDefectsLocally(nextList);
     } finally {
       setIsSavingAdminEdit(false);
       setAdminEditModalMeter(null);

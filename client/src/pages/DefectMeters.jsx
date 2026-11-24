@@ -196,7 +196,7 @@ export default function DefectMeters() {
                   );
                 }
               }}
-              disabled={data.filteredDefectiveMeters.length === 0}
+              disabled={data.loadingDefects || data.filteredDefectiveMeters.length === 0}
               className="btn-outline"
               title={
                 isArabic
