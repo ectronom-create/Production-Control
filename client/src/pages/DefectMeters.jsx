@@ -190,7 +190,10 @@ export default function DefectMeters() {
                   exportDefectsToExcel(data.filteredDefectiveMeters, isArabic);
                 } catch (err) {
                   console.error("Excel export failed:", err);
-                  alert(isArabic ? "فشل التنزيل. حاول مرة أخرى." : "Download failed. Please try again.");
+                  alert(
+                    (isArabic ? "فشل التنزيل: " : "Download failed: ") +
+                      (err?.message || err || "Unknown error"),
+                  );
                 }
               }}
               disabled={data.filteredDefectiveMeters.length === 0}

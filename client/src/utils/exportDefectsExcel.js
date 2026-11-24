@@ -25,14 +25,15 @@ function fmtDateTime(v) {
 
 function stageName(id, isArabic) {
   const s = findStage(id);
-  return s ? (isArabic ? s.arabic : s.name) : id || "";
+  return s ? (isArabic ? s.arabic : s.name) : String(id || "");
 }
 
 // Exports the meters currently shown (after filters) to an .xlsx file
-export function exportDefectsToExcel(meters, isArabic) {
+export function exportDefectsToExcel(meters = [], isArabic = false) {
   const L = (ar, en) => (isArabic ? ar : en);
+  const safeMeters = Array.isArray(meters) ? meters.filter(Boolean) : [];
 
-  const rows = meters.map((m) => ({
+  const rows = safeMeters.map((m) => ({
     [L("الرقم التسلسلي", "Serial Number")]: m.serial_number || "",
     [L("المحطة", "Station")]: stageName(m.stage, isArabic),
     [L("كود العطل", "Defect Code")]: m.defect_code || "",
@@ -54,21 +55,34 @@ export function exportDefectsToExcel(meters, isArabic) {
 
   // Second sheet: every movement in each meter's history
   const historyRows = [];
-  meters.forEach((m) => {
-    (Array.isArray(m.history) ? m.history : []).forEach((h) => {
-      historyRows.push({
-        [L("الرقم التسلسلي", "Serial Number")]: m.serial_number || "",
-        [L("الدورة", "Cycle")]: h.cycle ?? "",
-        [L("الحدث", "Event")]: EVENT_LABELS[h.type] ? (isArabic ? EVENT_LABELS[h.type].ar : EVENT_LABELS[h.type].en) : h.type || "",
-        [L("الوقت", "Time")]: fmtDateTime(h.logged_at || h.returned_at || h.scrapped_at || h.at),
-        [L("المحطة", "Station")]: h.stage ? stageName(h.stage, isArabic) : "",
-        [L("كود العطل", "Defect Code")]: h.defect_code || "",
-        [L("بواسطة", "By")]: h.logged_by || h.technician || h.by || "",
-        [L("الإجراء", "Action")]: h.action_taken || "",
-        [L("محطة العودة", "Returned To")]: h.destination ? stageName(h.destination, isArabic) : "",
-        [L("ملاحظات", "Notes")]: h.notes || h.reason || "",
+  safeMeters.forEach((m) => {
+    let hist = m.history;
+    if (typeof hist === "string") {
+      try {
+        hist = JSON.parse(hist);
+      } catch (_) {
+        hist = [];
+      }
+    }
+    if (Array.isArray(hist)) {
+      hist.forEach((h) => {
+        if (!h || typeof h !== "object") return;
+        historyRows.push({
+          [L("الرقم التسلسلي", "Serial Number")]: m.serial_number || "",
+          [L("الدورة", "Cycle")]: h.cycle ?? "",
+          [L("الحدث", "Event")]: EVENT_LABELS[h.type]
+            ? (isArabic ? EVENT_LABELS[h.type].ar : EVENT_LABELS[h.type].en)
+            : h.type || "",
+          [L("الوقت", "Time")]: fmtDateTime(h.logged_at || h.returned_at || h.scrapped_at || h.at),
+          [L("المحطة", "Station")]: h.stage ? stageName(h.stage, isArabic) : "",
+          [L("كود العطل", "Defect Code")]: h.defect_code || "",
+          [L("بواسطة", "By")]: h.logged_by || h.technician || h.by || "",
+          [L("الإجراء", "Action")]: h.action_taken || "",
+          [L("محطة العودة", "Returned To")]: h.destination ? stageName(h.destination, isArabic) : "",
+          [L("ملاحظات", "Notes")]: h.notes || h.reason || "",
+        });
       });
-    });
+    }
   });
 
   const wb = XLSX.utils.book_new();
@@ -81,30 +95,47 @@ export function exportDefectsToExcel(meters, isArabic) {
 
   if (historyRows.length) {
     const wsH = XLSX.utils.json_to_sheet(historyRows);
-    wsH["!cols"] = Object.keys(historyRows[0]).map(() => ({ wch: 20 }));
+    wsH["!cols"] = Object.keys(historyRows[0] || {}).map(() => ({ wch: 20 }));
     XLSX.utils.book_append_sheet(wb, wsH, L("سجل الحركات", "History"));
   }
 
-  if (isArabic) wb.Workbook = { Views: [{ RTL: true }] };
-
   const filename = `Defective_Meters_${getTodayString()}.xlsx`;
 
-  // Use writeFile which handles the browser download internally.
-  // If that fails (e.g. strict CSP on some browsers), fall back to manual blob download.
+  // Universal browser download:
   try {
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
+    });
+
+    // 1. IE / legacy Edge
+    if (typeof window !== "undefined" && window.navigator && window.navigator.msSaveOrOpenBlob) {
+      window.navigator.msSaveOrOpenBlob(blob, filename);
+      return;
+    }
+
+    // 2. Standard Blob URL download
+    if (typeof window !== "undefined" && window.URL && window.URL.createObjectURL) {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.style.display = "none";
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+          window.URL.revokeObjectURL(url);
+        } catch (_) {}
+      }, 2000);
+      return;
+    }
+
+    // 3. SheetJS native fallback
     XLSX.writeFile(wb, filename);
-  } catch (_e) {
-    const buf = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 1000);
+  } catch (err) {
+    console.warn("Blob export failed, trying XLSX.writeFile:", err);
+    XLSX.writeFile(wb, filename);
   }
 }

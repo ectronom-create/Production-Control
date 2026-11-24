@@ -91,16 +91,18 @@ export const STAGE_IDS = STAGES.map((s) => s.id);
 // Seamlessly resolve both 'Multin test' and 'Multi-Test'
 export function findStage(stageId) {
   if (!stageId) return STAGES[0];
+  const str = String(stageId).trim().toLowerCase();
   const matched = STAGES.find(
     (st) =>
-      st.id.toLowerCase() === stageId.toLowerCase() ||
-      (stageId.toLowerCase().includes("multi") && st.id === "Multin test"),
+      st.id.toLowerCase() === str ||
+      (str.includes("multi") && st.id === "Multin test") ||
+      String(st.num) === str,
   );
   return (
     matched || {
-      id: stageId,
-      name: stageId,
-      arabic: stageId,
+      id: String(stageId),
+      name: String(stageId),
+      arabic: String(stageId),
       color: "#334155",
       bg: "#f1f5f9",
       border: "#cbd5e1",
