@@ -8,6 +8,7 @@ import {
   MIN_PASSWORD_LENGTH,
 } from "../utils/userSecurity";
 import { useAuth } from "../context/AuthContext";
+import { createAccount, setAccountPassword, deleteAccount } from "../utils/adminUsers";
 import { useLanguage } from "../context/LanguageContext";
 
 // ─── Access options ───────────────────────────────────────────────────────────
@@ -106,9 +107,9 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
       setError(isArabic ? "الاسم مطلوب." : "Name is required.");
       return;
     }
-    const canLogIn = form.access !== "operator";
+    // Everyone (operators too) signs in now, so a new account needs a password.
     const newPassword = (form.password || "").trim();
-    if (canLogIn && (!isEdit || newPassword)) {
+    if (!isEdit || newPassword) {
       if (!newPassword) {
         setError(isArabic ? "كلمة المرور مطلوبة." : "Password is required.");
         return;
@@ -134,9 +135,8 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
           station: operatorStation,
           status: "active",
         });
-        // Operators can't log in; give them an unguessable password anyway.
-        if (!isEdit && !payload.password) payload.password = generatePassword(16);
       }
+      delete payload.password;
 
       let savedUser;
       if (isEdit) {
@@ -146,18 +146,12 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
           .eq("id", initial.id)
           .select(USER_COLUMNS);
         if (err) throw err;
-        const rest = { ...payload };
-        delete rest.password;
-        savedUser = data?.[0] || { ...initial, ...rest };
+        if (newPassword) await setAccountPassword(initial.id, newPassword);
+        savedUser = data?.[0] || { ...initial, ...payload };
       } else {
-        const { data, error: err } = await supabase
-          .from("users")
-          .insert([payload])
-          .select(USER_COLUMNS);
-        if (err) throw err;
-        const rest = { ...payload };
-        delete rest.password;
-        savedUser = data?.[0] || { ...rest, id: Date.now() };
+        // Creates the users row and its login; the person sets their own
+        // password at first sign-in.
+        savedUser = await createAccount(payload, newPassword);
       }
       onSaved(savedUser, isEdit);
     } catch (err) {
@@ -266,8 +260,8 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
                     : "Leave blank to keep the existing password. "
                   : ""}
                 {isArabic
-                  ? `${MIN_PASSWORD_LENGTH} أحرف على الأقل، حروف وأرقام، ومب نفس الرقم الوظيفي.`
-                  : `At least ${MIN_PASSWORD_LENGTH} characters, letters and numbers, not the company ID.`}
+                  ? `${MIN_PASSWORD_LENGTH} أحرف على الأقل، حروف وأرقام، ومب نفس الرقم الوظيفي. هذي كلمة مرور مؤقتة: الموظف بيغيرها أول ما يدخل.`
+                  : `At least ${MIN_PASSWORD_LENGTH} characters, letters and numbers, not the company ID. This is temporary: the person changes it at first sign-in.`}
               </p>
             </div>
 
@@ -425,8 +419,7 @@ function DeleteModal({ user, onClose, onDeleted }) {
     }
     setLoading(true);
     try {
-      const { error: delErr } = await supabase.from("users").delete().eq("id", user.id);
-      if (delErr) throw delErr;
+      await deleteAccount(user.id);
       onDeleted(user.id);
     } catch (err) {
       setError(

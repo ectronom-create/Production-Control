@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import Layout from "./components/Layout";
 import Login from "./pages/Login";
+import ChangePasswordForm from "./components/ChangePasswordForm";
+import { homeFor } from "./utils/roles";
 
 // Pages load on demand so the first screen opens fast on phones
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -17,6 +19,7 @@ const PreProductionChecklist = lazy(() => import("./pages/PreProductionChecklist
 const CrewManagement = lazy(() => import("./pages/CrewManagement"));
 const Users = lazy(() => import("./pages/Users"));
 const EmployeeProfiles = lazy(() => import("./pages/EmployeeProfiles"));
+const MyProfile = lazy(() => import("./pages/MyProfile"));
 
 function PrivateRoute({ children }) {
   const { token, user } = useAuth();
@@ -25,32 +28,35 @@ function PrivateRoute({ children }) {
 
 function IndexRedirect() {
   const { user } = useAuth();
-  const role = (user?.access || "viewer").toLowerCase();
-  return (
-    <Navigate
-      to={role === "viewer" ? "/management-dashboard" : "/dashboard"}
-      replace
-    />
-  );
+  return <Navigate to={homeFor((user?.access || "viewer").toLowerCase())} replace />;
 }
 
 function RoleRoute({ allowedRoles, children }) {
   const { user } = useAuth();
   const role = (user?.access || "viewer").toLowerCase();
   if (!allowedRoles.includes(role)) {
-    return (
-      <Navigate
-        to={role === "viewer" ? "/management-dashboard" : "/dashboard"}
-        replace
-      />
-    );
+    return <Navigate to={homeFor(role)} replace />;
   }
   return children;
 }
 
 export default function App() {
-  const { token, user } = useAuth();
+  const { token, user, ready } = useAuth();
   const isLoggedIn = Boolean(token && user);
+
+  // Wait until the saved session is checked, so a refresh doesn't bounce to /login.
+  if (!ready) {
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>
+        <span className="spinner" />
+      </div>
+    );
+  }
+
+  // First login / password reset: a new password is required before anything else.
+  if (isLoggedIn && user.must_change_password) {
+    return <ChangePasswordForm forced />;
+  }
 
   return (
     <Routes>
@@ -163,6 +169,7 @@ export default function App() {
             </RoleRoute>
           }
         />
+        <Route path="my-profile" element={<MyProfile />} />
         <Route
           path="users"
           element={

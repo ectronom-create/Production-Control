@@ -1,50 +1,66 @@
-# Security SQL Migration Steps
+# أمان النظام — المرحلة 1 (Supabase Auth + RLS)
 
-Run these two scripts **in order** in the **Supabase SQL Editor** to fully secure login.
+بعد هذي الخطوات:
+- الدخول يصير عن طريق **Supabase Auth**، والجلسة موقّعة، فما حد يقدر يصير admin لو عدّل `localStorage`.
+- قاعدة البيانات (RLS) هي اللي تقرر وش يقدر يشوف ويعدّل كل دور:
 
----
+| الدور | يقرأ | يكتب |
+|---|---|---|
+| admin | كل شي | كل شي |
+| supervisor | بيانات الخط | الإنتاج، التوقفات، العيوب، الفحص، والمشغلين. ما يقدر يحذف، ولا يعدّل الكيت والدفعات والإعدادات، ولا يغيّر الأدوار |
+| viewer (الإدارة) | كل شي | ولا شي (غير ملفه الشخصي) |
+| operator | ملفه وتقييمه فقط | بياناته الشخصية وصورته وكلمة مروره |
 
-## Step 1 — `01_login_function.sql` ✅ Run First
+- المشغلين صار عندهم دخول: الرقم الوظيفي وكلمة المرور، ويفتح لهم «ملفي».
+- أول دخول (أو بعد ما يرسل له المدير كلمة مرور جديدة) يطلب النظام من الموظف يختار كلمة مرور جديدة.
 
-Creates the server-side `app_login` RPC and the `login_attempts` brute-force table.
-
-**When to run:** Immediately — before or after deploying the new app version.  
-**Effect:** The app will switch from plain-text password comparison to the secure bcrypt RPC.  
-**Risk:** None — it supports both plain-text and hashed passwords during the transition.
-
-```sql
--- Paste the contents of 01_login_function.sql here
-```
-
----
-
-## Step 2 — `02_lock_passwords.sql` ⚠️ Run ONLY After Verifying Login Works
-
-Hashes all existing passwords with bcrypt, adds a trigger for new passwords,
-and revokes the `password` column from the browser role.
-
-**When to run:** ONLY after confirming that:
-1. `01_login_function.sql` was successfully run ✅
-2. The new app version is live on Vercel ✅
-3. You have tested login successfully with the new app ✅
-
-**Risk:** If run before Step 1, nobody can log in anymore (passwords hashed, RPC missing).
+> الملفات `01_login_function.sql` و`02_lock_passwords.sql` قديمة وانطبقت من قبل. لا تعيد تشغيلها.
 
 ---
 
-## Verification Checklist
+## الترتيب (لا تغيّره)
 
-After running Step 1:
-- [ ] Open the app → try logging in normally → should work
-- [ ] Check the browser console → should NOT see `app_login RPC not found` warning
-- [ ] Try wrong password 8+ times → should see "Too many wrong attempts" message
+### الخطوة 1: تجهيز قاعدة البيانات ونقل المستخدمين (ما يوقف التطبيق الحالي)
 
-After running Step 2:
-- [ ] Login still works (bcrypt hashed passwords)
-- [ ] In Supabase SQL Editor, run:
-  ```sql
-  SELECT count(*) AS plain_text_passwords_left
-  FROM public.users
-  WHERE password IS NOT NULL AND password !~ '^\$2[aby]\$';
-  ```
-  Should return **0**.
+1. **Supabase → Authentication → Providers → Email**: تأكد إنه **Enabled**. وطفِّ **Confirm email** (الإيميلات وهمية `user-…@ectron.local`).
+2. **SQL Editor**: شغّل `03_auth_prepare.sql`. آخر سطر يطلع لك عدد الحسابات اللي كلمة مرورها ضعيفة (`must_change`).
+3. انقل المستخدمين إلى Auth من جهازك (يحتاج `npm install` داخل مجلد `server` مرة وحدة):
+   ```bash
+   cd security
+   node migrate-users-to-auth.mjs --dry-run   # يعرض بس وش بيسوي
+   node migrate-users-to-auth.mjs             # التنفيذ
+   ```
+   السكربت يطلب **service_role key** (من Supabase → Project Settings → API). لا تحطه في أي ملف ولا ترسله لأحد.
+   - كل واحد يحتفظ بكلمة مروره الحالية.
+   - اللي كلمة مروره ضعيفة يدخل بها مرة وحدة، وبعدها يُجبر على تغييرها.
+   - السكربت آمن لو انعاد تشغيله: اللي انربط يتخطّاه.
+
+### الخطوة 2: الـ Edge Function ونشر التطبيق الجديد
+
+1. **Edge Function `admin-users`** (إنشاء الحسابات، تغيير كلمة المرور، الحذف):
+   - من الـ CLI: `supabase functions deploy admin-users`
+   - أو من **Dashboard → Edge Functions → Deploy a new function**: اسمها `admin-users`، والصق محتوى `supabase/functions/admin-users/index.ts`.
+   - خلِّ **Verify JWT** شغّال.
+   - المفاتيح `SUPABASE_URL` و`SUPABASE_SERVICE_ROLE_KEY` موجودة تلقائياً، فما تحتاج تضيف شي.
+2. ادفع الكود إلى GitHub (`main`) وVercel ينشره تلقائياً.
+3. جرّب: ادخل بحساب admin، وحساب مشرف، وحساب viewer، وأضف مشغل من «طاقم العمل» وادخل بحسابه.
+
+> بين الخطوة 1 والخطوة 3 في سياسة مؤقتة تعطي كل مستخدم مسجّل دخول وصول كامل، عشان ما يتعطّل شي أثناء النقل. لا تطوّل هالفترة.
+
+### الخطوة 3: القفل (بعد ما تتأكد إن التطبيق الجديد شغّال)
+
+شغّل `04_lock_rls.sql` في **SQL Editor**. هذا الملف:
+- يمسح كل السياسات القديمة، ويقفل كل شي على `anon` (غير البحث عن إيميل الدخول).
+- يطبّق صلاحيات كل دور حسب الجدول اللي فوق.
+- يحذف دالة الدخول القديمة `app_login`.
+
+بعد هالخطوة **النسخة القديمة من التطبيق ما بتشتغل**. لو أحد عنده نسخة مثبّتة (PWA) قديمة، يسكّر التطبيق ويفتحه من جديد.
+
+---
+
+## لو صارت مشكلة
+
+- **«Company ID or password is incorrect» لحساب معيّن**: تأكد إن السكربت ربطه (`users.auth_id` مب فاضي). لو فاضي: من صفحة المستخدمين، عدّل الحساب وحط له كلمة مرور جديدة (هذا ينشئ له login).
+- **«The account service is not reachable»**: الـ Edge Function ما انرفعت أو اسمها غلط.
+- **«Too many attempts»**: Supabase يوقف المحاولات الكثيرة مؤقتاً. انتظر شوي.
+- **رجوع سريع بعد الخطوة 3**: شغّل `03_auth_prepare.sql` مرة ثانية. يرجّع السياسة المؤقتة (التطبيق الجديد يشتغل، بس الصلاحيات تكون مفتوحة لكل مستخدم مسجّل).

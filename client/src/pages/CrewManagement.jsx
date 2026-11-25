@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "../supabaseClient";
 import { USER_COLUMNS, generatePassword } from "../utils/userSecurity";
+import { createAccount, setAccountPassword, deleteAccount } from "../utils/adminUsers";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import {
@@ -559,6 +560,24 @@ function OperatorModal({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // After create / reset: the temporary password shown once to the supervisor.
+  const [tempPassword, setTempPassword] = useState("");
+  const [savedResult, setSavedResult] = useState(null);
+
+  async function handleResetPassword() {
+    setError("");
+    setLoading(true);
+    try {
+      const pw = generatePassword();
+      await setAccountPassword(initial.id, pw);
+      setSavedResult({ ...initial });
+      setTempPassword(pw);
+    } catch (err) {
+      setError(err?.message || (isArabic ? "تعذر تغيير كلمة المرور." : "Could not reset the password."));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -604,14 +623,13 @@ function OperatorModal({
         if (err) throw err;
         result = data?.[0] || { ...initial, ...payload };
       } else {
-        // Operators can't log in; store an unguessable password, never the company ID.
-        payload.password = generatePassword(16);
-        const { data, error: err } = await supabase
-          .from("users")
-          .insert([payload])
-          .select(USER_COLUMNS);
-        if (err) throw err;
-        result = data?.[0] || { ...payload, password: undefined, id: Date.now() };
+        // Operators sign in to see their own profile and evaluation. They get
+        // a temporary password now and choose their own at first sign-in.
+        const pw = generatePassword();
+        result = await createAccount(payload, pw);
+        setSavedResult(result);
+        setTempPassword(pw);
+        return;
       }
 
       onSaved(result, isEdit);
@@ -646,6 +664,58 @@ function OperatorModal({
           </button>
         </div>
 
+        {tempPassword ? (
+          <>
+            <div className="modal-body" style={{ gap: "12px" }}>
+              <p style={{ margin: 0 }}>
+                {isArabic
+                  ? `عطِ ${savedResult?.name || "المشغل"} بيانات الدخول هذي. كلمة المرور مؤقتة وبيغيرها أول ما يدخل.`
+                  : `Give ${savedResult?.name || "the operator"} these sign-in details. The password is temporary; they change it at first sign-in.`}
+              </p>
+              <div
+                style={{
+                  background: "var(--gray-50, #f8fafc)",
+                  border: "1px dashed var(--teal)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  display: "grid",
+                  gap: 6,
+                  direction: "ltr",
+                }}
+              >
+                <div>
+                  {isArabic ? "الرقم الوظيفي: " : "Company ID: "}
+                  <strong>{savedResult?.company_id || companyId}</strong>
+                </div>
+                <div>
+                  {isArabic ? "كلمة المرور: " : "Password: "}
+                  <strong style={{ fontFamily: "monospace", fontSize: "1.1rem", letterSpacing: 1 }}>{tempPassword}</strong>
+                </div>
+              </div>
+              <p className="hint" style={{ margin: 0 }}>
+                {isArabic
+                  ? "ما بتقدر تشوف كلمة المرور مرة ثانية بعد ما تسكر النافذة."
+                  : "You won't be able to see this password again after closing."}
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => navigator.clipboard?.writeText(tempPassword).catch(() => {})}
+              >
+                {isArabic ? "نسخ كلمة المرور" : "Copy password"}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => onSaved(savedResult, isEdit)}
+              >
+                {isArabic ? "تم" : "Done"}
+              </button>
+            </div>
+          </>
+        ) : (
         <form onSubmit={handleSubmit}>
           <div className="modal-body" style={{ gap: "14px" }}>
             {error && <div className="modal-error">{error}</div>}
@@ -701,6 +771,17 @@ function OperatorModal({
           </div>
 
           <div className="modal-footer">
+            {isEdit && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleResetPassword}
+                disabled={loading}
+                style={{ marginInlineEnd: "auto" }}
+              >
+                {isArabic ? "كلمة مرور جديدة" : "Reset password"}
+              </button>
+            )}
             <button
               type="button"
               className="btn-secondary"
@@ -726,6 +807,7 @@ function OperatorModal({
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   );
@@ -744,8 +826,7 @@ function DeleteOperatorModal({ operator, onClose, onDeleted }) {
     }
     setLoading(true);
     try {
-      const { error: delErr } = await supabase.from("users").delete().eq("id", operator.id);
-      if (delErr) throw delErr;
+      await deleteAccount(operator.id);
       onDeleted(operator.id);
     } catch (e) {
       alert(e?.message || "Error deleting operator");

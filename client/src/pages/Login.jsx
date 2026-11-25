@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { homeFor } from "../utils/roles";
 import { ShieldCheck, Lock, Building } from "lucide-react";
 
 export default function Login() {
@@ -24,12 +25,7 @@ export default function Login() {
     setLoading(true);
     try {
       const res = await login(companyId.trim(), password);
-      const role = (res?.user?.access || "").toLowerCase();
-      if (role === "viewer") {
-        navigate("/management-dashboard", { replace: true });
-      } else {
-        navigate("/dashboard", { replace: true });
-      }
+      navigate(homeFor((res?.user?.access || "").toLowerCase()), { replace: true });
     } catch (err) {
       setError(
         err?.message ||

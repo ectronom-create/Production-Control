@@ -13,6 +13,7 @@ import {
   Truck,
   ScanSearch,
   UserCog,
+  CircleUserRound,
   LogOut,
   Menu,
   X,
@@ -91,13 +92,22 @@ const NAV_GROUPS = [
       { to: "/users", ar: "المستخدمين", en: "Users", shortAr: "المستخدمين", shortEn: "Users", Icon: UserCog, roles: ["admin"] },
     ],
   },
+  {
+    id: "me",
+    ar: "حسابي",
+    en: "My account",
+    items: [
+      { to: "/my-profile", ar: "ملفي", en: "My Profile", shortAr: "ملفي", shortEn: "Profile", Icon: CircleUserRound, roles: ["admin", "supervisor", "viewer", "operator"] },
+    ],
+  },
 ];
 
 /* Bottom bar on phones: the 4 most-used pages for each role, then "More". */
 const BOTTOM_BAR = {
   admin: ["/dashboard", "/production", "/defect-meters", "/management-dashboard"],
   supervisor: ["/dashboard", "/production", "/pre-production-checklist", "/downtime"],
-  viewer: ["/management-dashboard", "/batch-lookup"],
+  viewer: ["/management-dashboard", "/batch-lookup", "/my-profile"],
+  operator: ["/my-profile"],
 };
 
 const ALL_ITEMS = NAV_GROUPS.flatMap((g) => g.items);

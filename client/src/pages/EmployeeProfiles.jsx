@@ -34,6 +34,8 @@ import {
   Hash,
   Building2,
 } from "lucide-react";
+import { resizeImage } from "../utils/image";
+import { USER_COLUMNS } from "../utils/userSecurity";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const STAGES = [
@@ -187,39 +189,6 @@ function writeLocalProfile(userId, data) {
   } catch {}
 }
 
-// Resize an uploaded image to a small square JPEG (keeps DB rows light)
-function resizeImage(file, size = 240) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d");
-        const min = Math.min(img.width, img.height);
-        ctx.drawImage(
-          img,
-          (img.width - min) / 2,
-          (img.height - min) / 2,
-          min,
-          min,
-          0,
-          0,
-          size,
-          size,
-        );
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 function optLabel(map, key, isArabic) {
   if (!key || !map[key]) return "—";
   return isArabic ? map[key].ar : map[key].en;
@@ -357,7 +326,10 @@ function useEmployeesData() {
           }
           const row = payload.new;
           if (!row || row.access === "viewer") return;
-          const { password, ...safe } = row;
+          // Keep only the public columns (never password / login link).
+          const safe = Object.fromEntries(
+            USER_COLUMNS.split(",").filter((k) => k in row).map((k) => [k, row[k]]),
+          );
           setEmployees((prev) => {
             const exists = prev.some((e) => e.id === safe.id);
             const next = exists
