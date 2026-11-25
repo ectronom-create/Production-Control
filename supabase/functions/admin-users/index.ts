@@ -33,8 +33,22 @@ function passwordProblem(p: unknown, companyId = "", name = ""): string {
   const low = s.toLowerCase();
   if ((companyId && low === companyId.trim().toLowerCase()) || (name && low === name.trim().toLowerCase()))
     return "Password must not be the company ID or the name";
-  if (!/[A-Za-z]/.test(s) || !/[0-9]/.test(s)) return "Password must contain letters and numbers";
+  if (isTrivialSequence(s)) return "Password is too easy to guess (repeated or sequential digits)";
   return "";
+}
+
+// Same rule as client/src/utils/userSecurity.js: 11111111, 12345678, 87654321…
+function isTrivialSequence(p: string): boolean {
+  if (p.length < 2) return false;
+  if (/^(.)\1+$/.test(p)) return true;
+  if (!/^\d+$/.test(p)) return false;
+  const step = p.charCodeAt(1) - p.charCodeAt(0);
+  if (Math.abs(step) !== 1) return false;
+  for (let i = 2; i < p.length; i++) {
+    const d = p.charCodeAt(i) - p.charCodeAt(i - 1);
+    if (d !== step && d !== -9 * step) return false;
+  }
+  return true;
 }
 
 Deno.serve(async (req) => {

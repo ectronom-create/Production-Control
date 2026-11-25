@@ -260,8 +260,8 @@ function UserModal({ mode, initial, supervisors, onClose, onSaved }) {
                     : "Leave blank to keep the existing password. "
                   : ""}
                 {isArabic
-                  ? `${MIN_PASSWORD_LENGTH} أحرف على الأقل، حروف وأرقام، ومب نفس الرقم الوظيفي. هذي كلمة مرور مؤقتة: الموظف بيغيرها أول ما يدخل.`
-                  : `At least ${MIN_PASSWORD_LENGTH} characters, letters and numbers, not the company ID. This is temporary: the person changes it at first sign-in.`}
+                  ? `${MIN_PASSWORD_LENGTH} خانات على الأقل (أرقام بس مقبولة)، ومب نفس الرقم الوظيفي. هذي كلمة مرور مؤقتة: الموظف بيغيرها أول ما يدخل.`
+                  : `At least ${MIN_PASSWORD_LENGTH} characters (numbers only is fine), not the company ID. This is temporary: the person changes it at first sign-in.`}
               </p>
             </div>
 

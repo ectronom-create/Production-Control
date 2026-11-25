@@ -119,8 +119,8 @@ export default function ChangePasswordForm({ forced = false, onDone }) {
       </div>
       <p style={{ margin: 0, fontSize: "0.78rem", color: C.muted }}>
         {L(
-          `${MIN_PASSWORD_LENGTH} أحرف على الأقل، حروف وأرقام، ولا تكون نفس الرقم الوظيفي أو الاسم.`,
-          `At least ${MIN_PASSWORD_LENGTH} characters, letters and numbers, not your company ID or name.`,
+          `${MIN_PASSWORD_LENGTH} خانات على الأقل (أرقام بس مقبولة)، ولا تكون نفس الرقم الوظيفي أو الاسم، ولا أرقام متكررة أو متسلسلة.`,
+          `At least ${MIN_PASSWORD_LENGTH} characters (numbers only is fine), not your company ID or name, no repeated or sequential digits.`,
         )}
       </p>
       <button

@@ -36,18 +36,29 @@ export function passwordProblem(password, { companyId = "", name = "", isArabic 
   if (
     (companyId && lower === companyId.trim().toLowerCase()) ||
     (name && lower === name.trim().toLowerCase()) ||
-    ["12345678", "password", "admin@1234", "ectron123", "qwerty123"].includes(lower)
+    ["password", "admin@1234", "ectron123", "qwerty123"].includes(lower) ||
+    isTrivialSequence(p)
   ) {
     return isArabic
-      ? "كلمة المرور سهلة التخمين (نفس الرقم الوظيفي أو الاسم أو كلمة شائعة)."
-      : "Password is too easy to guess (same as company ID, name, or a common password).";
-  }
-  if (!/[A-Za-z]/.test(p) || !/[0-9]/.test(p)) {
-    return isArabic
-      ? "كلمة المرور لازم تحتوي على حروف وأرقام."
-      : "Password must contain letters and numbers.";
+      ? "كلمة المرور سهلة التخمين (نفس الرقم الوظيفي أو الاسم، أو أرقام متكررة أو متسلسلة مثل 11111111 و12345678)."
+      : "Password is too easy to guess (company ID, name, or repeated / sequential digits like 11111111 or 12345678).";
   }
   return "";
+}
+
+/** True for one repeated character (11111111) or a straight run (12345678, 87654321). */
+export function isTrivialSequence(p) {
+  if (!p || p.length < 2) return false;
+  if (/^(.)\1+$/.test(p)) return true;
+  if (!/^\d+$/.test(p)) return false;
+  const step = p.charCodeAt(1) - p.charCodeAt(0);
+  if (Math.abs(step) !== 1) return false;
+  for (let i = 2; i < p.length; i++) {
+    const d = p.charCodeAt(i) - p.charCodeAt(i - 1);
+    // allow wrap-around 9→0 / 0→9 (e.g. 67890123)
+    if (d !== step && d !== -9 * step) return false;
+  }
+  return true;
 }
 
 /**
