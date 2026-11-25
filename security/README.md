@@ -40,7 +40,7 @@
 1. **Edge Function `admin-users`** (إنشاء الحسابات، تغيير كلمة المرور، الحذف):
    - من الـ CLI: `supabase functions deploy admin-users`
    - أو من **Dashboard → Edge Functions → Deploy a new function**: اسمها `admin-users`، والصق محتوى `supabase/functions/admin-users/index.ts`.
-   - خلِّ **Verify JWT** شغّال.
+   - طفِّ **Verify JWT with legacy secret**: المشروع يوقّع الجلسات بمفتاح ECC الجديد، فهالخيار يرفض دخول الموظفين. الدالة نفسها تتحقق من الجلسة والدور (`auth.getUser` + جدول `users`).
    - المفاتيح `SUPABASE_URL` و`SUPABASE_SERVICE_ROLE_KEY` موجودة تلقائياً، فما تحتاج تضيف شي.
 2. ادفع الكود إلى GitHub (`main`) وVercel ينشره تلقائياً.
 3. جرّب: ادخل بحساب admin، وحساب مشرف، وحساب viewer، وأضف مشغل من «طاقم العمل» وادخل بحسابه.

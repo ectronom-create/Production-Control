@@ -8,7 +8,9 @@
 //   supervisor  → operators only (Line Crew page)
 //
 // Deploy: Supabase Dashboard → Edge Functions → "Deploy a new function" →
-// name it  admin-users  and paste this file. Keep "Verify JWT" ON.
+// name it  admin-users  and paste this file. Turn "Verify JWT with legacy
+// secret" OFF: sessions are signed with the new ECC key, and this function
+// checks the caller itself (auth.getUser + role in public.users).
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -56,7 +58,16 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "Method not allowed" });
 
   const url = Deno.env.get("SUPABASE_URL")!;
-  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  // Legacy service_role JWT, or the newer secret key (sb_secret_…) on projects
+  // that use the new API keys.
+  let serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+  if (!serviceKey) {
+    try {
+      const keys = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "{}");
+      serviceKey = keys.default ?? Object.values(keys)[0] ?? "";
+    } catch { /* ignore */ }
+  }
+  if (!serviceKey) return json(500, { error: "Service key is not configured" });
   const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
   // ── Who is calling? ──────────────────────────────────────────────────────
