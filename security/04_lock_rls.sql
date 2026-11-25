@@ -100,9 +100,15 @@ create policy "write: admin, supervisor for operators and self" on public.employ
   );
 
 -- 4) The old compatibility view must not bypass RLS ------------------------------
-alter view if exists public.fpy_reports set (security_invoker = true);
-revoke all on public.fpy_reports from anon;
-grant select on public.fpy_reports to authenticated;
+-- (only if that view exists in this project)
+do $$
+begin
+  if to_regclass('public.fpy_reports') is not null then
+    execute 'alter view public.fpy_reports set (security_invoker = true)';
+    execute 'revoke all on public.fpy_reports from anon';
+    execute 'grant select on public.fpy_reports to authenticated';
+  end if;
+end $$;
 
 -- 5) Old browser-side login is no longer used -----------------------------------
 drop function if exists public.app_login(text, text);
