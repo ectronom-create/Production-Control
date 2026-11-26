@@ -2,6 +2,8 @@ import { Printer, X } from "lucide-react";
 import { printReportDocument } from "../../utils/printReport";
 import { useLanguage } from "../../context/LanguageContext";
 import { useAuth } from "../../context/AuthContext";
+import { useLine } from "../../context/LineContext";
+import { lineLabel } from "../../constants/lines";
 import { findStage } from "../../constants/defectStages";
 import { buildAlerts } from "./AttentionList";
 import { C, fmtDate, num, pctColor } from "./dashTheme";
@@ -79,6 +81,7 @@ function MiniBars({ series, target }) {
 
 export default function ManagementReportModal({ isOpen, onClose, data: d }) {
   const { isArabic } = useLanguage();
+  const { line } = useLine();
   const { user } = useAuth();
   if (!isOpen || !d) return null;
   const L = (ar, en) => (isArabic ? ar : en);
@@ -185,7 +188,7 @@ export default function ManagementReportModal({ isOpen, onClose, data: d }) {
                 <div>
                   <div style={{ fontSize: 17, fontWeight: 900, color: C.navy }}>{L("تقرير الإنتاج للإدارة", "Management Production Report")}</div>
                   <div style={{ fontSize: 11, color: C.muted }}>
-                    {L("عدادات ثلاثية الطور — العقد 300,000 عداد", "3-Phase smart meters — 300,000-unit contract")}
+                    {lineLabel(line, isArabic)} — {L(`العقد ${num(d.targets?.overallProd)} عداد`, `${num(d.targets?.overallProd)}-unit contract`)}
                   </div>
                 </div>
               </div>

@@ -3,6 +3,8 @@ import { supabase } from "../supabaseClient";
 import { getBatchStatus } from "../utils/kitStatus";
 import { getBatchStage, getBatchStageDate, getBatchDefinedDate } from "../utils/batchStatus";
 import { toLocalDateStr, getTodayString } from "../utils/date";
+import { useLine } from "../context/LineContext";
+import { lineKey } from "../constants/lines";
 
 export const DEFAULT_TARGETS = {
   overallProd: 300000,
@@ -21,14 +23,36 @@ export const DEFAULT_TARGETS = {
 };
 
 // v2: daily target moved to 1200 — older locally-saved 1300 configs are ignored
-const STORAGE_TARGETS_KEY = "ectron_mgmt_targets_v2";
+const STORAGE_TARGETS_KEY_BASE = "ectron_mgmt_targets_v2";
 const SETTINGS_TABLE = "app_settings";
 
 // Production started 44 days before 30-Sep-2026. Output from 17-Aug to 30-Sep was
 // uploaded as one total dated 30-Sep; shift-by-shift reports start in October.
 export const PROJECT_START_DEFAULT = "2026-08-17";
 export const DAILY_TRACKING_START = "2026-10-01";
-const SETTINGS_KEY = "mgmt_targets";
+
+// Single-phase line (M11): 200,000 meters, 1,600 a day. Its start date is set by
+// the admin in the dashboard settings; until then the first report date is used.
+export const DEFAULT_TARGETS_1P = {
+  ...DEFAULT_TARGETS,
+  overallProd: 200000,
+  dailyProd: 1600,
+  weeklyProd: 11200,
+  shiftProd: 800,
+  overallFw: 200000,
+  dailyFw: 1600,
+  weeklyFw: 11200,
+  shiftFw: 800,
+  baselineDefects: 0,
+  fixedConsumptionRate: 1600,
+};
+
+// Per-line settings: three-phase keeps the original keys and dates.
+export const LINE_TARGET_CONFIG = {
+  "3P": { defaults: DEFAULT_TARGETS, settingsKey: "mgmt_targets", startDefault: PROJECT_START_DEFAULT, trackingStart: DAILY_TRACKING_START },
+  "1P": { defaults: DEFAULT_TARGETS_1P, settingsKey: "mgmt_targets_1P", startDefault: "", trackingStart: "" },
+};
+export const defaultTargetsFor = (line) => (LINE_TARGET_CONFIG[line] || LINE_TARGET_CONFIG["3P"]).defaults;
 
 const DAY_MS = 86400000;
 function dateToUtc(dStr) {
@@ -51,13 +75,13 @@ function getRecordShift(r) {
   return null;
 }
 
-function normalizeTargets(t) {
-  const out = { ...DEFAULT_TARGETS, ...t };
+function normalizeTargets(t, defaults = DEFAULT_TARGETS) {
+  const out = { ...defaults, ...t };
   const shifts = Number(out.shiftsPerDay) > 0 ? Number(out.shiftsPerDay) : 2;
-  out.dailyProd = Number(out.dailyProd) || DEFAULT_TARGETS.dailyProd;
+  out.dailyProd = Number(out.dailyProd) || defaults.dailyProd;
   out.weeklyProd = out.dailyProd * 7;
   out.shiftProd = Math.round(out.dailyProd / shifts);
-  out.dailyFw = Number(out.dailyFw) || DEFAULT_TARGETS.dailyFw;
+  out.dailyFw = Number(out.dailyFw) || defaults.dailyFw;
   out.weeklyFw = out.dailyFw * 7;
   out.shiftFw = Math.round(out.dailyFw / shifts);
   return out;
@@ -68,6 +92,13 @@ function normalizeTargets(t) {
  * adaptive runway math, custom targets configuration, and derived KPI analytics.
  */
 export function useManagementDashboardData() {
+  // The page is remounted when the line changes, so these are fixed per mount.
+  const { line } = useLine();
+  const lineCfg = LINE_TARGET_CONFIG[line] || LINE_TARGET_CONFIG["3P"];
+  const SETTINGS_KEY = lineCfg.settingsKey;
+  const STORAGE_TARGETS_KEY = lineKey(STORAGE_TARGETS_KEY_BASE, line);
+  const DEFECTS_CACHE_KEY = lineKey("ectron_defective_meters_cache", line);
+  const KITS_CACHE_KEY = lineKey("ectron_kit_meters_records", line);
   const [records, setRecords] = useState([]);
   const [kitRecords, setKitRecords] = useState([]);
   const [shipmentBatches, setShipmentBatches] = useState([]);
@@ -84,7 +115,7 @@ export function useManagementDashboardData() {
   // Defective Meters count logged live from the Defect Meters tracking system
   const [defectiveMetersCount, setDefectiveMetersCount] = useState(() => {
     try {
-      const cached = localStorage.getItem("ectron_defective_meters_cache");
+      const cached = localStorage.getItem(DEFECTS_CACHE_KEY);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed)) return parsed.length;
@@ -97,14 +128,14 @@ export function useManagementDashboardData() {
   const [targets, setTargets] = useState(() => {
     try {
       const saved = localStorage.getItem(STORAGE_TARGETS_KEY);
-      if (saved) return normalizeTargets(JSON.parse(saved));
+      if (saved) return normalizeTargets(JSON.parse(saved), lineCfg.defaults);
     } catch (_) {}
-    return normalizeTargets(DEFAULT_TARGETS);
+    return normalizeTargets(lineCfg.defaults, lineCfg.defaults);
   });
   const [targetsShared, setTargetsShared] = useState(true);
 
   const applyTargets = useCallback((value) => {
-    const t = normalizeTargets(value || {});
+    const t = normalizeTargets(value || {}, lineCfg.defaults);
     setTargets(t);
     try {
       localStorage.setItem(STORAGE_TARGETS_KEY, JSON.stringify(t));
@@ -129,14 +160,21 @@ export function useManagementDashboardData() {
   );
 
   // First day of production (setting, or 17-Aug-2026)
-  const projectStart = targets.projectStartDate || PROJECT_START_DEFAULT;
+  // Single-phase without a set start date: the first report date (or today).
+  const firstRecordDate = useMemo(
+    () => records.reduce((min, r) => (r.date && (!min || r.date < min) ? r.date : min), ""),
+    [records],
+  );
+  const projectStart = targets.projectStartDate || lineCfg.startDefault || firstRecordDate || getTodayString();
+  // Before this date output was uploaded as one lump total (three-phase only).
+  const trackingStart = lineCfg.trackingStart || projectStart;
 
   // Recovery months: from the first month with daily reports to this month
   // (Aug/Sep only have one lump-sum total, so a monthly breakdown is meaningless there)
   const availableRecoveryMonths = useMemo(() => {
     const months = [];
     const end = getTodayString().slice(0, 7);
-    const from = projectStart > DAILY_TRACKING_START ? projectStart : DAILY_TRACKING_START;
+    const from = projectStart > trackingStart ? projectStart : trackingStart;
     let [y, m] = from.slice(0, 7).split("-").map(Number);
     for (let guard = 0; guard < 60; guard++) {
       const ym = `${y}-${String(m).padStart(2, "0")}`;
@@ -161,21 +199,25 @@ export function useManagementDashboardData() {
         supabase
           .from("production_records")
           .select("*")
+          .eq("line", line)
           .order("date", { ascending: false }),
         supabase
           .from("kit_meters")
           .select("*")
+          .eq("line", line)
           .order("date", { ascending: false }),
         // Only meters still out of the line count as lost (not ones returned after repair)
         supabase
           .from("defective_meters")
           .select("id", { count: "exact", head: true })
+          .eq("line", line)
           .neq("status", "RETURNED_TO_LINE"),
-        supabase.from("shipment_batches").select("*").order("shipment_date", { ascending: false }),
+        supabase.from("shipment_batches").select("*").eq("line", line).order("shipment_date", { ascending: false }),
         supabase.from(SETTINGS_TABLE).select("value").eq("key", SETTINGS_KEY).maybeSingle(),
         supabase
           .from("stoppages")
           .select("stage_id, stopped_at, resumed_at, reason_code")
+          .eq("line", line)
           .gte("stopped_at", since),
       ]);
 
@@ -203,13 +245,13 @@ export function useManagementDashboardData() {
         setKitRecords(kitRes.value.data);
         try {
           localStorage.setItem(
-            "ectron_kit_meters_records",
+            KITS_CACHE_KEY,
             JSON.stringify(kitRes.value.data),
           );
         } catch (_) {}
       } else {
         try {
-          const cached = localStorage.getItem("ectron_kit_meters_records");
+          const cached = localStorage.getItem(KITS_CACHE_KEY);
           if (cached) setKitRecords(JSON.parse(cached));
         } catch (_) {}
       }
@@ -226,7 +268,7 @@ export function useManagementDashboardData() {
         }
       } else {
         try {
-          const cached = localStorage.getItem("ectron_defective_meters_cache");
+          const cached = localStorage.getItem(DEFECTS_CACHE_KEY);
           if (cached) {
             const parsed = JSON.parse(cached);
             if (Array.isArray(parsed)) setDefectiveMetersCount(parsed.length);
@@ -239,7 +281,7 @@ export function useManagementDashboardData() {
       console.warn("Error fetching management dashboard records:", e);
       setSyncError("Failed to fetch live records. Operating with cached data.");
       try {
-        const cached = localStorage.getItem("ectron_kit_meters_records");
+        const cached = localStorage.getItem(KITS_CACHE_KEY);
         if (cached) setKitRecords(JSON.parse(cached));
       } catch (_) {}
     } finally {
@@ -300,8 +342,8 @@ export function useManagementDashboardData() {
     // 2. Storage event listener (cross-tab sync)
     const handleStorageChange = (e) => {
       if (
-        e.key === "ectron_defective_meters_cache" ||
-        e.key === "ectron_kit_meters_records" ||
+        e.key === DEFECTS_CACHE_KEY ||
+        e.key === KITS_CACHE_KEY ||
         e.key === STORAGE_TARGETS_KEY
       ) {
         triggerDebouncedFetch();
@@ -489,7 +531,7 @@ export function useManagementDashboardData() {
     const monthName = monthNames[month - 1] || ym;
 
     // Month window starts on the 1st, or on the project start day in its first month
-    const firstDay = projectStart > DAILY_TRACKING_START ? projectStart : DAILY_TRACKING_START;
+    const firstDay = projectStart > trackingStart ? projectStart : trackingStart;
     const startDay = firstDay.slice(0, 7) === ym ? parseInt(firstDay.slice(8, 10), 10) : 1;
     const startDate = `${ym}-${String(startDay).padStart(2, "0")}`;
 
@@ -847,7 +889,7 @@ export function useManagementDashboardData() {
   const kitRunwayMetrics = useMemo(() => {
     const received = kitMetrics.receivedKits || 0;
     const achieved = productionMetrics.overallCompleted || 0;
-    const actualDefects = defectMetrics.actualPhysicalDefects || 4250;
+    const actualDefects = defectMetrics.actualPhysicalDefects ?? 0;
     const consumed = achieved + actualDefects;
     const remaining = Math.max(0, received - consumed);
 
@@ -983,7 +1025,7 @@ export function useManagementDashboardData() {
       slipDays,
       onTrack: slipDays != null && slipDays <= 0,
       completedToDate,
-      openingLumpDate: projectStart < DAILY_TRACKING_START ? addDays(DAILY_TRACKING_START, -1) : null,
+      openingLumpDate: projectStart < trackingStart ? addDays(trackingStart, -1) : null,
       scheduleAdherencePct: targetToDate > 0 ? (completedToDate / targetToDate) * 100 : 100,
     };
   }, [targets.dailyProd, targets.overallProd, productionMetrics.overallCompleted, projectStart, lastDataDate, dailyTotals]);
@@ -1016,7 +1058,7 @@ export function useManagementDashboardData() {
         total: t.Morning + t.Evening + t.Unknown,
         fw: t.fw,
         isToday: d === todayStr,
-        isLump: d === addDays(DAILY_TRACKING_START, -1) && projectStart < DAILY_TRACKING_START,
+        isLump: d === addDays(trackingStart, -1) && projectStart < trackingStart,
       });
     }
     return out;

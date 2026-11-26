@@ -27,6 +27,11 @@ import {
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { usePwaInstall } from "../hooks/usePwaInstall";
+import LineSwitcher from "./LineSwitcher";
+import { useLine } from "../context/LineContext";
+
+// Pages whose data belongs to one production line (3P MT212 / 1P M11)
+const LINE_PAGES = ["/dashboard", "/management-dashboard", "/production", "/downtime", "/defect-meters", "/kit-meters", "/batches"];
 
 function PageLoader() {
   return (
@@ -115,6 +120,7 @@ const RAIL_KEY = "ectron_sidebar_collapsed";
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const { line } = useLine();
   const { isArabic, canChangeLanguage, toggleLanguage, t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
@@ -357,7 +363,9 @@ export default function Layout() {
       {/* ── Page ── */}
       <main className="shell-main">
         <div className="page-container">
-          <Suspense fallback={<PageLoader />}>
+          {LINE_PAGES.includes(location.pathname) && <LineSwitcher />}
+          {/* key: switching the line remounts the page, so it reloads that line's data */}
+          <Suspense key={line} fallback={<PageLoader />}>
             <Outlet />
           </Suspense>
         </div>

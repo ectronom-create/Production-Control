@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "../supabaseClient";
+import { useLine } from "../context/LineContext";
+import { lineKey } from "../constants/lines";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { printReportDocument } from "../utils/printReport";
@@ -33,8 +35,11 @@ function stageLabel(id, isArabic) {
   return isArabic ? info.nameAr : info.nameEn;
 }
 
-const getStorageKey = (userName) =>
-  `ectron_live_downtime_${userName || "default"}`;
+// One running stoppage per user per line (three-phase keeps the old key)
+const getStorageKey = (userName, line) =>
+  lineKey(`ectron_live_downtime_${userName || "default"}`, line);
+// Offline records remember their line; ones from before lines existed are three-phase.
+const recordLine = (r) => r.line || "3P";
 const LOCAL_STOPPAGES_KEY = "ectron_downtime_local_records";
 const LIVE_NOTE = "LIVE_ACTIVE";
 
@@ -441,6 +446,7 @@ function DowntimeModal({
   onSaved,
 }) {
   const { t, isArabic } = useLanguage();
+  const { line } = useLine();
   const isEdit = mode === "edit";
   const [user_name, setUserName] = useState(
     initial?.user_name || currentUserName || "Admin",
@@ -493,6 +499,7 @@ function DowntimeModal({
     try {
       const payload = {
         id: isEdit ? initial.id : Date.now(),
+        line,
         user_name,
         stage,
         date,
@@ -501,6 +508,7 @@ function DowntimeModal({
         total_minutes: durationMins,
       };
       const row = {
+        line,
         stage_id: stage,
         supervisor_id: user_name,
         ...toStoppageRange(date, start_time, durationMins),
@@ -832,6 +840,7 @@ function DeleteModal({ record, onClose, onDeleted }) {
 export default function Downtime() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
+  const { line } = useLine();
   const isViewer = user?.access === "viewer";
   const isAdmin = user?.access === "admin";
 
@@ -858,7 +867,7 @@ export default function Downtime() {
     const currentUserName = user?.name;
     if (!currentUserName) return;
 
-    const userStorageKey = getStorageKey(currentUserName);
+    const userStorageKey = getStorageKey(currentUserName, line);
 
     // 1. Immediately hydrate from user-scoped localStorage if available
     try {
@@ -876,6 +885,7 @@ export default function Downtime() {
       .from("stoppages")
       .select("*")
       .is("resumed_at", null)
+      .eq("line", line)
       .eq("supervisor_id", currentUserName)
       .order("id", { ascending: false })
       .limit(1)
@@ -907,7 +917,7 @@ export default function Downtime() {
       .catch((err) => {
         console.warn("Sync live downtime from Supabase error:", err);
       });
-  }, [user?.name]);
+  }, [user?.name, line]);
 
   // ─── Live Timer Ticker (Display only) ───────────────────────────────────────
   useEffect(() => {
@@ -957,6 +967,7 @@ export default function Downtime() {
       const { data, error } = await supabase
         .from("stoppages")
         .select("*")
+        .eq("line", line)
         .order("stopped_at", { ascending: false });
       if (error) throw error;
 
@@ -984,11 +995,13 @@ export default function Downtime() {
       // Keep only genuinely unsynced local records; anything already in the
       // database (or legacy copies of saved records) is dropped from the cache.
       const cloudKeys = new Set(cloudList.map(recordKey));
-      const pending = readLocalRecords()
-        .filter(isPendingLocal)
+      const allPending = readLocalRecords().filter(isPendingLocal);
+      const otherLines = allPending.filter((l) => recordLine(l) !== line);
+      const pending = allPending
+        .filter((l) => recordLine(l) === line)
         .filter((l) => !cloudKeys.has(recordKey(l)))
         .map((l) => ({ ...l, pending: true }));
-      writeLocalRecords(pending);
+      writeLocalRecords([...pending, ...otherLines]);
 
       // Upload them once per page visit.
       if (pending.length > 0 && !syncAttemptedRef.current) {
@@ -997,6 +1010,7 @@ export default function Downtime() {
         for (const rec of pending) {
           const { error: insErr } = await supabase.from("stoppages").insert([
             {
+              line,
               stage_id: rec.stage,
               supervisor_id: rec.user_name,
               ...toStoppageRange(rec.date, rec.start_time, rec.total_minutes),
@@ -1029,6 +1043,7 @@ export default function Downtime() {
         applyFilters(
           readLocalRecords()
             .filter(isPendingLocal)
+            .filter((l) => recordLine(l) === line)
             .map((l) => ({ ...l, pending: true })),
         ),
       );
@@ -1037,7 +1052,7 @@ export default function Downtime() {
     }
     // showToast only sets state; isArabic just changes the toast wording.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDate, selectedStage, selectedUser]);
+  }, [selectedDate, selectedStage, selectedUser, line]);
 
   useEffect(() => {
     fetchRecords();
@@ -1086,6 +1101,7 @@ export default function Downtime() {
         .from("stoppages")
         .insert([
           {
+            line,
             stage_id: selectedPillStage,
             supervisor_id: user?.name || "Supervisor",
             stopped_at: now.toISOString(),
@@ -1101,7 +1117,7 @@ export default function Downtime() {
       console.warn("Could not register active live stoppage in Supabase:", e);
     }
 
-    localStorage.setItem(getStorageKey(user?.name), JSON.stringify(session));
+    localStorage.setItem(getStorageKey(user?.name, line), JSON.stringify(session));
     setActiveSession(session);
     setIsSavingLive(false);
     showToast(
@@ -1127,6 +1143,7 @@ export default function Downtime() {
       const endDate = new Date(activeSession.startTimestamp + durationMins * 60000);
       const payload = {
         id: activeSession.id || Date.now(),
+        line,
         user_name: activeSession.user_name || user?.name || "Supervisor",
         stage: activeSession.stage,
         date: activeSession.date || formatLocalDate(now),
@@ -1154,6 +1171,7 @@ export default function Downtime() {
           // No database row yet (started offline) or the row was removed.
           const { error } = await supabase.from("stoppages").insert([
             {
+              line,
               stage_id: activeSession.stage,
               supervisor_id: payload.user_name,
               ...range,
@@ -1168,7 +1186,7 @@ export default function Downtime() {
 
       if (!saved) addPendingLocal(payload);
 
-      localStorage.removeItem(getStorageKey(user?.name));
+      localStorage.removeItem(getStorageKey(user?.name, line));
       setActiveSession(null);
       setElapsedSeconds(0);
       const label = stageLabel(payload.stage, isArabic);
@@ -1208,7 +1226,7 @@ export default function Downtime() {
         console.warn("Could not delete canceled stoppage from Supabase:", e);
       }
     }
-    localStorage.removeItem(getStorageKey(user?.name));
+    localStorage.removeItem(getStorageKey(user?.name, line));
     setActiveSession(null);
     setElapsedSeconds(0);
     showToast(isArabic ? "تم إلغاء التسجيل." : "Recording cancelled.");

@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { Sliders, X, RotateCcw, Check, Info } from "lucide-react";
-import { DEFAULT_TARGETS } from "../../hooks/useManagementDashboardData";
+import { defaultTargetsFor } from "../../hooks/useManagementDashboardData";
+import { useLine } from "../../context/LineContext";
+import { lineLabel } from "../../constants/lines";
 
 export default function ManagementSettingsModal({
   isOpen,
@@ -8,6 +10,8 @@ export default function ManagementSettingsModal({
   targets,
   onSaveTargets,
 }) {
+  const { line } = useLine();
+  const DEFAULT_TARGETS = defaultTargetsFor(line);
   const [formData, setFormData] = useState(targets);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -79,7 +83,7 @@ export default function ManagementSettingsModal({
                 Executive Target Baselines & Configuration
               </h3>
               <p style={{ margin: "2px 0 0", fontSize: "0.78rem", color: "#64748b" }}>
-                Customize contract targets, daily rates, shifts count, and calibration benchmarks
+                {lineLabel(line, false)} · contract targets, daily rates, shifts count, and calibration benchmarks
               </p>
             </div>
           </div>
@@ -96,7 +100,7 @@ export default function ManagementSettingsModal({
             {/* Group 1: 3-Phase Assembly Targets */}
             <div style={{ background: "#f8fafc", padding: "16px 18px", borderRadius: 12, border: "1px solid #e2e8f0" }}>
               <span style={{ fontSize: "0.84rem", fontWeight: 800, color: "var(--navy)", textTransform: "uppercase", letterSpacing: "0.04em", display: "block", marginBottom: 12 }}>
-                1. Assembly Production Targets (3-Phase)
+                1. Assembly Production Targets — {lineLabel(line, false)}
               </span>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
                 <div className="form-group">

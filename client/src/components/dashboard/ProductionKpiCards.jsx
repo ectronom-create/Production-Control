@@ -1,9 +1,12 @@
+import { useLine } from "../../context/LineContext";
+import { lineLabel } from "../../constants/lines";
 import { Layers, Target, Calendar, Clock, Zap } from "lucide-react";
 
 export default function ProductionKpiCards({
   productionMetrics,
   weekStartDateStr,
 }) {
+  const { line } = useLine();
   return (
     <div
       style={{
@@ -48,7 +51,7 @@ export default function ProductionKpiCards({
               letterSpacing: "-0.01em",
             }}
           >
-            Production — 3-Phase Target Hierarchy & Actuals
+            Production — {lineLabel(line, false)} Target Hierarchy & Actuals
           </h3>
           <p
             style={{ margin: "3px 0 0", fontSize: "0.82rem", color: "#64748b" }}

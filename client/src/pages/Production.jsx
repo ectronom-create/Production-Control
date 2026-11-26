@@ -20,12 +20,19 @@ import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { toLocalDateStr } from "../utils/date";
+import { useLine } from "../context/LineContext";
+import { LINES, lineKey } from "../constants/lines";
+
+// Default shift target per line (three-phase 650, single-phase 1,600 a day / 2 shifts)
+const SHIFT_TARGET = { "3P": 650, "1P": 800 };
 
 // Direct Google Cloud Apps Script Web API (accessible globally from any computer/browser)
 const GOOGLE_DRIVE_SYNC_API_URL =
   "https://script.google.com/macros/s/AKfycbxHUCPbr7nKCtK9x1NuQ_ObGoyOlbB6GCUWw09dYhAVJODPpAdPuW7OBDxtZgyqRrq1Pw/exec";
 
-async function fetchFwSyncCount(date, shift) {
+async function fetchFwSyncCount(date, shift, line = "3P") {
+  // The LOG.csv firmware count belongs to the three-phase line only
+  if (!LINES[line]?.hasFirmwareSync) return null;
   const query = `date=${encodeURIComponent(date)}&shift=${encodeURIComponent(shift)}`;
 
   // 1. Same-Origin Proxy (/api/sync-fw): Works on Vercel Serverless, Vite, Express (Zero CORS, universally accessible)
@@ -63,6 +70,7 @@ async function fetchFwSyncCount(date, shift) {
     const { data, error } = await supabase
       .from("production_records")
       .select("updated_fw_qty, team_name, notes")
+      .eq("line", line)
       .eq("date", date);
 
     if (!error && data && data.length > 0) {
@@ -316,12 +324,13 @@ function getRecordShift(r) {
 }
 
 // Rule: max 2 reports per day — one Morning, one Evening
-async function findShiftConflict(date, shift, excludeId, localRecords) {
+async function findShiftConflict(date, shift, excludeId, localRecords, line = "3P") {
   let rows = null;
   try {
     const { data, error } = await supabase
       .from("production_records")
       .select("id, date, team_name, notes")
+      .eq("line", line)
       .eq("date", date);
     if (!error) rows = data || [];
   } catch {}
@@ -380,6 +389,9 @@ function getTodayString() {
 export default function Production() {
   const { user } = useAuth();
   const { isArabic, t } = useLanguage();
+  const { line } = useLine();
+  const RECORDS_CACHE_KEY = lineKey("ectron_production_records", line);
+  const defaultShiftTarget = SHIFT_TARGET[line] || 650;
   const isAdmin = user?.access === "admin";
   const isSupervisor = user?.access === "supervisor";
   const isViewer = user?.access === "viewer";
@@ -410,7 +422,7 @@ export default function Production() {
   const [isParsing, setIsParsing] = useState(false);
   const [parsedData, setParsedData] = useState(null);
   const [uploadDate, setUploadDate] = useState(initialShiftInfo.date);
-  const [uploadTarget, setUploadTarget] = useState(650);
+  const [uploadTarget, setUploadTarget] = useState(defaultShiftTarget);
   const [uploadShift, setUploadShift] = useState(initialShiftInfo.shift); // 'Morning' or 'Evening'
   const [uploadFwQty, setUploadFwQty] = useState(0);
   const [uploadTeamName, setUploadTeamName] = useState("");
@@ -423,7 +435,7 @@ export default function Production() {
   const [editRecordId, setEditRecordId] = useState(null);
   const [editDate, setEditDate] = useState("");
   const [editShift, setEditShift] = useState("Morning");
-  const [editTarget, setEditTarget] = useState(650);
+  const [editTarget, setEditTarget] = useState(defaultShiftTarget);
   const [editProduct, setEditProduct] = useState("");
   const [editAchieved, setEditAchieved] = useState(0);
   const [editTotalBoards, setEditTotalBoards] = useState(0);
@@ -442,7 +454,7 @@ export default function Production() {
     setIsSyncingEditFw(true);
     setSyncEditMsg("");
     try {
-      const count = await fetchFwSyncCount(d, s);
+      const count = await fetchFwSyncCount(d, s, line);
       if (count != null) {
         setEditFwQty(count);
         setSyncEditMsg(
@@ -511,12 +523,13 @@ export default function Production() {
       const { data, error } = await supabase
         .from("production_records")
         .select("*")
+        .eq("line", line)
         .order("date", { ascending: false });
 
       if (error) {
         setSupabaseConnected(false);
         // Try fallback view or local cache
-        const local = localStorage.getItem("ectron_production_records");
+        const local = localStorage.getItem(RECORDS_CACHE_KEY);
         if (local) {
           setRecords(JSON.parse(local));
         }
@@ -524,14 +537,14 @@ export default function Production() {
         setSupabaseConnected(true);
         setRecords(data || []);
         localStorage.setItem(
-          "ectron_production_records",
+          RECORDS_CACHE_KEY,
           JSON.stringify(data || []),
         );
       }
     } catch (err) {
       console.warn("Supabase fetch records error:", err);
       setSupabaseConnected(false);
-      const local = localStorage.getItem("ectron_production_records");
+      const local = localStorage.getItem(RECORDS_CACHE_KEY);
       if (local) {
         try {
           setRecords(JSON.parse(local));
@@ -540,7 +553,7 @@ export default function Production() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [RECORDS_CACHE_KEY, line]);
 
   useEffect(() => {
     loadRecords();
@@ -563,7 +576,7 @@ export default function Production() {
         const data = parseFPYExcel(e.target.result);
         const curShift = getProductionDateAndShift();
         setParsedData(data);
-        setUploadTarget(650);
+        setUploadTarget(defaultShiftTarget);
         setUploadDate(curShift.date);
         setUploadShift(curShift.shift);
         setShowUploadModal(true);
@@ -588,7 +601,7 @@ export default function Production() {
     setIsSyncingFw(true);
     try {
       // 1. Live sync from Google Cloud Drive Web API (or local proxy fallback)
-      const count = await fetchFwSyncCount(targetDate, targetShift);
+      const count = await fetchFwSyncCount(targetDate, targetShift, line);
       if (count != null) {
         setUploadFwQty(count);
         setIsSyncingFw(false);
@@ -600,6 +613,7 @@ export default function Production() {
       const { data, error } = await supabase
         .from("production_records")
         .select("updated_fw_qty, team_name, notes")
+        .eq("line", line)
         .eq("date", targetDate);
 
       if (!error && data && data.length > 0) {
@@ -641,7 +655,7 @@ export default function Production() {
     setUploadError("");
 
     const shiftLabel = uploadShift === "Evening" ? "Evening" : "Morning";
-    const conflict = await findShiftConflict(uploadDate, shiftLabel, null, records);
+    const conflict = await findShiftConflict(uploadDate, shiftLabel, null, records, line);
     if (conflict) {
       setUploadError(conflictMessage(conflict, uploadDate, shiftLabel, isArabic));
       setIsSaving(false);
@@ -653,9 +667,10 @@ export default function Production() {
     const assignedTeam = `${assignedTeamBase} - ${shiftLabel}`;
 
     const payload = {
+      line,
       date: uploadDate,
-      product: parsedData.product || "Unknown",
-      target: parseInt(uploadTarget) || 650,
+      product: parsedData.product || LINES[line].defaultProduct,
+      target: parseInt(uploadTarget) || defaultShiftTarget,
       overall_fpy: parsedData.overallFPY
         ? parseFloat(parsedData.overallFPY.toFixed(2))
         : null,
@@ -682,7 +697,7 @@ export default function Production() {
         currentList.unshift(newRecord);
         setRecords(currentList);
         localStorage.setItem(
-          "ectron_production_records",
+          RECORDS_CACHE_KEY,
           JSON.stringify(currentList),
         );
       } else {
@@ -719,8 +734,8 @@ export default function Production() {
     const detectedShift = isEvening ? "Evening" : "Morning";
     setEditShift(detectedShift);
 
-    setEditTarget(record.target || 650);
-    setEditProduct(record.product || "254100543S - SFIN MT212 OMAN - A01");
+    setEditTarget(record.target || defaultShiftTarget);
+    setEditProduct(record.product || LINES[line].defaultProduct);
     setEditAchieved(record.achieved || 0);
     setEditTotalBoards(record.total_boards || 0);
     setEditFwQty(record.updated_fw_qty || 0);
@@ -750,7 +765,7 @@ export default function Production() {
     setEditError("");
 
     const shiftLabel = editShift === "Evening" ? "Evening" : "Morning";
-    const conflict = await findShiftConflict(editDate, shiftLabel, editRecordId, records);
+    const conflict = await findShiftConflict(editDate, shiftLabel, editRecordId, records, line);
     if (conflict) {
       setEditError(conflictMessage(conflict, editDate, shiftLabel, isArabic));
       setIsUpdatingRecord(false);
@@ -763,7 +778,7 @@ export default function Production() {
 
     const boardsNum = parseInt(editTotalBoards, 10) || 0;
     const achievedNum = parseInt(editAchieved, 10) || 0;
-    const targetNum = parseInt(editTarget, 10) || 650;
+    const targetNum = parseInt(editTarget, 10) || defaultShiftTarget;
     const fwNum = parseInt(editFwQty, 10) || 0;
 
     // Achieved and total_boards are auto-derived from test logs, FW QTY is synced from Update PCs
@@ -809,7 +824,7 @@ export default function Production() {
       );
       setRecords(updatedList);
       localStorage.setItem(
-        "ectron_production_records",
+        RECORDS_CACHE_KEY,
         JSON.stringify(updatedList),
       );
 
@@ -857,7 +872,7 @@ export default function Production() {
       const remaining = records.filter((r) => r.id !== id);
       setRecords(remaining);
       localStorage.setItem(
-        "ectron_production_records",
+        RECORDS_CACHE_KEY,
         JSON.stringify(remaining),
       );
       await loadRecords();
@@ -1774,7 +1789,7 @@ export default function Production() {
                             fontWeight: 700,
                           }}
                         >
-                          Default 650
+                          Default {defaultShiftTarget}
                         </span>
                       </div>
                       <input
@@ -1782,7 +1797,7 @@ export default function Production() {
                         value={uploadTarget}
                         onChange={(e) => setUploadTarget(e.target.value)}
                         disabled={isSaving}
-                        placeholder="650"
+                        placeholder={String(defaultShiftTarget)}
                         style={{ fontWeight: 700 }}
                       />
                       <span
@@ -1793,7 +1808,7 @@ export default function Production() {
                           display: "block",
                         }}
                       >
-                        Default shift target is 650 boards, adjust if needed
+                        Default shift target is {defaultShiftTarget} boards, adjust if needed
                       </span>
                     </div>
                   </div>
@@ -2562,7 +2577,7 @@ export default function Production() {
                           fontWeight: 700,
                         }}
                       >
-                        Default 650
+                        Default {defaultShiftTarget}
                       </span>
                     </div>
                     <input

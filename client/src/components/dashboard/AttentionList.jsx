@@ -25,7 +25,10 @@ export function buildAlerts({ forecast: f, shiftTotals, lastCompleteDate, shiftT
 
   // 2. Last day by shift
   const day = shiftTotals[lastCompleteDate];
-  if (!day) {
+  const beforeStart = f?.projectStart && lastCompleteDate < f.projectStart;
+  if (beforeStart) {
+    // The line has not started yet (e.g. a new line with no reports): nothing is missing.
+  } else if (!day) {
     add("bad", L(`لا يوجد أي تقرير إنتاج ليوم ${dayLbl}`, `No production report for ${dayLbl}`));
   } else {
     [["Morning", "☀️", "الصباحية", "Morning"], ["Evening", "🌙", "المسائية", "Evening"]].forEach(([k, ic, ar, en]) => {

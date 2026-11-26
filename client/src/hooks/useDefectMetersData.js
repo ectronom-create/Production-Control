@@ -2,10 +2,12 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { fetchAllRows } from "../utils/fetchAllRows";
 import {
-  DEFAULT_ACTUAL_DEFECTS,
-  STORAGE_ACTUAL_KEY,
-  LOCAL_DEFECTIVE_METERS_KEY,
+  DEFAULT_ACTUAL_DEFECTS as DEFAULT_ACTUAL_DEFECTS_3P,
+  STORAGE_ACTUAL_KEY as STORAGE_ACTUAL_KEY_BASE,
+  LOCAL_DEFECTIVE_METERS_KEY as LOCAL_DEFECTIVE_METERS_KEY_BASE,
 } from "../constants/defectStages";
+import { useLine } from "../context/LineContext";
+import { lineKey } from "../constants/lines";
 import {
   getTodayDateStr,
   getDaysAgoDateStr,
@@ -14,15 +16,21 @@ import {
 
 // Offline copy of the list. Best-effort only: a full or blocked storage must
 // never break a save or replace fresh data.
-function cacheDefectsLocally(list) {
+function cacheDefectsLocally(list, line) {
   try {
-    localStorage.setItem(LOCAL_DEFECTIVE_METERS_KEY, JSON.stringify(list));
+    localStorage.setItem(lineKey(LOCAL_DEFECTIVE_METERS_KEY_BASE, line), JSON.stringify(list));
   } catch (err) {
     console.warn("Could not cache defective meters locally:", err);
   }
 }
 
 export function useDefectMetersData(user, isArabic) {
+  // The page remounts when the line changes, so these are fixed per mount.
+  const { line } = useLine();
+  const LOCAL_DEFECTIVE_METERS_KEY = lineKey(LOCAL_DEFECTIVE_METERS_KEY_BASE, line);
+  const STORAGE_ACTUAL_KEY = lineKey(STORAGE_ACTUAL_KEY_BASE, line);
+  // Historical defect baseline exists only for the three-phase line
+  const DEFAULT_ACTUAL_DEFECTS = line === "3P" ? DEFAULT_ACTUAL_DEFECTS_3P : 0;
   const isAdmin = user?.access === "admin";
   const isViewer = user?.access === "viewer";
 
@@ -133,7 +141,7 @@ export function useDefectMetersData(user, isArabic) {
     try {
       // Load ALL rows — a plain select stops at Supabase's 1,000-row limit.
       const { data, error } = await fetchAllRows(() =>
-        supabase.from("defective_meters").select("*").order("id", { ascending: false }),
+        supabase.from("defective_meters").select("*").eq("line", line).order("id", { ascending: false }),
       );
 
       if (error) {
@@ -145,7 +153,7 @@ export function useDefectMetersData(user, isArabic) {
       setDefectiveMeters(data);
       // Offline copy is best-effort: a full / blocked storage must never
       // replace the fresh data we just loaded.
-      cacheDefectsLocally(data);
+      cacheDefectsLocally(data, line);
     } catch (e) {
       console.warn("Defective meters load error, using cached copy:", e);
       setDefectiveMeters(readLocalCache());
@@ -161,6 +169,7 @@ export function useDefectMetersData(user, isArabic) {
       const { data, error } = await supabase
         .from("production_records")
         .select("*")
+        .eq("line", line)
         .order("date", { ascending: false })
         .order("id", { ascending: false });
 
@@ -309,6 +318,7 @@ export function useDefectMetersData(user, isArabic) {
       };
     } else {
       updatedMeterRecord = {
+        line,
         serial_number: cleanSerial,
         stage: selectedStage,
         defect_code: defectCode.trim(),
@@ -372,7 +382,7 @@ export function useDefectMetersData(user, isArabic) {
         : [finalLocalRecord, ...defectiveMeters];
 
       setDefectiveMeters(nextList);
-      cacheDefectsLocally(nextList);
+      cacheDefectsLocally(nextList, line);
     } finally {
       setIsSubmittingDefect(false);
       setScanSerial("");
@@ -456,7 +466,7 @@ export function useDefectMetersData(user, isArabic) {
         m.id === repairModalMeter.id ? updated : m,
       );
       setDefectiveMeters(nextList);
-      cacheDefectsLocally(nextList);
+      cacheDefectsLocally(nextList, line);
     } finally {
       setIsSubmittingRepair(false);
       setRepairModalMeter(null);
@@ -507,7 +517,7 @@ export function useDefectMetersData(user, isArabic) {
       m.id === meter.id ? updated : m,
     );
     setDefectiveMeters(nextList);
-    cacheDefectsLocally(nextList);
+    cacheDefectsLocally(nextList, line);
   };
 
   // ── Delete Defect Record ──────────────────────────────────────────────────
@@ -524,7 +534,7 @@ export function useDefectMetersData(user, isArabic) {
 
     const nextList = defectiveMeters.filter((m) => m.id !== id);
     setDefectiveMeters(nextList);
-    cacheDefectsLocally(nextList);
+    cacheDefectsLocally(nextList, line);
   };
 
   // ── Admin Edit Modal Functions ────────────────────────────────────────────
@@ -597,7 +607,7 @@ export function useDefectMetersData(user, isArabic) {
         m.id === adminEditModalMeter.id ? updatedRecord : m,
       );
       setDefectiveMeters(nextList);
-      cacheDefectsLocally(nextList);
+      cacheDefectsLocally(nextList, line);
     } finally {
       setIsSavingAdminEdit(false);
       setAdminEditModalMeter(null);

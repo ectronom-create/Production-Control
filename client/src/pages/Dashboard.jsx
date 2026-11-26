@@ -20,6 +20,7 @@ import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
 import { toLocalDateStr, getTodayString } from "../utils/date";
+import { useLine } from "../context/LineContext";
 
 Chart.register(...registerables);
 
@@ -81,6 +82,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isArabic, t } = useLanguage();
+  const { line } = useLine();
   const isAdmin = user?.access === "admin";
 
   const [activeTab, setActiveTab] = useState("overview"); // 'overview', 'downtime', 'trend'
@@ -120,10 +122,12 @@ export default function Dashboard() {
       const { data: prodData, error: prodErr } = await supabase
         .from("production_records")
         .select("*")
+        .eq("line", line)
         .order("date", { ascending: false });
 
       let loadedReports = prodData || [];
-      if (prodErr || loadedReports.length === 0) {
+      // Legacy view only ever held three-phase reports
+      if (line === "3P" && (prodErr || loadedReports.length === 0)) {
         const fb = await supabase
           .from("fpy_reports")
           .select("*")
@@ -146,6 +150,7 @@ export default function Dashboard() {
       const { data: stopData } = await supabase
         .from("stoppages")
         .select("*")
+        .eq("line", line)
         .order("stopped_at", { ascending: false });
 
       setStoppages(stopData || []);

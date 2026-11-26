@@ -24,6 +24,8 @@ import {
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { useLine } from "../context/LineContext";
+import { LINES, lineKey, lineForProductType } from "../constants/lines";
 import { getTodayString } from "../utils/date";
 import BatchStatusModal from "../components/batches/BatchStatusModal";
 import {
@@ -184,6 +186,9 @@ export default function Batches() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
+  // The page remounts when the line changes, so these are fixed per mount.
+  const { line } = useLine();
+  const BATCHES_CACHE_KEY = lineKey("ectron_shipment_batches", line);
   const isAdmin = user?.access === "admin";
 
   // Batches state
@@ -207,7 +212,7 @@ export default function Batches() {
   const [shipmentDate, setShipmentDate] = useState(
     getTodayString(),
   );
-  const [productType, setProductType] = useState("Three Phase");
+  const [productType, setProductType] = useState(LINES[line].productType);
   const [destination, setDestination] = useState("Nama / Field");
   const [batchNotes, setBatchNotes] = useState("");
   const [uploadError, setUploadError] = useState("");
@@ -237,6 +242,7 @@ export default function Batches() {
       const { data, error } = await supabase
         .from("shipment_batches")
         .select("*")
+        .eq("line", line)
         .order("shipment_date", { ascending: false });
 
       if (error) {
@@ -244,18 +250,18 @@ export default function Batches() {
           "Supabase batches error, using local cache:",
           error.message,
         );
-        const local = localStorage.getItem("ectron_shipment_batches");
+        const local = localStorage.getItem(BATCHES_CACHE_KEY);
         if (local) setBatches(JSON.parse(local));
       } else {
         setBatches(data || []);
         localStorage.setItem(
-          "ectron_shipment_batches",
+          BATCHES_CACHE_KEY,
           JSON.stringify(data || []),
         );
       }
     } catch (e) {
       console.warn("Error loading batches:", e);
-      const local = localStorage.getItem("ectron_shipment_batches");
+      const local = localStorage.getItem(BATCHES_CACHE_KEY);
       if (local) setBatches(JSON.parse(local));
     } finally {
       setLoading(false);
@@ -461,6 +467,7 @@ export default function Batches() {
         shipment_date: shipmentDate,
         total_meters: parsedRows.length,
         product_type: productType,
+        line: lineForProductType(productType),
         destination: destination.trim(),
         notes: batchNotes.trim(),
         uploaded_by: user?.name || "Admin",
@@ -534,7 +541,7 @@ export default function Batches() {
       ];
       setBatches(updatedBatches);
       localStorage.setItem(
-        "ectron_shipment_batches",
+        BATCHES_CACHE_KEY,
         JSON.stringify(updatedBatches),
       );
 
@@ -711,7 +718,7 @@ export default function Batches() {
 
       const next = batches.filter((b) => b.id !== batchId);
       setBatches(next);
-      localStorage.setItem("ectron_shipment_batches", JSON.stringify(next));
+      localStorage.setItem(BATCHES_CACHE_KEY, JSON.stringify(next));
 
       if (inspectBatch && inspectBatch.id === batchId) {
         setInspectBatch(null);
@@ -873,7 +880,7 @@ export default function Batches() {
           onSaved={(updated) => {
             setBatches((prev) => {
               const next = prev.map((x) => (x.id === updated.id ? updated : x));
-              localStorage.setItem("ectron_shipment_batches", JSON.stringify(next));
+              localStorage.setItem(BATCHES_CACHE_KEY, JSON.stringify(next));
               return next;
             });
             setStatusBatch(null);

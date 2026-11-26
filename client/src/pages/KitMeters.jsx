@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../supabaseClient";
 import { useAuth } from "../context/AuthContext";
 import { useLanguage } from "../context/LanguageContext";
+import { useLine } from "../context/LineContext";
+import { LINES, lineKey, lineForProductType } from "../constants/lines";
 import {
   Package,
   Plus,
@@ -20,11 +22,15 @@ import {
 } from "lucide-react";
 import { getTodayString, getBatchStatus } from "../utils/kitStatus";
 
-const LOCAL_STORAGE_KEY = "ectron_kit_meters_records";
+const LOCAL_STORAGE_KEY_BASE = "ectron_kit_meters_records";
 
 export default function KitMeters() {
   const { user } = useAuth();
   const { t, isArabic } = useLanguage();
+  // The page remounts when the line changes, so these are fixed per mount.
+  const { line } = useLine();
+  const LOCAL_STORAGE_KEY = lineKey(LOCAL_STORAGE_KEY_BASE, line);
+  const lineProduct = LINES[line].productType;
   const isViewer = user?.access === "viewer";
   const isAdmin = user?.access === "admin";
 
@@ -46,7 +52,7 @@ export default function KitMeters() {
   const [batchNumber, setBatchNumber] = useState("");
   const [kitQuantity, setKitQuantity] = useState("");
   const [recordDate, setRecordDate] = useState(getTodayString());
-  const [productName, setProductName] = useState("Three Phase");
+  const [productName, setProductName] = useState(lineProduct);
   const [notes, setNotes] = useState("");
   const [modalError, setModalError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +64,7 @@ export default function KitMeters() {
       const { data, error } = await supabase
         .from("kit_meters")
         .select("*")
+        .eq("line", line)
         .order("date", { ascending: false })
         .order("id", { ascending: false });
 
@@ -91,7 +98,8 @@ export default function KitMeters() {
     try {
       const { data: remoteData, error: readError } = await supabase
         .from("kit_meters")
-        .select("*");
+        .select("*")
+        .eq("line", line);
       if (readError) {
         alert(
           `Supabase is still reporting an error: ${readError.message}\n\nPlease run the GRANT SQL in the Supabase SQL Editor.`,
@@ -110,7 +118,8 @@ export default function KitMeters() {
           batch_number: r.batch_number,
           kit_quantity: r.kit_quantity,
           date: r.date,
-          product_name: r.product_name || "Three Phase",
+          product_name: r.product_name || lineProduct,
+          line: lineForProductType(r.product_name || lineProduct),
           notes: r.notes || "",
           created_by: r.created_by || user?.name || "Admin",
           updated_at: new Date().toISOString(),
@@ -150,7 +159,7 @@ export default function KitMeters() {
     setBatchNumber("");
     setKitQuantity("");
     setRecordDate(getTodayString());
-    setProductName("Three Phase");
+    setProductName(lineProduct);
     setNotes("");
     setModalError("");
     setShowModal(true);
@@ -162,7 +171,7 @@ export default function KitMeters() {
     setBatchNumber(rec.batch_number || "");
     setKitQuantity(rec.kit_quantity || "");
     setRecordDate(rec.date || getTodayString());
-    setProductName(rec.product_name || "Three Phase");
+    setProductName(rec.product_name || lineProduct);
     setNotes(rec.notes || "");
     setModalError("");
     setShowModal(true);
@@ -193,6 +202,7 @@ export default function KitMeters() {
       kit_quantity: qty,
       date: recordDate,
       product_name: productName,
+      line: lineForProductType(productName),
       notes: notes.trim(),
       created_by: user?.name || "Admin",
       updated_at: new Date().toISOString(),

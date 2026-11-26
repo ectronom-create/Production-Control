@@ -43,6 +43,10 @@ alter table public.pre_production_checklists enable row level security;
 alter table public.employee_profiles enable row level security;
 alter table public.app_settings enable row level security;
 
+-- Signed-in users need table rights on every app table (RLS below decides
+-- the rows). shipment_batches / batch_meter_records were created without them.
+grant select, insert, update, delete on public.shipment_batches, public.batch_meter_records to authenticated;
+
 -- Line work — read: admin/supervisor/viewer · write: admin/supervisor · delete: admin
 do $$
 declare t text;

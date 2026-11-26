@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./context/AuthContext";
 import { LanguageProvider } from "./context/LanguageContext";
+import { LineProvider } from "./context/LineContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import PwaPrompt from "./components/PwaPrompt";
 import "./hooks/usePwaInstall"; // start listening for the install offer early
@@ -16,8 +17,10 @@ ReactDOM.createRoot(document.getElementById("root")).render(
       <BrowserRouter>
         <AuthProvider>
           <LanguageProvider>
-            <App />
-            <PwaPrompt />
+            <LineProvider>
+              <App />
+              <PwaPrompt />
+            </LineProvider>
           </LanguageProvider>
         </AuthProvider>
       </BrowserRouter>
